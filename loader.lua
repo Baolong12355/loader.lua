@@ -3,9 +3,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 local config = getgenv().TDX_Config or {}
 
--- Kiểm tra game hiện tại có phải lobby TDX không
+-- Kiểm tra lobby
 local function isInTDXLobby()
-	return game.PlaceId == 9503261072 -- ID lobby TDX
+	return game.PlaceId == 9503261072
 end
 
 -- Hàm chạy link
@@ -33,7 +33,7 @@ local function tryRun(name, enabled, url)
 	end
 end
 
--- Link raw chính xác
+-- Link các module raw
 local base = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/"
 local links = {
 	["x1.5 Speed"]      = base .. "speed.lua",
@@ -44,21 +44,18 @@ local links = {
 	["Auto Difficulty"] = base .. "difficulty.lua"
 }
 
--- Chạy loader theo đúng vị trí game
+-- Loader chạy tuần tự thông minh
 task.spawn(function()
-	-- 🚩 Luôn chạy tăng tốc sớm
 	tryRun("x1.5 Speed", config["x1.5 Speed"], links["x1.5 Speed"])
 	task.wait(0.5)
 
 	if isInTDXLobby() then
-		-- 📌 Chỉ chạy ở lobby
 		tryRun("Join Map", config["Map"], links["Join Map"])
-		task.wait(0.5)
-
+	else
+		-- ✅ Chọn chế độ ngay khi vào trận (rất quan trọng)
 		tryRun("Auto Difficulty", config["Auto Difficulty"], links["Auto Difficulty"])
 		task.wait(0.5)
-	else
-		-- ⚔️ Chỉ chạy trong trận
+
 		tryRun("Run Macro", config["Macros"] == "run" or config["Macros"] == "record", links["Run Macro"])
 		task.wait(0.5)
 
