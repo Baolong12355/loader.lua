@@ -18,12 +18,12 @@ end
 
 local base = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/"
 local links = {
-    ["x1.5 Speed"]      = base .. "speed",
-    ["Auto Skill"]      = base .. "Auto%20Skill",
-    ["Run Macro"]       = base .. "Run%20Macro",
-    ["Return Lobby"]    = base .. "Return%20Lobby",
-    ["Join Map"]        = base .. "Join%20Map",
-    ["Auto Difficulty"] = base .. "Auto%20Difficulty"
+    ["x1.5 Speed"]      = base .. "speed.lua",
+    ["Auto Skill"]      = base .. "Auto%20Skill.lua",
+    ["Run Macro"]       = base .. "Run%20Macro.lua",
+    ["Return Lobby"]    = base .. "Return%20Lobby.lua",
+    ["Join Map"]        = base .. "Join%20Map.lua",
+    ["Auto Difficulty"] = base .. "Auto%20Difficulty.lua"
 }
 
 tryRun("x1.5 Speed", config["x1.5 Speed"], links["x1.5 Speed"])
