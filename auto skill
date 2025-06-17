@@ -1,34 +1,21 @@
+-- 📦 TDX Auto Skill Module (dùng trong loader)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TowersFolder = game:GetService("Workspace"):WaitForChild("Game"):WaitForChild("Towers")
+local Workspace = game:GetService("Workspace")
+local TowersFolder = Workspace:WaitForChild("Game"):WaitForChild("Towers")
 local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
 local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 
--- Danh sách tower KHÔNG dùng kỹ năng
+-- Bỏ qua các tower không dùng skill
 local skipTowers = {
-    ["Helicopter"] = true,
-    ["Cryo Helicopter"] = true,
-    ["Artillery"] = true,
-    ["Combat Drone"] = true,
-    ["AA Turret"] = true,
-    ["XWM Turret"] = true,
-    ["Barracks"] = true,
-    ["Cryo Blaster"] = true,
-    ["Farm"] = true,
-    ["Grenadier"] = true,
-    ["Juggernaut"] = true,
-    ["Machine Gunner"] = true,
-    ["Relic"] = true,
-    ["Sentry"] = true,
-    ["Scarecrow"] = true,
-    ["Zed"] = true,
-    ["Troll Tower"] = true,
-    ["Missile Trooper"] = true,
-    ["Patrol Boat"] = true,
-    ["Railgunner"] = true,
-    ["Mine Layer"] = true,
+    ["Helicopter"] = true, ["Cryo Helicopter"] = true, ["Artillery"] = true, ["Combat Drone"] = true,
+    ["AA Turret"] = true, ["XWM Turret"] = true, ["Barracks"] = true, ["Cryo Blaster"] = true,
+    ["Farm"] = true, ["Grenadier"] = true, ["Juggernaut"] = true, ["Machine Gunner"] = true,
+    ["Relic"] = true, ["Sentry"] = true, ["Scarecrow"] = true, ["Zed"] = true,
+    ["Troll Tower"] = true, ["Missile Trooper"] = true, ["Patrol Boat"] = true, ["Railgunner"] = true,
+    ["Mine Layer"] = true
 }
 
--- Gán tên "ID.TowerName" nếu chưa có
+-- Gán lại tên dạng ID.Name nếu chưa có
 local placedIndex = 1
 local function RenameTowers()
     for _, tower in ipairs(TowersFolder:GetChildren()) do
@@ -39,7 +26,7 @@ local function RenameTowers()
     end
 end
 
--- Dùng skill 1 → 3 nếu tower không bị skip
+-- Tự động dùng skill cho tower đủ điều kiện
 local function AutoUseSkills()
     for _, tower in ipairs(TowersFolder:GetChildren()) do
         local id = tonumber(tower.Name:match("^(%d+)"))
@@ -58,7 +45,7 @@ local function AutoUseSkills()
     end
 end
 
--- Lặp liên tục
+-- Lặp mỗi giây
 while task.wait(1) do
     RenameTowers()
     AutoUseSkills()
