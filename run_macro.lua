@@ -13,54 +13,17 @@ local mode = config["Macros"] or "run"
 local macroName = config["Macro Name"] or "y"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
 
--- 💠 Bảng lưu các tower đã rename
-local renamed = {}
-local renameIndex = 1
-
--- 🔄 Hàm đổi tên tower ngay lập tức cho tất cả tower hiện có
-local function renameAllExistingTowers()
-    for i, tower in ipairs(TowersFolder:GetChildren()) do
-        if not renamed[tower] and tower:IsA("Model") then
-            if not tower.Name:match("^%d+%.") then
-                tower.Name = i .. "." .. tower.Name
-                renamed[tower] = true
-                print("🔁 Đổi tên tower ban đầu:", tower.Name)
-                renameIndex = i + 1  -- Cập nhật index để tiếp tục từ vị trí này
-            end
-        end
-    end
-end
-
--- Gọi hàm đổi tên ngay lập tức
-renameAllExistingTowers()
-
--- 🌀 Luôn kiểm tra tower mới để rename
-task.spawn(function()
-    while true do
-        for _, tower in ipairs(TowersFolder:GetChildren()) do
-            if not renamed[tower] and tower:IsA("Model") then
-                if not tower.Name:match("^%d+%.") then
-                    tower.Name = renameIndex .. "." .. tower.Name
-                    renamed[tower] = true
-                    renameIndex += 1
-                    print("🔁 Đổi tên tower mới:", tower.Name)
-                end
-            end
-        end
-        task.wait() -- Giảm từ 0.3 xuống 0.1
-    end
-end)
-
--- 🪙 Đợi đủ tiền
+-- 🪙 Hàm kiểm tra tiền tối ưu
 local function waitUntilCashEnough(amount)
-    while cashStat.Value < amount do task.wait() end -- Thêm delay ngắn để giảm CPU usage
+    while cashStat.Value < amount do
+        task.wait(0.05) -- Giảm thời gian chờ
+    end
 end
 
--- 🔍 Tìm tower theo số thứ tự
+-- 🔍 Tìm tower theo số thứ tự (nếu vẫn cần)
 local function findTowerByIndex(index)
     for _, tower in ipairs(TowersFolder:GetChildren()) do
-        local num = tonumber(tower.Name:match("^(%d+)"))
-        if num == tonumber(index) then
+        if tower.Name == tostring(index) or tower.Name:match("^"..index.."%.") then
             return tower
         end
     end
@@ -80,8 +43,10 @@ if mode == "run" then
         error("❌ Lỗi khi đọc file macro: " .. macro)
     end
 
+    -- Tối ưu: xử lý theo từng loại hành động
     for _, entry in ipairs(macro) do
         if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
+            -- Xử lý đặt tower
             local x, y, z = entry.TowerVector:match("([^,]+), ([^,]+), ([^,]+)")
             local pos = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
             local args = {
@@ -93,30 +58,27 @@ if mode == "run" then
 
             waitUntilCashEnough(entry.TowerPlaceCost)
             Remotes.PlaceTower:InvokeServer(unpack(args))
-            task.wait() -- Giảm từ 0.4 xuống 0.1
+            task.wait(0.05) -- Giảm thời gian chờ
 
         elseif entry.TowerIndex and entry.UpgradePath and entry.UpgradeCost then
+            -- Xử lý nâng cấp tower
             waitUntilCashEnough(entry.UpgradeCost)
-            for _ = 1, 20 do
-                local tower = findTowerByIndex(entry.TowerIndex)
-                if tower then
-                    local before = cashStat.Value
-                    Remotes.TowerUpgradeRequest:FireServer(entry.TowerIndex, entry.UpgradePath, 1)
-                    task.wait() -- Giảm từ 0.3 xuống 0.1
-                    if cashStat.Value < before then
-                        break
-                    end
-                end
-                task.wait() -- Giảm từ 0.2 xuống 0.05
+            local tower = findTowerByIndex(entry.TowerIndex)
+            if tower then
+                local before = cashStat.Value
+                Remotes.TowerUpgradeRequest:FireServer(entry.TowerIndex, entry.UpgradePath, 1)
+                task.wait(0.05)
             end
 
         elseif entry.ChangeTarget and entry.TargetType then
+            -- Xử lý thay đổi mục tiêu
             Remotes.ChangeQueryType:FireServer(entry.ChangeTarget, entry.TargetType)
-            task.wait() -- Giảm từ 0.2 xuống 0.05
+            task.wait(0.03)
 
         elseif entry.SellTower then
+            -- Xử lý bán tower
             Remotes.SellTower:FireServer(entry.SellTower)
-            task.wait() -- Giảm từ 0.2 xuống 0.05
+            task.wait(0.03)
         end
     end
 
