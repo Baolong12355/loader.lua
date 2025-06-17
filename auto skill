@@ -1,24 +1,65 @@
--- ✅ Script auto skill Tower Defense X (mới nhất) -- - Tự động duyệt toàn bộ tower trong workspace.Game.Towers -- - Bỏ qua các tower không có kỹ năng hoặc kỹ năng định hướng -- - Dùng skill 1 đến 3 mỗi 1 giây
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TowersFolder = game:GetService("Workspace"):WaitForChild("Game"):WaitForChild("Towers")
+local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
+local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage") local Workspace = game:GetService("Workspace") local Players = game:GetService("Players") local LocalPlayer = Players.LocalPlayer
+-- Danh sách tower KHÔNG dùng kỹ năng
+local skipTowers = {
+    ["Helicopter"] = true,
+    ["Cryo Helicopter"] = true,
+    ["Artillery"] = true,
+    ["Combat Drone"] = true,
+    ["AA Turret"] = true,
+    ["XWM Turret"] = true,
+    ["Barracks"] = true,
+    ["Cryo Blaster"] = true,
+    ["Farm"] = true,
+    ["Grenadier"] = true,
+    ["Juggernaut"] = true,
+    ["Machine Gunner"] = true,
+    ["Relic"] = true,
+    ["Sentry"] = true,
+    ["Scarecrow"] = true,
+    ["Zed"] = true,
+    ["Troll Tower"] = true,
+    ["Missile Trooper"] = true,
+    ["Patrol Boat"] = true,
+    ["Railgunner"] = true,
+    ["Mine Layer"] = true,
+}
 
-local TowersFolder = Workspace:WaitForChild("Game"):WaitForChild("Towers") local AbilityRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
+-- Gán tên "ID.TowerName" nếu chưa có
+local placedIndex = 1
+local function RenameTowers()
+    for _, tower in ipairs(TowersFolder:GetChildren()) do
+        if not tower.Name:match("^%d+%.") then
+            tower.Name = placedIndex .. "." .. tower.Name
+            placedIndex += 1
+        end
+    end
+end
 
--- Danh sách các tower không dùng skill tự động (chặn spam vô nghĩa hoặc lỗi) local Blacklist = { ["Helicopter"] = true, ["Artillery"] = true, ["Combat Drone"] = true, ["Cryo Helicopter"] = true, ["AA Turret"] = true, ["XWM Turret"] = true, ["Barracks"] = true, ["Cryo Blaster"] = true, ["Farm"] = true, ["Grenadier"] = true, ["Juggernaut"] = true, ["Machine Gunner"] = true, ["Relic"] = true, ["Sentry"] = true, ["Scarecrow"] = true, ["Zed"] = true, ["Troll Tower"] = true, ["Missile Trooper"] = true, ["Patrol Boat"] = true, ["Railgunner"] = true, ["Mine Layer"] = true }
-
--- Dùng skill tự động với ID 1 đến 3 local function autoUseSkill() for _, tower in ipairs(TowersFolder:GetChildren()) do if tower:FindFirstChild("RootPart") then local towerNumber = tonumber(tower.Name:match("^(%d+)") or "") local cleanName = tower.Name:match("%d+%.(.+)") or tower.Name
-
-if towerNumber and not Blacklist[cleanName] then
+-- Dùng skill 1 → 3 nếu tower không bị skip
+local function AutoUseSkills()
+    for _, tower in ipairs(TowersFolder:GetChildren()) do
+        local id = tonumber(tower.Name:match("^(%d+)"))
+        local towerName = tower.Name:match("^%d+%.(.+)")
+        if id and towerName and not skipTowers[towerName] then
             for skillId = 1, 3 do
                 pcall(function()
-                    AbilityRemote:FireServer(towerNumber, skillId)
+                    if useFireServer then
+                        TowerUseAbilityRequest:FireServer(id, skillId)
+                    else
+                        TowerUseAbilityRequest:InvokeServer(id, skillId)
+                    end
                 end)
             end
         end
     end
 end
 
+-- Lặp liên tục
+while task.wait(1) do
+    RenameTowers()
+    AutoUseSkills()
 end
-
--- Lặp mỗi 1 giây while task.wait(1) do pcall(autoUseSkill) end
-
