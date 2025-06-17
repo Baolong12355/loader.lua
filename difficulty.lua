@@ -34,7 +34,7 @@ print("📌 Đã chọn chế độ:", mode)
 
 -- Nếu có remote "READY", gửi luôn để bắt đầu
 if readyRemote then
-	task.wait(0.5)
+	task.wait(2)
 	readyRemote:FireServer()
 	print("▶️ Đã bấm BẮT ĐẦU trận.")
 end
