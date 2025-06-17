@@ -1,0 +1,18 @@
+-- ✅ TDX FULL SCRIPT LOADER - GitHub version hỗ trợ getgenv().TDX_Config với Script Base URL -- Gồm: speed, auto skill, auto join map, chọn chế độ, chạy macro từ GitHub, quay lại lobby khi hết trận
+
+local Players = game:GetService("Players") local ReplicatedStorage = game:GetService("ReplicatedStorage") local Workspace = game:GetService("Workspace") local LocalPlayer = Players.LocalPlayer local PlayerGui = LocalPlayer:WaitForChild("PlayerGui") local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+
+local config = getgenv().TDX_Config or {} local baseUrl = config["Script Base URL"] or "https://raw.githubusercontent.com/yourname/yourrepo/main/tdx/"
+
+-- 🔁 Speed 1.5x if config["x1.5 Speed"] then local speedRemote = Remotes:FindFirstChild("SoloToggleSpeedControl") if speedRemote then speedRemote:FireServer(true, true) end end
+
+-- 🎯 Chọn chế độ (Easy / Normal / Hard) if config["Auto Difficulty"] then local vote = tostring(config["Auto Difficulty"]):lower() local difficulty = vote:sub(1,1):upper() .. vote:sub(2) if Remotes:FindFirstChild("DifficultyVoteCast") then Remotes.DifficultyVoteCast:FireServer(difficulty) end end
+
+-- 🗺️ Auto join map nếu ở trong lobby if config["Map"] and game.PlaceId == 9503261072 then local function matchMap(a, b) return (a or ""):lower():gsub("%s+", "") == (b or ""):lower():gsub("%s+", "") end local function enterDetector(detector) local char = LocalPlayer.Character local hrp = char and char:FindFirstChild("HumanoidRootPart") if hrp then hrp.CFrame = detector.CFrame end end for _, root in ipairs({Workspace:FindFirstChild("APCs"), Workspace:FindFirstChild("APCs2")}) do if root then for _, folder in ipairs(root:GetChildren()) do local apc = folder:FindFirstChild("APC") local detector = apc and apc:FindFirstChild("Detector") local mapLabel = folder:FindFirstChild("mapdisplay") and folder.mapdisplay:FindFirstChild("screen") and folder.mapdisplay.screen:FindFirstChild("displayscreen") and folder.mapdisplay.screen.displayscreen:FindFirstChild("map") local plrCount = folder.mapdisplay.screen.displayscreen:FindFirstChild("plrcount") if detector and mapLabel and plrCount then local cur, max = plrCount.Text:match("(%d+)%s*/%s*(%d+)") if tonumber(cur) == 0 and matchMap(mapLabel.Text, config["Map"]) then enterDetector(detector) break end end end end end end
+
+-- ▶️ Gọi macro nếu được chọn if config["Macros"] == "run" then local macroName = config["Macro Name"] or "y" local url = baseUrl .. "macros/" .. macroName .. ".lua" pcall(function() loadstring(game:HttpGet(url))() end) elseif config["Macros"] == "record" then local url = baseUrl .. "record_macro.lua" pcall(function() loadstring(game:HttpGet(url))() end) end
+
+-- ♻️ Auto skill if config["Auto Skill"] then local url = baseUrl .. "auto_skill.lua" pcall(function() loadstring(game:HttpGet(url))() end) end
+
+-- 🔁 Quay về lobby khi hết trận local GameOverScreen = PlayerGui:FindFirstChild("Interface") and PlayerGui.Interface:FindFirstChild("GameOverScreen") if GameOverScreen then task.spawn(function() while true do if GameOverScreen.Visible then local tele = ReplicatedStorage:FindFirstChild("RequestTeleportToLobby") if tele then tele:FireServer() end break end task.wait(1) end end) end
+
