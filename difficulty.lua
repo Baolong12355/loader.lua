@@ -1,17 +1,18 @@
--- 📌 Auto chọn chế độ trong trận
+-- 📌 Auto chọn chế độ trong trận và bấm bắt đầu
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 
--- Chờ remote (tối đa 10s)
-local voteRemote
+-- Chờ remote vote (tối đa 10s)
+local voteRemote, readyRemote
 for i = 1, 100 do
 	voteRemote = remotes:FindFirstChild("DifficultyVoteCast")
-	if voteRemote then break end
+	readyRemote = remotes:FindFirstChild("DifficultyVoteReady")
+	if voteRemote and readyRemote then break end
 	task.wait(0.1)
 end
 
 if not voteRemote then
-	warn("⚠️ Không tìm thấy remote DifficultyVoteCast sau 10s")
+	warn("⚠️ Không tìm thấy DifficultyVoteCast")
 	return
 end
 
@@ -24,9 +25,16 @@ if not rawVote then
 	return
 end
 
--- Chuẩn hóa thành "Easy", "Normal", "Hard"
+-- Định dạng lại chuỗi vote (vd: "easy" → "Easy")
 local mode = rawVote:sub(1,1):upper() .. rawVote:sub(2):lower()
 
--- Gửi remote
+-- Gửi vote chọn chế độ
 voteRemote:FireServer(mode)
 print("📌 Đã chọn chế độ:", mode)
+
+-- Nếu có remote "READY", gửi luôn để bắt đầu
+if readyRemote then
+	task.wait(0.5)
+	readyRemote:FireServer()
+	print("▶️ Đã bấm BẮT ĐẦU trận.")
+end
