@@ -1,40 +1,54 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
+-- Kiểm tra và lấy các instance một cách an toàn
 local player = Players.LocalPlayer
-local gui = player:WaitForChild("PlayerGui")
-local interface = gui:WaitForChild("Interface")
-local gameOver = interface:WaitForChild("GameOverScreen")
+if not player then return end
+
+local playerGui = player:WaitForChild("PlayerGui")
+local interface = playerGui and playerGui:WaitForChild("Interface")
+local gameOverScreen = interface and interface:WaitForChild("GameOverScreen")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local teleport = remotes:FindFirstChild("RequestTeleportToLobby")
+local teleportRemote = remotes and remotes:FindFirstChild("RequestTeleportToLobby")
 
-local function tryTeleport()
-	while task.wait(1) do
-		local ok, err = pcall(function()
-			if teleport:IsA("RemoteEvent") then
-				teleport:FireServer()
-			elseif teleport:IsA("RemoteFunction") then
-				teleport:InvokeServer()
-			end
-		end)
-		if ok then
-			print("✅ Đã gửi yêu cầu về lobby.")
-			break
-		else
-			warn("❌ Gửi teleport thất bại, thử lại... ", err)
-		end
-	end
+-- THÊM KIỂM TRA QUAN TRỌNG
+if not teleportRemote or not (teleportRemote:IsA("RemoteEvent") or teleportRemote:IsA("RemoteFunction")) then
+    warn("❌ Không tìm thấy RemoteEvent/Function hợp lệ")
+    return
 end
 
-if gameOver and teleport then
-	if gameOver.Visible then
-		tryTeleport()
-	end
+local function tryTeleport()
+    local maxAttempts = 5
+    for attempt = 1, maxAttempts do
+        local success, response = pcall(function()
+            if teleportRemote:IsA("RemoteEvent") then
+                teleportRemote:FireServer()
+            else
+                return teleportRemote:InvokeServer()
+            end
+            return true
+        end)
+        
+        if success then
+            print("✅ Teleport thành công")
+            return true
+        else
+            warn(`❌ Lỗi lần {attempt}:`, response)
+            task.wait(1)
+        end
+    end
+    return false
+end
 
-	gameOver:GetPropertyChangedSignal("Visible"):Connect(function()
-		if gameOver.Visible then
-			tryTeleport()
-		end
-	end)
+if gameOverScreen and gameOverScreen.Visible then
+    tryTeleport()
+end
+
+if gameOverScreen then
+    gameOverScreen:GetPropertyChangedSignal("Visible"):Connect(function()
+        if gameOverScreen.Visible then
+            tryTeleport()
+        end
+    end)
 end
