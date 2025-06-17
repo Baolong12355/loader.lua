@@ -15,18 +15,19 @@ local function tryRun(name, enabled, url)
     end
 end
 
+-- ⚠️ Sử dụng link RAW đúng chuẩn GitHub (đã chuyển sang /main/)
 local links = {
-    ["x1.5 Speed"]      = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/speed",
-    ["Auto Skill"]      = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/auto%20skill",
-    ["Run Macro"]       = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/Run%20Macro" .. (config["Macro Name"] or "y") .. ".lua",
-    ["Return Lobby"]    = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/retrun",
-    ["Join Map"]        = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/match%20making",
-    ["Auto Difficulty"] = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/difficulty"
+    ["x1.5 Speed"]      = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/speed",
+    ["Auto Skill"]      = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/Auto%20Skill",
+    ["Run Macro"]       = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/Run%20Macro",
+    ["Return Lobby"]    = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/Return%20Lobby",
+    ["Join Map"]        = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/Join%20Map",
+    ["Auto Difficulty"] = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/Auto%20Difficulty"
 }
 
 tryRun("x1.5 Speed", config["x1.5 Speed"], links["x1.5 Speed"])
 tryRun("Auto Skill", config["Auto Skill"], links["Auto Skill"])
-tryRun("Run Macro", config["Macros"] == "run", links["Run Macro"])
+tryRun("Run Macro", config["Macros"] == "run" or config["Macros"] == "record", links["Run Macro"])
 tryRun("Return Lobby", true, links["Return Lobby"])
 tryRun("Join Map", config["Map"] ~= nil, links["Join Map"])
 tryRun("Auto Difficulty", config["Auto Difficulty"] ~= nil, links["Auto Difficulty"])
