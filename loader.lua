@@ -25,7 +25,7 @@ local links = {
     ["Run Macro"]       = base .. "run_macro.lua",
     ["Return Lobby"]    = base .. "return_lobby.lua",
     ["Join Map"]        = base .. "auto_join.lua",
-    ["Auto Difficulty"] = base .. "auto_difficulty.lua"
+    ["Auto Difficulty"] = base .. "difficulty.lua"
 }
 
 -- 🚀 Chạy tuần tự với delay để tránh lỗi tải
