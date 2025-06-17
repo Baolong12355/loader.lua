@@ -9,25 +9,37 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local TowersFolder = Workspace:WaitForChild("Game"):WaitForChild("Towers")
 
 local config = getgenv().TDX_Config or {}
+local mode = config["Macros"] or "run"
 local macroName = config["Macro Name"] or "y"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
 
-local macro = HttpService:JSONDecode(readfile(macroPath))
+-- 💠 Bảng lưu các tower đã rename
+local renamed = {}
+local renameIndex = 1
 
+-- 🌀 Luôn kiểm tra tower mới để rename
+task.spawn(function()
+	while true do
+		for _, tower in ipairs(TowersFolder:GetChildren()) do
+			if not renamed[tower] and tower:IsA("Model") then
+				if not tower.Name:match("^%d+%.") then
+					tower.Name = renameIndex .. "." .. tower.Name
+					renamed[tower] = true
+					renameIndex += 1
+					print("🔁 Đổi tên tower:", tower.Name)
+				end
+			end
+		end
+		task.wait(0.3)
+	end
+end)
+
+-- 🪙 Đợi đủ tiền
 local function waitUntilCashEnough(amount)
 	while cashStat.Value < amount do task.wait() end
 end
 
-local function countTowerByName(name)
-	local count = 0
-	for _, tower in ipairs(TowersFolder:GetChildren()) do
-		if tower.Name == name or tower.Name:match("%." .. name .. "$") then
-			count += 1
-		end
-	end
-	return count
-end
-
+-- 🔍 Tìm tower theo số thứ tự
 local function findTowerByIndex(index)
 	for _, tower in ipairs(TowersFolder:GetChildren()) do
 		local num = tonumber(tower.Name:match("^(%d+)"))
@@ -35,80 +47,50 @@ local function findTowerByIndex(index)
 			return tower
 		end
 	end
-	return nil
 end
 
--- ▶️ Chạy từng bước macro
-for _, entry in ipairs(macro) do
-	-- Đặt tower
-	if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
-		local x, y, z = entry.TowerVector:match("([^,]+), ([^,]+), ([^,]+)")
-		local pos = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
-		local args = {
-			tonumber(entry.TowerA1),
-			entry.TowerPlaced,
-			pos,
-			tonumber(entry.Rotation) or 0
-		}
+-- ▶️ CHẠY MACROS
+if mode == "run" then
+	local macro = HttpService:JSONDecode(readfile(macroPath))
 
-		local beforeCount = countTowerByName(entry.TowerPlaced)
-		local placed = false
-		local start = tick()
+	for _, entry in ipairs(macro) do
+		if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
+			local x, y, z = entry.TowerVector:match("([^,]+), ([^,]+), ([^,]+)")
+			local pos = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
+			local args = {
+				tonumber(entry.TowerA1),
+				entry.TowerPlaced,
+				pos,
+				tonumber(entry.Rotation) or 0
+			}
 
-		while not placed and tick() - start < 3 do
 			waitUntilCashEnough(entry.TowerPlaceCost)
-			local beforeCash = cashStat.Value
 			Remotes.PlaceTower:InvokeServer(unpack(args))
-			task.wait(0.25)
-			local afterCash = cashStat.Value
+			task.wait(0.4)
 
-			local count = 0
-			for _, tower in ipairs(TowersFolder:GetChildren()) do
-				if tower:IsA("Model") and (tower.Name == entry.TowerPlaced or tower.Name:match("%." .. entry.TowerPlaced .. "$")) then
-					count += 1
-					if count > beforeCount then
-						tower.Name = count .. "." .. entry.TowerPlaced
-						print("✅ Đặt:", tower.Name)
-						placed = true
+		elseif entry.TowerIndex and entry.UpgradePath and entry.UpgradeCost then
+			waitUntilCashEnough(entry.UpgradeCost)
+			for _ = 1, 20 do
+				local tower = findTowerByIndex(entry.TowerIndex)
+				if tower then
+					local before = cashStat.Value
+					Remotes.TowerUpgradeRequest:FireServer(entry.TowerIndex, entry.UpgradePath, 1)
+					task.wait(0.3)
+					if cashStat.Value < before then
 						break
 					end
 				end
+				task.wait(0.2)
 			end
 
-			if afterCash < beforeCash and not placed then
-				print("⚠️ Đặt thành công nhưng không rename được")
-				placed = true
-			end
+		elseif entry.ChangeTarget and entry.TargetType then
+			Remotes.ChangeQueryType:FireServer(entry.ChangeTarget, entry.TargetType)
+			task.wait(0.2)
+
+		elseif entry.SellTower then
+			Remotes.SellTower:FireServer(entry.SellTower)
+			task.wait(0.2)
 		end
-
-	-- Nâng cấp tower
-	elseif entry.TowerIndex and entry.UpgradePath and entry.UpgradeCost then
-		waitUntilCashEnough(entry.UpgradeCost)
-		local start = tick()
-		while tick() - start < 5 do
-			local tower = findTowerByIndex(entry.TowerIndex)
-			if tower then
-				local before = cashStat.Value
-				Remotes.TowerUpgradeRequest:FireServer(entry.TowerIndex, entry.UpgradePath, 1)
-				task.wait(0.25)
-				if cashStat.Value < before then
-					print("⬆️ Nâng cấp:", tower.Name)
-					break
-				end
-			end
-			task.wait(0.1)
-		end
-
-	-- Đổi target
-	elseif entry.ChangeTarget and entry.TargetType then
-		Remotes.ChangeQueryType:FireServer(entry.ChangeTarget, entry.TargetType)
-		task.wait(0.2)
-
-	-- Bán tower
-	elseif entry.SellTower then
-		Remotes.SellTower:FireServer(entry.SellTower)
-		task.wait(0.2)
 	end
-end
 
-print("✅ Đã chạy xong macro:", macroName)
+	print("✅ Đã hoàn
