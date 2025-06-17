@@ -9,7 +9,9 @@ local gameOver = interface:WaitForChild("GameOverScreen")
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local teleport = remotes:FindFirstChild("RequestTeleportToLobby")
 
-local function sendBackToLobby()
+local lastState = gameOver.Visible
+
+local function sendBack()
 	task.wait(1)
 	if teleport then
 		if teleport:IsA("RemoteEvent") then
@@ -20,10 +22,15 @@ local function sendBackToLobby()
 	end
 end
 
-if gameOver and teleport then
-	-- Trường hợp đã visible từ trước
-	if gameOver.Visible then
-		sendBackToLobby()
+-- Lặp liên tục để kiểm tra trạng thái Visible mỗi 1 giây
+task.spawn(function()
+	while true do
+		local current = gameOver.Visible
+		if current and not lastState then
+			-- Khi từ false chuyển thành true
+			sendBack()
+		end
+		lastState = current
+		task.wait(1)
 	end
-
-	-- Trường hợp visible thay đổi sau
+end)
