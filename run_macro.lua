@@ -47,13 +47,13 @@ task.spawn(function()
                 end
             end
         end
-        task.wait(0.1) -- Giảm từ 0.3 xuống 0.1
+        task.wait() -- Giảm từ 0.3 xuống 0.1
     end
 end)
 
 -- 🪙 Đợi đủ tiền
 local function waitUntilCashEnough(amount)
-    while cashStat.Value < amount do task.wait(0.05) end -- Thêm delay ngắn để giảm CPU usage
+    while cashStat.Value < amount do task.wait() end -- Thêm delay ngắn để giảm CPU usage
 end
 
 -- 🔍 Tìm tower theo số thứ tự
@@ -107,16 +107,16 @@ if mode == "run" then
                         break
                     end
                 end
-                task.wait(0.05) -- Giảm từ 0.2 xuống 0.05
+                task.wait() -- Giảm từ 0.2 xuống 0.05
             end
 
         elseif entry.ChangeTarget and entry.TargetType then
             Remotes.ChangeQueryType:FireServer(entry.ChangeTarget, entry.TargetType)
-            task.wait(0.05) -- Giảm từ 0.2 xuống 0.05
+            task.wait() -- Giảm từ 0.2 xuống 0.05
 
         elseif entry.SellTower then
             Remotes.SellTower:FireServer(entry.SellTower)
-            task.wait(0.05) -- Giảm từ 0.2 xuống 0.05
+            task.wait() -- Giảm từ 0.2 xuống 0.05
         end
     end
 
