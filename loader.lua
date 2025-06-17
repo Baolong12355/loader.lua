@@ -45,4 +45,4 @@ tryRun("Auto Skill",      config["Auto Skill"], links["Auto Skill"])
 task.wait(2)
 
 tryRun("Return Lobby",    true, links["Return Lobby"])
-task.wait(10)
+task.wait(1)
