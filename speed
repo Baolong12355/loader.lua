@@ -1,0 +1,8 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("SoloToggleSpeedControl")
+
+if Remote:IsA("RemoteEvent") then
+    Remote:FireServer(true, true)
+elseif Remote:IsA("RemoteFunction") then
+    Remote:InvokeServer(true, true)
+end
