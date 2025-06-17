@@ -47,13 +47,13 @@ task.spawn(function()
                 end
             end
         end
-        task.wait(0.3)
+        task.wait(0.1) -- Giảm từ 0.3 xuống 0.1
     end
 end)
 
 -- 🪙 Đợi đủ tiền
 local function waitUntilCashEnough(amount)
-    while cashStat.Value < amount do task.wait() end
+    while cashStat.Value < amount do task.wait(0.05) end -- Thêm delay ngắn để giảm CPU usage
 end
 
 -- 🔍 Tìm tower theo số thứ tự
@@ -93,7 +93,7 @@ if mode == "run" then
 
             waitUntilCashEnough(entry.TowerPlaceCost)
             Remotes.PlaceTower:InvokeServer(unpack(args))
-            task.wait(0.4)
+            task.wait(0.1) -- Giảm từ 0.4 xuống 0.1
 
         elseif entry.TowerIndex and entry.UpgradePath and entry.UpgradeCost then
             waitUntilCashEnough(entry.UpgradeCost)
@@ -102,21 +102,21 @@ if mode == "run" then
                 if tower then
                     local before = cashStat.Value
                     Remotes.TowerUpgradeRequest:FireServer(entry.TowerIndex, entry.UpgradePath, 1)
-                    task.wait(0.3)
+                    task.wait() -- Giảm từ 0.3 xuống 0.1
                     if cashStat.Value < before then
                         break
                     end
                 end
-                task.wait(0.2)
+                task.wait(0.05) -- Giảm từ 0.2 xuống 0.05
             end
 
         elseif entry.ChangeTarget and entry.TargetType then
             Remotes.ChangeQueryType:FireServer(entry.ChangeTarget, entry.TargetType)
-            task.wait(0.2)
+            task.wait(0.05) -- Giảm từ 0.2 xuống 0.05
 
         elseif entry.SellTower then
             Remotes.SellTower:FireServer(entry.SellTower)
-            task.wait(0.2)
+            task.wait(0.05) -- Giảm từ 0.2 xuống 0.05
         end
     end
 
