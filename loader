@@ -18,7 +18,7 @@ end
 local links = {
     ["x1.5 Speed"]      = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/speed",
     ["Auto Skill"]      = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/auto%20skill",
-    ["Run Macro"]       = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/run/record.lua" .. (config["Macro Name"] or "y") .. ".lua",
+    ["Run Macro"]       = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/Run%20Macro" .. (config["Macro Name"] or "y") .. ".lua",
     ["Return Lobby"]    = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/retrun",
     ["Join Map"]        = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/match%20making",
     ["Auto Difficulty"] = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/difficulty"
