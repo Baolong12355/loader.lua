@@ -93,7 +93,7 @@ if mode == "run" then
 
             waitUntilCashEnough(entry.TowerPlaceCost)
             Remotes.PlaceTower:InvokeServer(unpack(args))
-            task.wait(0.1) -- Giảm từ 0.4 xuống 0.1
+            task.wait() -- Giảm từ 0.4 xuống 0.1
 
         elseif entry.TowerIndex and entry.UpgradePath and entry.UpgradeCost then
             waitUntilCashEnough(entry.UpgradeCost)
