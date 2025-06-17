@@ -1,0 +1,22 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local Interface = PlayerGui:WaitForChild("Interface")
+local GameOverScreen = Interface:WaitForChild("GameOverScreen")
+
+-- Đợi cho GameOverScreen.Visible == true
+while true do
+    if GameOverScreen.Visible then
+        print("🏁 Trận đấu kết thúc! Quay về lobby...")
+        local TeleportRemote = ReplicatedStorage:FindFirstChild("RequestTeleportToLobby")
+        if TeleportRemote then
+            TeleportRemote:FireServer()
+        else
+            warn("⚠️ Không tìm thấy Remote RequestTeleportToLobby")
+        end
+        break
+    end
+    task.wait(1)
+end
