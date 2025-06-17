@@ -1,0 +1,39 @@
+-- 🛡️ Auto Difficulty Selector - TDX
+-- Copy file này thành link RAW và dùng với loader
+
+-- Đảm bảo các Remote đã tồn tại
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Đợi Remotes
+local remotes
+repeat
+    remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    task.wait(0.2)
+until remotes
+
+-- Đợi DifficultyVoteCast (tối đa 10s)
+local voteRemote
+local timeWaited = 0
+repeat
+    voteRemote = remotes:FindFirstChild("DifficultyVoteCast")
+    if not voteRemote then
+        task.wait(0.2)
+        timeWaited = timeWaited + 0.2
+    end
+until voteRemote or timeWaited > 10
+
+if not voteRemote then
+    warn("⚠️ Không tìm thấy Remote DifficultyVoteCast sau 10s!")
+    return
+end
+
+-- Lấy config từ getgenv()
+local config = getgenv().TDX_Config or {}
+local vote = config["Auto Difficulty"] or "easy"
+
+-- Viết hoa chữ cái đầu cho đúng định dạng server
+local mode = vote:sub(1,1):upper() .. vote:sub(2):lower()
+
+-- Gửi remote chọn chế độ
+voteRemote:FireServer(mode)
+print("✅ Đã chọn chế độ:", mode)
