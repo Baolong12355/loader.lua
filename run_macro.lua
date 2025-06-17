@@ -17,6 +17,23 @@ local macroPath = "tdx/macros/" .. macroName .. ".json"
 local renamed = {}
 local renameIndex = 1
 
+-- 🔄 Hàm đổi tên tower ngay lập tức cho tất cả tower hiện có
+local function renameAllExistingTowers()
+    for i, tower in ipairs(TowersFolder:GetChildren()) do
+        if not renamed[tower] and tower:IsA("Model") then
+            if not tower.Name:match("^%d+%.") then
+                tower.Name = i .. "." .. tower.Name
+                renamed[tower] = true
+                print("🔁 Đổi tên tower ban đầu:", tower.Name)
+                renameIndex = i + 1  -- Cập nhật index để tiếp tục từ vị trí này
+            end
+        end
+    end
+end
+
+-- Gọi hàm đổi tên ngay lập tức
+renameAllExistingTowers()
+
 -- 🌀 Luôn kiểm tra tower mới để rename
 task.spawn(function()
     while true do
@@ -26,7 +43,7 @@ task.spawn(function()
                     tower.Name = renameIndex .. "." .. tower.Name
                     renamed[tower] = true
                     renameIndex += 1
-                    print("🔁 Đổi tên tower:", tower.Name)
+                    print("🔁 Đổi tên tower mới:", tower.Name)
                 end
             end
         end
