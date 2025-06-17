@@ -1,24 +1,29 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local player = Players.LocalPlayer
-local PlayerGui = player:WaitForChild("PlayerGui")
-local Interface = PlayerGui:WaitForChild("Interface")
-local GameOverScreen = Interface:WaitForChild("GameOverScreen")
+local gui = player:WaitForChild("PlayerGui")
+local interface = gui:WaitForChild("Interface")
+local gameOver = interface:WaitForChild("GameOverScreen")
 
-local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local RequestTeleport = Remotes:FindFirstChild("RequestTeleportToLobby")
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local teleport = remotes:FindFirstChild("RequestTeleportToLobby")
 
-if GameOverScreen and RequestTeleport then
-    -- Theo dõi thay đổi trạng thái Visible
-    GameOverScreen:GetPropertyChangedSignal("Visible"):Connect(function()
-        if GameOverScreen.Visible then
-            -- Đợi nhẹ 1 giây rồi gửi teleport về lobby
-            task.wait(1)
-            if RequestTeleport:IsA("RemoteEvent") then
-                RequestTeleport:FireServer()
-            elseif RequestTeleport:IsA("RemoteFunction") then
-                RequestTeleport:InvokeServer()
-            end
-        end
-    end)
+local function sendBackToLobby()
+	task.wait(1)
+	if teleport then
+		if teleport:IsA("RemoteEvent") then
+			teleport:FireServer()
+		elseif teleport:IsA("RemoteFunction") then
+			teleport:InvokeServer()
+		end
+	end
 end
+
+if gameOver and teleport then
+	-- Trường hợp đã visible từ trước
+	if gameOver.Visible then
+		sendBackToLobby()
+	end
+
+	-- Trường hợp visible thay đổi sau
