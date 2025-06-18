@@ -13,10 +13,10 @@ local mode = config["Macros"] or "run"
 local macroName = config["Macro Name"] or "y"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
 
--- 🏦 Hàm chờ đủ tiền với delay tối ưu
+-- 🏦 Hàm chờ đủ tiền
 local function waitUntilCashEnough(amount)
     while cashStat.Value < amount do
-        task.wait(0.1) -- Delay kiểm tra tiền
+        task.wait(0.1) -- Giữ nguyên delay kiểm tra tiền
     end
 end
 
@@ -45,7 +45,7 @@ if mode == "run" then
 
     for _, entry in ipairs(macro) do
         if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
-            -- 🏗️ Xử lý đặt tower
+            -- 🏗️ Xử lý đặt tower với delay 0.2s
             local x, y, z = entry.TowerVector:match("([^,]+), ([^,]+), ([^,]+)")
             local pos = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
             local args = {
@@ -57,38 +57,32 @@ if mode == "run" then
 
             waitUntilCashEnough(entry.TowerPlaceCost)
             Remotes.PlaceTower:InvokeServer(unpack(args))
-            task.wait(0.1) -- Delay sau khi đặt tower
+            task.wait(0.2) -- CHỈNH THÀNH 0.2s CHO ĐẶT TOWER
 
         elseif entry.TowerIndex and entry.UpgradePath and entry.UpgradeCost then
-            -- ⬆️ Xử lý nâng cấp tower (đảm bảo không miss)
+            -- ⬆️ Xử lý nâng cấp tower với delay 0.2s
             waitUntilCashEnough(entry.UpgradeCost)
             local tower = findTowerByIndex(entry.TowerIndex)
             if tower then
-                local attempts = 0
-                local maxAttempts = 5 -- Thử tối đa 5 lần
-                local upgraded = false
+                local beforeCash = cashStat.Value
+                Remotes.TowerUpgradeRequest:FireServer(entry.TowerIndex, entry.UpgradePath, 1)
+                task.wait(0.2) -- CHỈNH THÀNH 0.2s CHO NÂNG CẤP
                 
-                while not upgraded and attempts < maxAttempts do
-                    local beforeCash = cashStat.Value
+                -- Kiểm tra lại sau 0.1s nếu chưa thành công
+                if cashStat.Value >= beforeCash then
+                    task.wait(0.1)
                     Remotes.TowerUpgradeRequest:FireServer(entry.TowerIndex, entry.UpgradePath, 1)
-                    task.wait(0.1) -- Delay giữa các lần thử nâng cấp
-                    
-                    -- Kiểm tra xem đã nâng cấp thành công chưa
-                    if cashStat.Value < beforeCash then
-                        upgraded = true
-                    end
-                    attempts = attempts + 1
                 end
             end
-            task.wait(0.1) -- Delay sau khi hoàn thành nâng cấp
+            task.wait(0.1) -- Delay phụ sau nâng cấp
 
         elseif entry.ChangeTarget and entry.TargetType then
-            -- 🎯 Xử lý thay đổi mục tiêu
+            -- 🎯 Xử lý thay đổi mục tiêu (giữ nguyên delay)
             Remotes.ChangeQueryType:FireServer(entry.ChangeTarget, entry.TargetType)
             task.wait(0.1)
 
         elseif entry.SellTower then
-            -- 💰 Xử lý bán tower
+            -- 💰 Xử lý bán tower (giữ nguyên delay)
             Remotes.SellTower:FireServer(entry.SellTower)
             task.wait(0.1)
         end
