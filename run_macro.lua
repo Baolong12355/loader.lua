@@ -57,7 +57,7 @@ if mode == "run" then
 
             waitUntilCashEnough(entry.TowerPlaceCost)
             Remotes.PlaceTower:InvokeServer(unpack(args))
-            task.wait(0.3) -- CHỈNH THÀNH 0.2s CHO ĐẶT TOWER
+            task.wait(0.2) -- CHỈNH THÀNH 0.2s CHO ĐẶT TOWER
 
         elseif entry.TowerIndex and entry.UpgradePath and entry.UpgradeCost then
             -- ⬆️ Xử lý nâng cấp tower với delay 0.2s
@@ -66,7 +66,7 @@ if mode == "run" then
             if tower then
                 local beforeCash = cashStat.Value
                 Remotes.TowerUpgradeRequest:FireServer(entry.TowerIndex, entry.UpgradePath, 1)
-                task.wait(0.3) -- CHỈNH THÀNH 0.2s CHO NÂNG CẤP
+                task.wait(0.2) -- CHỈNH THÀNH 0.2s CHO NÂNG CẤP
                 
                 -- Kiểm tra lại sau 0.1s nếu chưa thành công
                 if cashStat.Value >= beforeCash then
