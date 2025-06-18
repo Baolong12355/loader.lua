@@ -16,7 +16,7 @@ local macroPath = "tdx/macros/" .. macroName .. ".json"
 -- 🏦 Hàm chờ đủ tiền
 local function waitUntilCashEnough(amount)
     while cashStat.Value < amount do
-        task.wait(0.1) -- Giữ nguyên delay kiểm tra tiền
+        task.wait() -- Giữ nguyên delay kiểm tra tiền
     end
 end
 
@@ -70,11 +70,11 @@ if mode == "run" then
                 
                 -- Kiểm tra lại sau 0.1s nếu chưa thành công
                 if cashStat.Value >= beforeCash then
-                    task.wait(0.1)
+                    task.wait()
                     Remotes.TowerUpgradeRequest:FireServer(entry.TowerIndex, entry.UpgradePath, 1)
                 end
             end
-            task.wait(0.1) -- Delay phụ sau nâng cấp
+            task.wait() -- Delay phụ sau nâng cấp
 
         elseif entry.ChangeTarget and entry.TargetType then
             -- 🎯 Xử lý thay đổi mục tiêu (giữ nguyên delay)
