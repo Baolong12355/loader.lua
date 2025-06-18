@@ -1,23 +1,21 @@
--- ✅ TDX Loader - Tải chức năng từ repo GitHub của bạn
+-- ✅ TDX Loader - Tải chức năng tuần tự
 local config = getgenv().TDX_Config or {}
 
-local function tryRun(name, enabled, url)
-    if enabled and typeof(url) == "string" and url:match("^https?://") then
-        print("⏳ Loading:", name)
-        local ok, result = pcall(function()
-            return loadstring(game:HttpGet(url))()
-        end)
+local function tryRun(name, enabled, func)
+    if enabled then
+        print("⏳ Đang khởi chạy:", name)
+        local ok, result = pcall(func)
         if ok then
-            print("✅ Loaded:", name)
+            print("✅ Thành công:", name)
         else
-            warn("❌ Failed:", name, result)
+            warn("❌ Thất bại:", name, result)
         end
     else
-        print("⏭️ Skipped:", name)
+        print("⏭️ Bỏ qua:", name)
     end
 end
 
--- 🧩 Link RAW cho từng module từ repo của bạn
+-- 🧩 Link RAW cho các module từ repo
 local base = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/"
 local links = {
     ["x1.5 Speed"]      = base .. "speed.lua",
@@ -27,28 +25,11 @@ local links = {
     ["Auto Difficulty"] = base .. "difficulty.lua"
 }
 
--- 🚀 Chạy tuần tự với delay để tránh lỗi tải
-tryRun("x1.5 Speed",      config["x1.5 Speed"], links["x1.5 Speed"])
-task.wait(1)
-
-tryRun("Join Map",        config["Map"] ~= nil, links["Join Map"])
-task.wait(0.5)
-
-tryRun("Auto Difficulty", config["Auto Difficulty"] ~= nil, links["Auto Difficulty"])
-task.wait(1)
-
-tryRun("Run Macro",       config["Macros"] == "run" or config["Macros"] == "record", links["Run Macro"])
-task.wait(2)
-
-tryRun("Auto Skill",      config["Auto Skill"], links["Auto Skill"])
-task.wait(2)
-
--- Integrated Auto Teleport to Lobby when game over
+-- 🛠️ Các chức năng tích hợp
 local function setupAutoTeleport()
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local Players = game:GetService("Players")
 
-    -- Kiểm tra và lấy các instance một cách an toàn
     local player = Players.LocalPlayer
     if not player then return end
 
@@ -59,7 +40,6 @@ local function setupAutoTeleport()
     local remotes = ReplicatedStorage:WaitForChild("Remotes")
     local teleportRemote = remotes and remotes:FindFirstChild("RequestTeleportToLobby")
 
-    -- THÊM KIỂM TRA QUAN TRỌNG
     if not teleportRemote or not (teleportRemote:IsA("RemoteEvent") or teleportRemote:IsA("RemoteFunction")) then
         warn("❌ Không tìm thấy RemoteEvent/Function hợp lệ")
         return
@@ -78,7 +58,7 @@ local function setupAutoTeleport()
             end)
             
             if success then
-                print("✅ Teleport thành công")
+                print("✅ Tự động về lobby thành công")
                 return true
             else
                 warn(`❌ Lỗi lần {attempt}:`, response)
@@ -88,11 +68,10 @@ local function setupAutoTeleport()
         return false
     end
 
-    if gameOverScreen and gameOverScreen.Visible then
-        tryTeleport()
-    end
-
     if gameOverScreen then
+        if gameOverScreen.Visible then
+            tryTeleport()
+        end
         gameOverScreen:GetPropertyChangedSignal("Visible"):Connect(function()
             if gameOverScreen.Visible then
                 tryTeleport()
@@ -101,32 +80,44 @@ local function setupAutoTeleport()
     end
 end
 
--- Integrated Tower Renamer
 local function setupTowerRenamer()
     repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
 
     local function RenameTowers()
-        local towersFolder = game:GetService("Workspace"):FindFirstChild("Game"):FindFirstChild("Towers")
+        local gameFolder = game:GetService("Workspace"):FindFirstChild("Game")
+        if not gameFolder then return false end
         
-        if not towersFolder then
-            return false
-        end
+        local towersFolder = gameFolder:FindFirstChild("Towers")
+        if not towersFolder then return false end
 
         for i, tower in ipairs(towersFolder:GetChildren()) do
             if not tower.Name:match("^%d+%.") then
                 tower.Name = i .. "." .. tower.Name
             end
         end
-        
         return true
     end
 
     while true do
         pcall(RenameTowers)
-        task.wait()
+        task.wait(5) -- Giảm tần suất kiểm tra để tối ưu
     end
 end
 
--- Run the integrated functions
-task.spawn(setupAutoTeleport)
-task.spawn(setupTowerRenamer)
+-- 🚀 Khởi chạy tuần tự với delay
+local startupSequence = {
+    {name = "x1.5 Speed",      enabled = config["x1.5 Speed"],      func = function() loadstring(game:HttpGet(links["x1.5 Speed"]))() end},
+    {name = "Join Map",        enabled = config["Map"] ~= nil,      func = function() loadstring(game:HttpGet(links["Join Map"]))() end},
+    {name = "Auto Difficulty", enabled = config["Auto Difficulty"] ~= nil, func = function() loadstring(game:HttpGet(links["Auto Difficulty"]))() end},
+    {name = "Run Macro",       enabled = config["Macros"] == "run" or config["Macros"] == "record", func = function() loadstring(game:HttpGet(links["Run Macro"]))() end},
+    {name = "Auto Skill",      enabled = config["Auto Skill"],      func = function() loadstring(game:HttpGet(links["Auto Skill"]))() end},
+    {name = "Tự động về lobby", enabled = true, func = setupAutoTeleport},
+    {name = "Đặt lại tên tháp", enabled = true, func = setupTowerRenamer}
+}
+
+for _, item in ipairs(startupSequence) do
+    tryRun(item.name, item.enabled, item.func)
+    task.wait(1.5) -- Delay giữa các chức năng
+end
+
+print("✨ Tất cả chức năng đã được khởi chạy")
