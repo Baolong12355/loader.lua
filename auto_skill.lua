@@ -1,11 +1,11 @@
--- 📦 TDX Auto Skill Module (dùng trong loader)
+-- 📦 TDX Auto Skill Module (Bỏ qua tower trong danh sách, kích hoạt skill cho các tower còn lại)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local TowersFolder = Workspace:WaitForChild("Game"):WaitForChild("Towers")
 local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
 local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 
--- Bỏ qua các tower không dùng skill
+-- Danh sách tower BỎ QUA (không dùng skill)
 local skipTowers = {
     ["Helicopter"] = true, ["Cryo Helicopter"] = true, ["Artillery"] = true, ["Combat Drone"] = true,
     ["AA Turret"] = true, ["XWM Turret"] = true, ["Barracks"] = true, ["Cryo Blaster"] = true,
@@ -15,7 +15,7 @@ local skipTowers = {
     ["Mine Layer"] = true
 }
 
--- Gán lại tên dạng ID.Name nếu chưa có
+-- Đánh lại tên tower dạng "ID.Tên" (nếu cần)
 local placedIndex = 1
 local function RenameTowers()
     for _, tower in ipairs(TowersFolder:GetChildren()) do
@@ -26,12 +26,18 @@ local function RenameTowers()
     end
 end
 
--- Tự động dùng skill cho tower đủ điều kiện
+-- Kiểm tra tower có nằm trong danh sách bỏ qua không
+local function ShouldSkip(towerName)
+    if not towerName then return true end
+    return skipTowers[towerName] ~= nil
+end
+
+-- Tự động dùng skill cho tower KHÔNG nằm trong danh sách skip
 local function AutoUseSkills()
     for _, tower in ipairs(TowersFolder:GetChildren()) do
         local id = tonumber(tower.Name:match("^(%d+)"))
         local towerName = tower.Name:match("^%d+%.(.+)")
-        if id and towerName and not skipTowers[towerName] then
+        if id and towerName and not ShouldSkip(towerName) then
             for skillId = 1, 3 do
                 pcall(function()
                     if useFireServer then
