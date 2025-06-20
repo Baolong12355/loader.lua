@@ -47,10 +47,9 @@ end
 
 TowerClass = LoadTowerClass()
 
--- â–¶ï¸ RUN MACRO
 if mode == "run" then
     if not isfile(macroPath) then
-        error("âŒ KhĂ´ng tĂ¬m tháº¥y file macro: " .. macroPath)
+        error("❌ Không tìm thấy file macro: " .. macroPath)
     end
 
     local success, macro = pcall(function()
@@ -58,15 +57,16 @@ if mode == "run" then
     end)
 
     if not success then
-        error("âŒ Lá»—i khi Ä‘á»c file macro: " .. macro)
+        error("❌ Lỗi khi đọc file macro: " .. macro)
     end
 
-    DebugPrint("Báº¯t Ä‘áº§u cháº¡y macro vá»›i", #macro, "thao tĂ¡c")
+    DebugPrint("Bắt đầu chạy macro với", #macro, "thao tác")
 
     for _, entry in ipairs(macro) do
-        -- Äáº·t tower
+
+        -- ▶️ Đặt tower (có retry + delay 0.2)
         if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
-            DebugPrint("Thao tĂ¡c Ä‘áº·t tower")
+            DebugPrint("Thao tác đặt tower")
 
             while cashStat.Value < entry.TowerPlaceCost do
                 task.wait()
@@ -81,36 +81,45 @@ if mode == "run" then
                 tonumber(entry.Rotation) or 0
             }
 
-            Remotes.PlaceTower:InvokeServer(unpack(args))
-            task.wait(0.2)
+            local placed = false
+            for attempt = 1, 3 do
+                Remotes.PlaceTower:InvokeServer(unpack(args))
+                task.wait(0.2)
 
-            -- Kiá»ƒm tra tá»“n táº¡i tower
-            local found = false
-            for _, tower in pairs(TowerClass.GetTowers()) do
-                if tower.DisplayName == entry.TowerPlaced then
-                    found = true
-                    break
+                for _, tower in pairs(TowerClass.GetTowers()) do
+                    if tower.DisplayName == entry.TowerPlaced then
+                        placed = true
+                        break
+                    end
                 end
-            end
-            if found then
-                DebugPrint("âœ… Äáº·t tower thĂ nh cĂ´ng:", entry.TowerPlaced)
-            else
-                DebugPrint("â ï¸ KHĂ”NG tĂ¬m tháº¥y tower sau khi Ä‘áº·t:", entry.TowerPlaced)
+
+                if placed then break end
+                DebugPrint("⚠️ Thử lại đặt tower (lần", attempt + 1, ")")
             end
 
-        -- NĂ¢ng cáº¥p tower
+            if placed then
+                DebugPrint("✅ Đặt tower thành công:", entry.TowerPlaced)
+            else
+                DebugPrint("❌ Không thể đặt tower sau 3 lần thử:", entry.TowerPlaced)
+            end
+
+        -- ▶️ Nâng cấp tower (có retry + delay 0.2)
         elseif entry.TowerHash and entry.UpgradePath and entry.UpgradeCost then
-            DebugPrint("Thao tĂ¡c nĂ¢ng cáº¥p tower")
+            DebugPrint("Thao tác nâng cấp tower")
 
             local numericHash = GetNumericHash(entry.TowerHash)
             if not numericHash then
-                DebugPrint("Hash khĂ´ng há»£p lá»‡:", entry.TowerHash)
+                DebugPrint("Hash không hợp lệ:", entry.TowerHash)
                 continue
             end
 
-            local tower = GetAliveTowerByHash(numericHash)
+            local function getTower()
+                return GetAliveTowerByHash(numericHash)
+            end
+
+            local tower = getTower()
             if not tower then
-                DebugPrint("KhĂ´ng cĂ³ tower cĂ²n sá»‘ng vá»›i hash", numericHash, ", bá» qua nĂ¢ng cáº¥p")
+                DebugPrint("Không có tower còn sống với hash", numericHash, ", bỏ qua nâng cấp")
                 continue
             end
 
@@ -119,39 +128,48 @@ if mode == "run" then
             end
 
             local beforeLevel = tower.LevelHandler and tower.LevelHandler:GetLevelOnPath(entry.UpgradePath) or -1
+            local upgraded = false
 
-            Remotes.TowerUpgradeRequest:FireServer(numericHash, entry.UpgradePath, 1)
-            task.wait(0.2)
+            for attempt = 1, 3 do
+                Remotes.TowerUpgradeRequest:FireServer(numericHash, entry.UpgradePath, 1)
+                task.wait(0.2)
 
-            local after = GetAliveTowerByHash(numericHash)
-            if after then
-                local afterLevel = after.LevelHandler and after.LevelHandler:GetLevelOnPath(entry.UpgradePath) or -1
-                if afterLevel > beforeLevel then
-                    DebugPrint("âœ… ÄĂ£ nĂ¢ng cáº¥p tower hash:", numericHash, "Path:", entry.UpgradePath, "Tá»« cáº¥p", beforeLevel, "â†’", afterLevel)
+                local after = getTower()
+                if after then
+                    local afterLevel = after.LevelHandler and after.LevelHandler:GetLevelOnPath(entry.UpgradePath) or -1
+                    if afterLevel > beforeLevel then
+                        DebugPrint("✅ Nâng cấp thành công (hash:", numericHash, ", path:", entry.UpgradePath, ")")
+                        upgraded = true
+                        break
+                    else
+                        DebugPrint("⚠️ Cấp không tăng, thử lại lần", attempt + 1)
+                    end
                 else
-                    DebugPrint("â ï¸ Tower hash:", numericHash, "khĂ´ng tÄƒng cáº¥p sau nĂ¢ng")
+                    DebugPrint("⚠️ Tower biến mất sau nâng, thử lại lần", attempt + 1)
                 end
-            else
-                DebugPrint("â ï¸ KhĂ´ng tĂ¬m tháº¥y láº¡i tower sau nĂ¢ng cáº¥p")
             end
 
-        -- Äá»•i target
+            if not upgraded then
+                DebugPrint("❌ Nâng cấp thất bại sau 3 lần thử")
+            end
+
+        -- ▶️ Đổi target (delay 0.2)
         elseif entry.ChangeTarget and entry.TargetType then
-            DebugPrint("Thao tĂ¡c Ä‘á»•i target")
+            DebugPrint("Thao tác đổi target")
 
             local numericHash = GetNumericHash(entry.ChangeTarget)
             local tower = GetAliveTowerByHash(numericHash)
             if not tower then
-                DebugPrint("Tower cháº¿t hoáº·c khĂ´ng tá»“n táº¡i, bá» qua Ä‘á»•i target")
+                DebugPrint("Tower chết hoặc không tồn tại, bỏ qua target")
                 continue
             end
 
             Remotes.ChangeQueryType:FireServer(numericHash, entry.TargetType)
             task.wait(0.2)
 
-        -- BĂ¡n tower
+        -- ▶️ Bán tower (delay 0.2)
         elseif entry.SellTower then
-            DebugPrint("Thao tĂ¡c bĂ¡n tower")
+            DebugPrint("Thao tác bán tower")
 
             local numericHash = GetNumericHash(entry.SellTower)
             Remotes.SellTower:FireServer(numericHash)
@@ -159,7 +177,7 @@ if mode == "run" then
         end
     end
 
-    print("âœ… ÄĂ£ hoĂ n thĂ nh macro!")
+    print("✅ Đã hoàn thành macro!")
 else
-    print("â„¹ï¸ Cháº¿ Ä‘á»™ macro hiá»‡n táº¡i:", mode)
+    print("ℹ️ Chế độ macro hiện tại:", mode)
 end
