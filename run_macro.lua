@@ -12,7 +12,7 @@ local mode = config["Macros"] or "run"
 local macroName = config["Macro Name"] or "y"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
 
-local DEBUG = false
+local DEBUG = true
 local function DebugPrint(...)
     if DEBUG then
         print("[DEBUG]", ...)
