@@ -1,4 +1,4 @@
--- [TDX] Macro Runner - Enhanced Version with Position Verification
+-- [TDX] Macro Runner - Enhanced Version with Position Utilities
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -32,36 +32,75 @@ end
 
 TowerClass = LoadTowerClass()
 
--- Utility functions
-local function GetNumericHash(inputHash)
-    return tonumber(tostring(inputHash):match("%d+"))
+-- ==================================================================
+-- POSITION UTILITIES (Extracted from the report script)
+-- ==================================================================
+
+-- Lấy vị trí tower an toàn (safe wrapper)
+local function GetTowerPosition(tower)
+    if not tower then return nil end
+    
+    local success, position = pcall(function()
+        if tower.Character then
+            local model = tower.Character:GetCharacterModel()
+            local part = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
+            return part and part.Position
+        end
+        return nil
+    end)
+    
+    return success and position or nil
 end
 
+-- Kiểm tra tower có hợp lệ không (có position và health > 0)
+local function IsValidTower(tower)
+    if not tower then return false end
+    
+    -- Kiểm tra health
+    local healthValid = pcall(function()
+        return tower.HealthHandler and tower.HealthHandler:GetHealth() > 0
+    end)
+    
+    -- Kiểm tra position
+    local positionValid = GetTowerPosition(tower) ~= nil
+    
+    return healthValid and positionValid
+end
+
+-- Tìm tower tại vị trí với bán kính kiểm tra
+local function GetTowerAtPosition(position, radiusCheck)
+    radiusCheck = radiusCheck or 5 -- Bán kính mặc định 5 studs
+    
+    for hash, tower in pairs(TowerClass.GetTowers()) do
+        if IsValidTower(tower) then
+            local towerPos = GetTowerPosition(tower)
+            if towerPos and (towerPos - position).Magnitude <= radiusCheck then
+                return tower
+            end
+        end
+    end
+    
+    return nil
+end
+
+-- Tìm tower sống tại vị trí
+local function GetAliveTowerAtPosition(position, radiusCheck)
+    local tower = GetTowerAtPosition(position, radiusCheck)
+    if tower and pcall(function() return tower.HealthHandler:GetHealth() > 0 end) then
+        return tower
+    end
+    return nil
+end
+
+-- Chuyển đổi string vector sang Vector3
 local function Vector3FromString(str)
     local x, y, z = str:match("([^,]+), ([^,]+), ([^,]+)")
     return Vector3.new(tonumber(x), tonumber(y), tonumber(z))
 end
 
-local function GetTowerAtPosition(position, radiusCheck)
-    radiusCheck = radiusCheck or 5
-    for hash, tower in pairs(TowerClass.GetTowers()) do
-        if tower.Character and tower.Character:GetTorso() then
-            local towerPos = tower.Character:GetTorso().Position
-            if (towerPos - position).Magnitude <= radiusCheck then
-                return tower
-            end
-        end
-    end
-    return nil
-end
-
-local function GetAliveTowerAtPosition(position, radiusCheck)
-    local tower = GetTowerAtPosition(position, radiusCheck)
-    if tower and tower.HealthHandler and tower.HealthHandler:GetHealth() > 0 then
-        return tower
-    end
-    return nil
-end
+-- ==================================================================
+-- MACRO RUNNER FUNCTIONS
+-- ==================================================================
 
 local function WaitForCash(requiredAmount)
     while cashStat.Value < requiredAmount do
@@ -93,7 +132,6 @@ if mode == "run" then
         if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then  
             DebugPrint("Thao tác đặt tower:", entry.TowerPlaced)  
 
-            -- Check if tower already exists at this position
             local position = Vector3FromString(entry.TowerVector)
             if GetTowerAtPosition(position) then
                 DebugPrint("⚠️ Đã có tower tại vị trí này, bỏ qua")
@@ -138,7 +176,7 @@ if mode == "run" then
             if type(entry.TowerUpgraded) == "string" then
                 position = Vector3FromString(entry.TowerUpgraded)
             else
-                position = Vector3.new(entry.TowerUpgraded, 0, 0) -- Handle numeric position format
+                position = Vector3.new(entry.TowerUpgraded, 0, 0)
             end
 
             local tower = GetAliveTowerAtPosition(position)
@@ -150,7 +188,10 @@ if mode == "run" then
 
             WaitForCash(entry.UpgradeCost)
 
-            local beforeLevel = tower.LevelHandler and tower.LevelHandler:GetLevelOnPath(entry.UpgradePath) or -1  
+            local beforeLevel = pcall(function() 
+                return tower.LevelHandler:GetLevelOnPath(entry.UpgradePath) 
+            end) or -1
+            
             local upgraded = false  
 
             for attempt = 1, 3 do  
@@ -164,7 +205,10 @@ if mode == "run" then
                     break
                 end
 
-                local afterLevel = tower.LevelHandler:GetLevelOnPath(entry.UpgradePath)
+                local afterLevel = pcall(function() 
+                    return tower.LevelHandler:GetLevelOnPath(entry.UpgradePath) 
+                end) or -1
+                
                 if afterLevel > beforeLevel then  
                     DebugPrint("✅ Nâng cấp thành công (path:", entry.UpgradePath, "from", beforeLevel, "to", afterLevel, ")")  
                     upgraded = true  
