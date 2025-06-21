@@ -32,19 +32,20 @@ local links = {
 if config["Return Lobby"] then
     tryRun("Return Lobby", true, links["Return Lobby"])
 else
-    -- đŸ€ Cháº¡y tuáº§n tá»± vá»›i delay Ä‘á»ƒ trĂ¡nh lá»—i táº£i
-    tryRun("x1.5 Speed",      config["x1.5 Speed"], links["x1.5 Speed"])
-    task.wait(1)
+-- ✅ Tải tất cả module song song nếu được bật trong config
+tryRun("x1.5 Speed",      config["x1.5 Speed"], links["x1.5 Speed"])
+task.wait(1)
 
-    tryRun("Join Map",        config["Map"] ~= nil, links["Join Map"])
-    task.wait(0.5)
+tryRun("Join Map",        config["Map"] ~= nil, links["Join Map"])
+task.wait(0.5)
 
-    tryRun("Auto Difficulty", config["Auto Difficulty"] ~= nil, links["Auto Difficulty"])
-    task.wait(1)
+tryRun("Auto Difficulty", config["Auto Difficulty"] ~= nil, links["Auto Difficulty"])
+task.wait(1)
 
-    tryRun("Run Macro",       config["Macros"] == "run" or config["Macros"] == "record", links["Run Macro"])
-    task.wait(2)
+tryRun("Run Macro",       config["Macros"] == "run" or config["Macros"] == "record", links["Run Macro"])
+task.wait(2)
 
-    tryRun("Auto Skill",      config["Auto Skill"], links["Auto Skill"])
-    task.wait(2)
-end
+tryRun("Auto Skill",      config["Auto Skill"], links["Auto Skill"])
+task.wait(2)
+
+tryRun("Return Lobby",    config["Return Lobby"], links["Return Lobby"])
