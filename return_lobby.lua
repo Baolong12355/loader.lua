@@ -1,7 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
--- Kiểm tra và lấy các instance một cách an toàn
+-- Kiá»ƒm tra vĂ  láº¥y cĂ¡c instance má»™t cĂ¡ch an toĂ n
 local player = Players.LocalPlayer
 if not player then return end
 
@@ -12,9 +12,9 @@ local gameOverScreen = interface and interface:WaitForChild("GameOverScreen")
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local teleportRemote = remotes and remotes:FindFirstChild("RequestTeleportToLobby")
 
--- THÊM KIỂM TRA QUAN TRỌNG
+-- THĂM KIá»‚M TRA QUAN TRá»ŒNG
 if not teleportRemote or not (teleportRemote:IsA("RemoteEvent") or teleportRemote:IsA("RemoteFunction")) then
-    warn("❌ Không tìm thấy RemoteEvent/Function hợp lệ")
+    warn("âŒ KhĂ´ng tĂ¬m tháº¥y RemoteEvent/Function há»£p lá»‡")
     return
 end
 
@@ -31,24 +31,37 @@ local function tryTeleport()
         end)
         
         if success then
-            print("✅ Teleport thành công")
+            print("âœ… Teleport thĂ nh cĂ´ng")
             return true
         else
-            warn(`❌ Lỗi lần {attempt}:`, response)
+            warn(`âŒ Lá»—i láº§n {attempt}:`, response)
             task.wait(1)
         end
     end
     return false
 end
 
+-- HĂ m tá»± Ä‘á»™ng thá»­ láº¡i má»—i 4 giĂ¢y khi mĂ n hĂ¬nh GameOver Ä‘ang hiá»ƒn thá»‹
+local function autoRetryTeleport()
+    while true do
+        if gameOverScreen and gameOverScreen.Visible then
+            tryTeleport()
+        end
+        task.wait(4) -- Chá» 4 giĂ¢y trÆ°á»›c khi thá»­ láº¡i
+    end
+end
+
+-- KĂ­ch hoáº¡t ngay láº­p tá»©c náº¿u mĂ n hĂ¬nh Ä‘ang hiá»ƒn thá»‹
 if gameOverScreen and gameOverScreen.Visible then
     tryTeleport()
 end
 
+-- Theo dĂµi sá»± thay Ä‘á»•i tráº¡ng thĂ¡i hiá»ƒn thá»‹
 if gameOverScreen then
     gameOverScreen:GetPropertyChangedSignal("Visible"):Connect(function()
         if gameOverScreen.Visible then
-            tryTeleport()
+            -- Báº¯t Ä‘áº§u vĂ²ng láº·p tá»± Ä‘á»™ng thá»­ láº¡i
+            coroutine.wrap(autoRetryTeleport)()
         end
     end)
 end
