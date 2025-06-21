@@ -1,3 +1,4 @@
+-- [TDX] Macro Runner - Bản có chống lặp khi tower chết
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -46,6 +47,7 @@ local function GetAliveTowerByHash(numericHash)
 end
 
 TowerClass = LoadTowerClass()
+local actionDone = {} -- ✅ Đánh dấu thao tác đã xử lý
 
 if mode == "run" then
     if not isfile(macroPath) then
@@ -62,7 +64,8 @@ if mode == "run" then
 
     DebugPrint("Bắt đầu chạy macro với", #macro, "thao tác")
 
-    for _, entry in ipairs(macro) do
+    for index, entry in ipairs(macro) do
+        if actionDone[index] then continue end
 
         -- ▶️ Đặt tower (có retry + delay 0.2)
         if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
@@ -103,6 +106,8 @@ if mode == "run" then
                 DebugPrint("❌ Không thể đặt tower sau 3 lần thử:", entry.TowerPlaced)
             end
 
+            actionDone[index] = true
+
         -- ▶️ Nâng cấp tower (có retry + delay 0.2)
         elseif entry.TowerHash and entry.UpgradePath and entry.UpgradeCost then
             DebugPrint("Thao tác nâng cấp tower")
@@ -110,6 +115,7 @@ if mode == "run" then
             local numericHash = GetNumericHash(entry.TowerHash)
             if not numericHash then
                 DebugPrint("Hash không hợp lệ:", entry.TowerHash)
+                actionDone[index] = true
                 continue
             end
 
@@ -119,7 +125,8 @@ if mode == "run" then
 
             local tower = getTower()
             if not tower then
-                DebugPrint("Không có tower còn sống với hash", numericHash, ", bỏ qua nâng cấp")
+                DebugPrint("⚠️ Tower không còn sống, bỏ qua nâng cấp")
+                actionDone[index] = true
                 continue
             end
 
@@ -153,6 +160,8 @@ if mode == "run" then
                 DebugPrint("❌ Nâng cấp thất bại sau 3 lần thử")
             end
 
+            actionDone[index] = true
+
         -- ▶️ Đổi target (delay 0.2)
         elseif entry.ChangeTarget and entry.TargetType then
             DebugPrint("Thao tác đổi target")
@@ -160,12 +169,14 @@ if mode == "run" then
             local numericHash = GetNumericHash(entry.ChangeTarget)
             local tower = GetAliveTowerByHash(numericHash)
             if not tower then
-                DebugPrint("Tower chết hoặc không tồn tại, bỏ qua target")
+                DebugPrint("⚠️ Tower chết hoặc không tồn tại, bỏ qua target")
+                actionDone[index] = true
                 continue
             end
 
             Remotes.ChangeQueryType:FireServer(numericHash, entry.TargetType)
             task.wait(0.2)
+            actionDone[index] = true
 
         -- ▶️ Bán tower (delay 0.2)
         elseif entry.SellTower then
@@ -174,6 +185,7 @@ if mode == "run" then
             local numericHash = GetNumericHash(entry.SellTower)
             Remotes.SellTower:FireServer(numericHash)
             task.wait(0.2)
+            actionDone[index] = true
         end
     end
 
