@@ -1,27 +1,23 @@
--- âœ… TDX Loader - Táº£i chá»©c nÄƒng tá»« repo GitHub cá»§a báº¡n
+-- ✅ TDX Loader - Tải chức năng từ repo GitHub của bạn
 local config = getgenv().TDX_Config or {}
 
 local function tryRun(name, enabled, url)
     if enabled and typeof(url) == "string" and url:match("^https?://") then
-        print("â³ Loading:", name)
+        print("⏳ Loading:", name)
         local ok, result = pcall(function()
-            local script = game:HttpGet(url)
-            return loadstring(script)()
+            return loadstring(game:HttpGet(url))()
         end)
         if ok then
-            print("âœ… Loaded:", name)
-            return true
+            print("✅ Loaded:", name)
         else
-            warn("âŒ Failed:", name, result)
-            return false
+            warn("❌ Failed:", name, result)
         end
     else
-        print("â­ï¸ Skipped:", name)
-        return false
+        print("⏭️ Skipped:", name)
     end
 end
 
--- đŸ§© Link RAW cho tá»«ng module tá»« repo cá»§a báº¡n
+-- 📦 Link RAW cho từng module từ repo của bạn
 local base = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/"
 local links = {
     ["x1.5 Speed"]      = base .. "speed.lua",
@@ -29,27 +25,26 @@ local links = {
     ["Run Macro"]       = base .. "run_macro.lua",
     ["Join Map"]        = base .. "auto_join.lua",
     ["Auto Difficulty"] = base .. "difficulty.lua",
-    ["Return Lobby"]    = base .. "return_lobby.lua"
+    ["Return Lobby"]    = base .. "return_lobby.lua", -- ✅ thêm vào đây
 }
 
--- Special case for Return Lobby
-if config["Return Lobby"] then
-    local success = tryRun("Return Lobby", true, links["Return Lobby"])
-    if not success then
-        warn("âŒ Critical error in Return Lobby - attempting fallback...")
-        -- Add simple fallback return to lobby function
-        game:GetService("ReplicatedStorage").Remotes.To_Server.Handle_Initiate_S:FireServer("leave_game")
-    end
-    return -- Stop execution here if we're just returning to lobby
-end
+-- 🚪 Chạy Return Lobby ngay lập tức, không chờ
+spawn(function()
+    tryRun("Return Lobby", config["Return Lobby"], links["Return Lobby"])
+end)
 
--- Normal module loading sequence
+-- 🔁 Các module còn lại (vẫn có delay để tránh lỗi tải)
 tryRun("x1.5 Speed",      config["x1.5 Speed"], links["x1.5 Speed"])
 task.wait(1)
+
 tryRun("Join Map",        config["Map"] ~= nil, links["Join Map"])
 task.wait(0.5)
+
 tryRun("Auto Difficulty", config["Auto Difficulty"] ~= nil, links["Auto Difficulty"])
 task.wait(1)
+
 tryRun("Run Macro",       config["Macros"] == "run" or config["Macros"] == "record", links["Run Macro"])
 task.wait(2)
+
 tryRun("Auto Skill",      config["Auto Skill"], links["Auto Skill"])
+task.wait(2)
