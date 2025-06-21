@@ -5,15 +5,19 @@ local function tryRun(name, enabled, url)
     if enabled and typeof(url) == "string" and url:match("^https?://") then
         print("â³ Loading:", name)
         local ok, result = pcall(function()
-            return loadstring(game:HttpGet(url))()
+            local script = game:HttpGet(url)
+            return loadstring(script)()
         end)
         if ok then
             print("âœ… Loaded:", name)
+            return true
         else
             warn("âŒ Failed:", name, result)
+            return false
         end
     else
         print("â­ï¸ Skipped:", name)
+        return false
     end
 end
 
@@ -28,24 +32,24 @@ local links = {
     ["Return Lobby"]    = base .. "return_lobby.lua"
 }
 
--- Check if only Return Lobby is enabled
+-- Special case for Return Lobby
 if config["Return Lobby"] then
-    tryRun("Return Lobby", true, links["Return Lobby"])
-else
--- ✅ Tải tất cả module song song nếu được bật trong config
+    local success = tryRun("Return Lobby", true, links["Return Lobby"])
+    if not success then
+        warn("âŒ Critical error in Return Lobby - attempting fallback...")
+        -- Add simple fallback return to lobby function
+        game:GetService("ReplicatedStorage").Remotes.To_Server.Handle_Initiate_S:FireServer("leave_game")
+    end
+    return -- Stop execution here if we're just returning to lobby
+end
+
+-- Normal module loading sequence
 tryRun("x1.5 Speed",      config["x1.5 Speed"], links["x1.5 Speed"])
 task.wait(1)
-
 tryRun("Join Map",        config["Map"] ~= nil, links["Join Map"])
 task.wait(0.5)
-
 tryRun("Auto Difficulty", config["Auto Difficulty"] ~= nil, links["Auto Difficulty"])
 task.wait(1)
-
 tryRun("Run Macro",       config["Macros"] == "run" or config["Macros"] == "record", links["Run Macro"])
 task.wait(2)
-
 tryRun("Auto Skill",      config["Auto Skill"], links["Auto Skill"])
-task.wait(2)
-
-tryRun("Return Lobby",    config["Return Lobby"], links["Return Lobby"])
