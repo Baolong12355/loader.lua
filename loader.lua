@@ -30,27 +30,17 @@ local links = {
     ["Return Lobby"]    = base .. "return_lobby.lua"
 }
 
--- 🚪 Return Lobby chạy riêng, không chờ
-spawn(function()
-    tryRun("Return Lobby", getgenv().TDX_Config["Return Lobby"], links["Return Lobby"])
-end)
+-- 🔁 Chạy từng module trong thread riêng
+spawn(function() tryRun("Return Lobby",    getgenv().TDX_Config["Return Lobby"],    links["Return Lobby"]) end)
+spawn(function() tryRun("x1.5 Speed",       getgenv().TDX_Config["x1.5 Speed"],     links["x1.5 Speed"]) end)
+spawn(function() tryRun("Join Map",         getgenv().TDX_Config["Map"] ~= nil,     links["Join Map"]) end)
+spawn(function() tryRun("Auto Difficulty",  getgenv().TDX_Config["Auto Difficulty"] ~= nil, links["Auto Difficulty"]) end)
 
--- 🔁 Chạy các module còn lại theo cấu hình
-tryRun("x1.5 Speed",      getgenv().TDX_Config["x1.5 Speed"], links["x1.5 Speed"])
-task.wait(1)
-
-tryRun("Join Map",        getgenv().TDX_Config["Map"] ~= nil, links["Join Map"])
-task.wait(0.5)
-
-tryRun("Auto Difficulty", getgenv().TDX_Config["Auto Difficulty"] ~= nil, links["Auto Difficulty"])
-task.wait(1)
-
+-- 🧠 Macro chạy theo loại
 if getgenv().TDX_Config["Macros"] == "run" then
-    tryRun("Run Macro", true, links["Run Macro"])
+    spawn(function() tryRun("Run Macro", true, links["Run Macro"]) end)
 elseif getgenv().TDX_Config["Macros"] == "record" then
-    tryRun("Record Macro", true, links["Record Macro"])
+    spawn(function() tryRun("Record Macro", true, links["Record Macro"]) end)
 end
-task.wait(2)
 
-tryRun("Auto Skill",      getgenv().TDX_Config["Auto Skill"], links["Auto Skill"])
-task.wait(2)
+spawn(function() tryRun("Auto Skill", getgenv().TDX_Config["Auto Skill"], links["Auto Skill"]) end)
