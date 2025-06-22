@@ -1,22 +1,240 @@
-local HttpService = game:GetService("HttpService") local ReplicatedStorage = game:GetService("ReplicatedStorage") local Players = game:GetService("Players") local LocalPlayer = Players.LocalPlayer local Remotes = ReplicatedStorage:WaitForChild("Remotes") local TowerClass = require(LocalPlayer.PlayerScripts.Client.GameClass.TowerClass)
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
-local recorded = {} local towerData = {}
+-- Ensure LocalPlayer exists
+local LocalPlayer = Players.LocalPlayer
+while not LocalPlayer do
+    task.wait()
+    LocalPlayer = Players.LocalPlayer
+end
 
-local SAVE_FOLDER = "tdx/macros" local SAVE_NAME = "recorded.json" local SAVE_PATH = SAVE_FOLDER .. "/" .. SAVE_NAME
+-- Safely load TowerClass
+local TowerClass
+local ok, err = pcall(function()
+    TowerClass = require(LocalPlayer.PlayerScripts.Client.GameClass.TowerClass)
+end)
+if not ok then
+    warn("Failed to load TowerClass:", err)
+    return
+end
 
-if typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder(SAVE_FOLDER) then makefolder(SAVE_FOLDER) end
+-- Verify Remotes folder exists
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if not Remotes then
+    warn("Remotes folder not found in ReplicatedStorage")
+    return
+end
 
-local function add(entry) print("[GHI]", HttpService:JSONEncode(entry)) table.insert(recorded, entry) end
+local recorded = {}
+local towerPrices = {}
 
-local function getTimeLeft() local ok, result = pcall(function() local text = Players.LocalPlayer :WaitForChild("PlayerGui") :WaitForChild("Interface") :WaitForChild("GameInfoBar") :WaitForChild("TimeLeft") :WaitForChild("TimeLeftText").Text local minutes, seconds = text:match("^(%d+):(%d+)$") if minutes and seconds then return tonumber(minutes) * 60 + tonumber(seconds) end end) return ok and result or 0 end
+local SAVE_FOLDER = "tdx/macros"
+local SAVE_NAME = "recorded.json"
+local SAVE_PATH = SAVE_FOLDER .. "/" .. SAVE_NAME
 
-local towerPrices = {} do local interface = LocalPlayer:WaitForChild("PlayerGui"):WaitForChild("Interface") local towersBar = interface:WaitForChild("BottomBar"):WaitForChild("TowersBar") for _, tower in ipairs(towersBar:GetChildren()) do if tower.Name ~= "TowerTemplate" and not tower:IsA("UIGridLayout") then local costFrame = tower:FindFirstChild("CostFrame") if costFrame then local costText = costFrame:FindFirstChild("CostText") if costText then local price = tonumber(costText.Text:gsub("$", "") or "0") towerPrices[tower.Name] = price end end end end end
+-- Initialize folder and file
+if type(makefolder) == "function" and not isfolder(SAVE_FOLDER) then
+    makefolder(SAVE_FOLDER)
+end
 
-spawn(function() while true do task.wait(5) if typeof(writefile) == "function" then writefile(SAVE_PATH, HttpService:JSONEncode(recorded)) else print("[Lưu JSON]", HttpService:JSONEncode(recorded)) end end end)
+if type(writefile) == "function" and not isfile(SAVE_PATH) then
+    writefile(SAVE_PATH, "[]")
+end
 
-local function GetTowerXFromHash(hash) local tower = TowerClass.GetTower(hash) if not tower then return nil end local model = tower.Character and tower.Character:GetCharacterModel() local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart) return root and tonumber(string.format("%.15f", root.Position.X)) or nil end
+-- Load existing data
+if type(readfile) == "function" and isfile(SAVE_PATH) then
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(readfile(SAVE_PATH))
+    end)
+    if ok and type(data) == "table" then
+        recorded = data
+    end
+end
 
-local oldNamecall oldNamecall = hookmetamethod(game, "__namecall", function(self, ...) local method = getnamecallmethod() local args = { ... } if method == "InvokeServer" and typeof(self) == "Instance" and self.Name == "PlaceTower" then local a1, towerName, pos, rotation = unpack(args) if typeof(pos) == "Vector3" and typeof(towerName) == "string" then add({ TowerA1 = tostring(a1), TowerPlaced = towerName, TowerVector = string.format("%.15f, %.15f, %.15f", pos.X, pos.Y, pos.Z), Rotation = rotation, TowerPlaceCost = towerPrices[towerName] or 0 }) end elseif method == "FireServer" and typeof(self) == "Instance" then local remoteName = self.Name if remoteName == "SellTower" and typeof(args[1]) == "number" then local x = GetTowerXFromHash(args[1]) if x then add({ SellTower = x }) end elseif remoteName == "TowerUpgradeRequest" and typeof(args[1]) == "number" then local x = GetTowerXFromHash(args[1]) if x then add({ TowerUpgraded = x, UpgradePath = args[2], UpgradeCost = 0 }) end elseif remoteName == "ChangeQueryType" and typeof(args[1]) == "number" then local x = GetTowerXFromHash(args[1]) if x then add({ TowerTargetChange = x, TargetWanted = args[2], TargetChangedAt = getTimeLeft() }) end end end return oldNamecall(self, ...) end)
+-- Add new record function
+local function add(entry)
+    if not entry or type(entry) ~= "table" then return end
+    
+    local ok, result = pcall(function()
+        table.insert(recorded, entry)
+        print("[RECORD]", HttpService:JSONEncode(entry))
+    end)
+    if not ok then
+        warn("[RECORD ERROR]", result)
+    end
+end
 
-print("Macro Recorder HOàN CHẮN. Đang theo dõi và ghi vào:", SAVE_PATH)
+-- Get remaining time function
+local function getTimeLeft()
+    local ok, result = pcall(function()
+        local gui = LocalPlayer:WaitForChild("PlayerGui")
+        local interface = gui:WaitForChild("Interface")
+        local gameInfoBar = interface:WaitForChild("GameInfoBar")
+        local timeLeft = gameInfoBar:WaitForChild("TimeLeft")
+        local text = timeLeft:WaitForChild("TimeLeftText").Text
+        
+        local minutes, seconds = text:match("^(%d+):(%d+)$")
+        if not minutes or not seconds then return 0 end
+        return (tonumber(minutes) or 0) * 60 + (tonumber(seconds) or 0)
+    end)
+    return ok and result or 0
+end
 
+-- Get tower X position from hash
+local function GetTowerXFromHash(hash)
+    local tower = TowerClass.GetTower(hash)
+    if not tower or not tower.Character then return nil end
+    
+    local model = tower.Character:GetCharacterModel()
+    if not model then return nil end
+    
+    local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+    return root and tonumber(string.format("%.15f", root.Position.X))
+end
+
+-- Load tower prices
+local function loadTowerPrices()
+    local ok, gui = pcall(function()
+        return LocalPlayer:WaitForChild("PlayerGui")
+    end)
+    if not ok then return end
+    
+    local ok, bar = pcall(function()
+        return gui:WaitForChild("Interface"):WaitForChild("BottomBar"):WaitForChild("TowersBar")
+    end)
+    if not ok then return end
+    
+    for _, tower in ipairs(bar:GetChildren()) do
+        if tower:IsA("ImageButton") and tower:FindFirstChild("CostFrame") then
+            local text = tower.CostFrame:FindFirstChild("CostText")
+            if text then
+                local price = tonumber(text.Text:match("%d+"))
+                if price then
+                    towerPrices[tower.Name] = price
+                end
+            end
+        end
+    end
+end
+
+-- Initialize tower prices
+loadTowerPrices()
+
+-- Auto-save data
+if type(writefile) == "function" then
+    task.spawn(function()
+        while task.wait(5) do
+            local ok, json = pcall(HttpService.JSONEncode, HttpService, recorded)
+            if ok and type(json) == "string" then
+                pcall(function()
+                    writefile(SAVE_PATH, json)
+                end)
+            end
+        end
+    end)
+end
+
+-- Hook PlaceTower remote
+local rawPlace = Remotes:FindFirstChild("PlaceTower")
+if rawPlace then
+    Remotes.PlaceTower = setmetatable({}, {
+        __index = function(_, key)
+            if key == "InvokeServer" then
+                return function(_, a1, towerName, pos, rotation)
+                    local vectorString = "0, 0, 0"
+                    pcall(function()
+                        vectorString = string.format("%.15f, %.15f, %.15f", pos.X, pos.Y, pos.Z)
+                    end)
+                    
+                    add({
+                        type = "PlaceTower",
+                        a1 = tostring(a1),
+                        tower = towerName,
+                        position = vectorString,
+                        rotation = rotation,
+                        cost = towerPrices[towerName] or 0,
+                        time = getTimeLeft()
+                    })
+                    
+                    return rawPlace:InvokeServer(a1, towerName, pos, rotation)
+                end
+            end
+            return rawPlace[key]
+        end
+    })
+end
+
+-- Hook SellTower remote
+local rawSell = Remotes:FindFirstChild("SellTower")
+if rawSell then
+    Remotes.SellTower = setmetatable({}, {
+        __index = function(_, key)
+            if key == "FireServer" then
+                return function(_, hash)
+                    local x = GetTowerXFromHash(hash)
+                    if x then
+                        add({
+                            type = "SellTower",
+                            positionX = x,
+                            time = getTimeLeft()
+                        })
+                    end
+                    return rawSell:FireServer(hash)
+                end
+            end
+            return rawSell[key]
+        end
+    })
+end
+
+-- Hook UpgradeTower remote
+local rawUpgrade = Remotes:FindFirstChild("TowerUpgradeRequest")
+if rawUpgrade then
+    Remotes.TowerUpgradeRequest = setmetatable({}, {
+        __index = function(_, key)
+            if key == "FireServer" then
+                return function(_, hash, path, level)
+                    local x = GetTowerXFromHash(hash)
+                    if x then
+                        add({
+                            type = "UpgradeTower",
+                            positionX = x,
+                            path = path,
+                            level = level,
+                            time = getTimeLeft()
+                        })
+                    end
+                    return rawUpgrade:FireServer(hash, path, level)
+                end
+            end
+            return rawUpgrade[key]
+        end
+    })
+end
+
+-- Hook ChangeTarget remote
+local rawTarget = Remotes:FindFirstChild("ChangeQueryType")
+if rawTarget then
+    Remotes.ChangeQueryType = setmetatable({}, {
+        __index = function(_, key)
+            if key == "FireServer" then
+                return function(_, hash, targetType)
+                    local x = GetTowerXFromHash(hash)
+                    if x then
+                        add({
+                            type = "ChangeTarget",
+                            positionX = x,
+                            target = targetType,
+                            time = getTimeLeft()
+                        })
+                    end
+                    return rawTarget:FireServer(hash, targetType)
+                end
+            end
+            return rawTarget[key]
+        end
+    })
+end
+
+print("✅ Macro Recorder successfully initialized!")
