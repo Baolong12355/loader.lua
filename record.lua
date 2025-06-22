@@ -1,4 +1,4 @@
--- 📜 TDX Macro Recorder (Executor Compatible + Chat Toggle + ooooo.json Format)
+-- 📜 TDX Macro Recorder (Executor + Chat Toggle + ooooo.json Format)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -10,21 +10,22 @@ local TowerClass = require(LocalPlayer.PlayerScripts.Client.GameClass.TowerClass
 local SAVE_FOLDER = "tdx/macros"
 local MACRO_NAME = getgenv().TDX_Config and getgenv().TDX_Config["Macro Name"] or "recorded"
 local SAVE_PATH = SAVE_FOLDER .. "/" .. MACRO_NAME .. ".json"
+getgenv().TDX_RecordEnabled = true
 
 -- 📦 Biến toàn cục
 local recorded = {}
 local towerData = {}
-getgenv().TDX_RecordEnabled = true -- trạng thái mặc định: bật
 
 -- Tạo thư mục nếu chưa có
 if not isfolder(SAVE_FOLDER) then makefolder(SAVE_FOLDER) end
+
 local function add(entry)
 	if getgenv().TDX_RecordEnabled then
 		table.insert(recorded, entry)
 	end
 end
 
--- Tự động lưu macro định kỳ
+-- Tự động lưu định kỳ
 task.spawn(function()
 	while true do
 		task.wait(5)
@@ -39,7 +40,7 @@ local TargetMap = {
 	First = 0, Last = 1, Strongest = 2, Weakest = 3, Closest = 4, Farthest = 5
 }
 
--- ✅ Hook đặt tower (vì là RemoteFunction)
+-- ✅ Hook đặt tower
 local originalInvoke = hookfunction(Remotes.PlaceTower.InvokeServer, function(self, towerA1, towerName, pos, rotation)
 	local config = require(ReplicatedStorage:WaitForChild("TDX_Shared"):WaitForChild("Common"):WaitForChild("ResourceManager")).GetTowerConfig(towerName)
 	local cost = config and config.UpgradePathData.BaseLevelData.Cost or 0
@@ -116,7 +117,7 @@ Remotes.ChangeQueryType.OnClientEvent:Connect(function(hash, targetType)
 	})
 end)
 
--- ❌ Sell tower
+-- ❌ Sell
 Remotes.SellTower.OnClientEvent:Connect(function(hash)
 	local tower = TowerClass.GetTower(hash)
 	if not tower then return end
@@ -129,7 +130,7 @@ Remotes.SellTower.OnClientEvent:Connect(function(hash)
 	add({ SellTower = x })
 end)
 
--- 💬 Lệnh chat: /record on | /record off
+-- 💬 Chat toggle: /record on | /record off
 local function handleChatCommand(msg)
 	local args = string.split(msg:lower(), " ")
 	if args[1] == "/record" then
@@ -143,20 +144,26 @@ local function handleChatCommand(msg)
 	end
 end
 
--- Hỗ trợ cả hệ thống chat cũ và mới
-local TextChatService = game:GetService("TextChatService")
-if TextChatService.TextChannels then
-	local channel = TextChatService.TextChannels.RBXGeneral
-	if channel then
-		channel.OnIncomingMessage:Connect(function(msg)
-			if msg.TextSource == Players.LocalPlayer then
-				handleChatCommand(msg.Text)
+-- 📦 Tự phát hiện hệ thống chat
+local function setupChatCommand()
+	local success, rbxChannel = pcall(function()
+		return game:GetService("TextChatService").TextChannels.RBXGeneral
+	end)
+
+	if success and rbxChannel then
+		-- Chat mới
+		rbxChannel.OnIncomingMessage = function(message)
+			if message.TextSource and message.TextSource.UserId == Players.LocalPlayer.UserId then
+				handleChatCommand(message.Text)
 			end
-		end)
+		end
+	else
+		-- Chat cũ
+		Players.LocalPlayer.Chatted:Connect(handleChatCommand)
 	end
-else
-	LocalPlayer.Chatted:Connect(handleChatCommand)
 end
 
-print("🎥 [TDX Macro Recorder] Sẵn sàng ghi macro! Lệnh: /record on | /record off")
-print("📁 File lưu tại: " .. SAVE_PATH)
+setupChatCommand()
+
+print("🎥 [TDX Macro Recorder] Đã sẵn sàng! Sử dụng: /record on | /record off")
+print("📁 Lưu macro tại: " .. SAVE_PATH)
