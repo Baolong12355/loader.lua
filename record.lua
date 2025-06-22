@@ -1,7 +1,10 @@
--- Tower Defense Macro Recorder (TowerClass Version)
+-- Tower Defense Macro Recorder (TowerClass Version) - Updated
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
+
+-- Tùy chỉnh
+local debugMode = true -- bật/tắt in log chi tiết
 
 -- Tải TowerClass
 local function LoadTowerClass()
@@ -36,7 +39,7 @@ local function SaveMacro()
     local filePath = config["Save Path"] .. fileName
     
     writefile(filePath, HttpService:JSONEncode(macroData))
-    print("💾 Đã lưu macro:", filePath)
+    if debugMode then print("💾 Đã lưu macro:", filePath) end
 end
 
 -- Hook function
@@ -58,7 +61,7 @@ local function HookFunction(remote, callback)
     end
 end
 
--- Lấy thông tin giá từ TowerClass
+-- Lấy giá
 local function GetTowerCost(towerType, path, level)
     if not TowerClass then return 0 end
     
@@ -70,27 +73,54 @@ local function GetTowerCost(towerType, path, level)
     if not towerConfig then return 0 end
     
     if path and level then
-        -- Giá nâng cấp
         local upgradePath = towerConfig.UpgradePathData[path]
         if upgradePath and upgradePath[level] then
             return upgradePath[level].Cost or 0
         end
     else
-        -- Giá đặt tháp
         return towerConfig.UpgradePathData.BaseLevelData.Cost or 0
     end
     
     return 0
 end
 
--- Bắt đầu ghi macro
+-- Dừng ghi macro
+local function StopRecording()
+    if not recording then return end
+    recording = false
+    SaveMacro()
+    
+    for remote, original in pairs(originalFunctions) do
+        if remote:IsA("RemoteFunction") then
+            remote.InvokeServer = original
+        elseif remote:IsA("RemoteEvent") then
+            remote.FireServer = original
+        end
+    end
+    originalFunctions = {}
+    
+    print("⏹️ Đã dừng ghi macro")
+end
+
+-- Theo dõi chat
+local function ListenToChatForStop()
+    player.Chatted:Connect(function(msg)
+        if msg:lower():match("^stop$") and recording then
+            print("🛑 Phát hiện chat 'stop' → Dừng ghi macro")
+            StopRecording()
+        end
+    end)
+end
+
+-- Ghi macro
 local function StartRecording()
     if recording then return end
     
     macroData = {}
     recording = true
     
-    -- Hook PlaceTower
+    ListenToChatForStop()
+    
     local placeTower = game:GetService("ReplicatedStorage"):FindFirstChild("PlaceTower")
     if placeTower then
         HookFunction(placeTower, function(args)
@@ -103,12 +133,13 @@ local function StartRecording()
                     Rotation = args[4],
                     TowerA1 = tostring(os.time())
                 })
-                print("📝 Đã ghi đặt tháp:", args[2], "| Giá:", cost)
+                if debugMode then
+                    print("📝 Đã ghi đặt tháp:", args[2], "| Giá:", cost)
+                end
             end
         end)
     end
 
-    -- Hook TowerUpgradeRequest
     local upgradeRemote = game:GetService("ReplicatedStorage"):FindFirstChild("TowerUpgradeRequest")
     if upgradeRemote then
         HookFunction(upgradeRemote, function(args)
@@ -124,13 +155,14 @@ local function StartRecording()
                         UpgradePath = args[2],
                         TowerUpgraded = tower:GetPosition().X
                     })
-                    print("📝 Đã ghi nâng cấp | Đường:", args[2], "| Giá:", cost)
+                    if debugMode then
+                        print("📝 Đã ghi nâng cấp | Đường:", args[2], "| Giá:", cost)
+                    end
                 end
             end
         end)
     end
 
-    -- Hook ChangeQueryType (nếu cần)
     local targetRemote = game:GetService("ReplicatedStorage"):FindFirstChild("ChangeQueryType")
     if targetRemote then
         HookFunction(targetRemote, function(args)
@@ -142,7 +174,9 @@ local function StartRecording()
                         TargetWanted = args[2],
                         TargetChangedAt = os.time()
                     })
-                    print("📝 Đã ghi thay đổi mục tiêu")
+                    if debugMode then
+                        print("📝 Đã ghi thay đổi mục tiêu:", args[2])
+                    end
                 end
             end
         end)
@@ -151,28 +185,9 @@ local function StartRecording()
     print("🔴 Bắt đầu ghi macro...")
 end
 
--- Dừng ghi macro
-local function StopRecording()
-    if not recording then return end
-    recording = false
-    SaveMacro()
-    
-    -- Khôi phục original functions
-    for remote, original in pairs(originalFunctions) do
-        if remote:IsA("RemoteFunction") then
-            remote.InvokeServer = original
-        elseif remote:IsA("RemoteEvent") then
-            remote.FireServer = original
-        end
-    end
-    originalFunctions = {}
-    
-    print("⏹️ Đã dừng ghi macro")
-end
-
--- Gán hàm toàn cục
+-- Toàn cục
 getgenv().StartMacroRecording = StartRecording
 getgenv().StopMacroRecording = StopRecording
 
 print("✅ Macro Recorder (TowerClass Version) sẵn sàng")
-print("💡 Sử dụng StartMacroRecording() để bắt đầu")
+print("💡 Gõ StartMacroRecording() để bắt đầu | Chat 'stop' để dừng")
