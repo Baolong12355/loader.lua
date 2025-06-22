@@ -1,4 +1,4 @@
--- Tower Defense Macro Recorder (Auto-Start Version)
+-- Tower Defense Macro Recorder (Phiên bản hoàn chỉnh)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -8,85 +8,99 @@ local player = Players.LocalPlayer
 local macroData = {}
 local recording = false
 
--- Kiểm tra và lấy cấu hình từ getgenv()
+-- Cấu hình
 local config = getgenv().TDX_Config or {}
 local macroName = config["Macro Name"] or "macro_"..os.time()
 
--- Kết nối các RemoteEvent
+-- Kết nối các Remote
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local PlaceTowerRemote = Remotes:WaitForChild("PlaceTower")
 local UpgradeRemote = Remotes:WaitForChild("TowerUpgradeRequest")
 local TargetRemote = Remotes:WaitForChild("ChangeQueryType")
 local SellRemote = Remotes:WaitForChild("SellTower")
 
--- Tải TowerClass
+-- Hàm require an toàn với thời gian chờ
 local function SafeRequire(path, timeout)
     timeout = timeout or 5
-    local t0 = os.clock()
-    while os.clock() - t0 < timeout do
+    local startTime = os.clock()
+    local module
+    
+    while os.clock() - startTime < timeout do
         local success, result = pcall(function()
             return require(path)
         end)
-        if success then return result end
-        task.wait()
+        
+        if success then
+            module = result
+            break
+        end
+        task.wait(0.1)
     end
+    
+    return module
+end
+
+-- Lấy TowerClass
+local TowerClass
+local function LoadTowerClass()
+    local clientFolder = player.PlayerScripts:FindFirstChild("Client")
+    if not clientFolder then return nil end
+
+    local gameClass = clientFolder:FindFirstChild("GameClass")
+    if not gameClass then return nil end
+
+    local towerClassModule = gameClass:FindFirstChild("TowerClass")
+    if not towerClassModule then return nil end
+
+    return SafeRequire(towerClassModule)
+end
+
+TowerClass = LoadTowerClass()
+
+-- Hàm lấy vị trí X của tháp từ model
+local function GetTowerX(tower)
+    if not tower then return nil end
+    
+    -- Ưu tiên lấy từ Character model
+    if tower.Character and tower.Character.GetTorso then
+        local torso = tower.Character:GetTorso()
+        if torso then return torso.Position.X end
+    end
+    
+    -- Fallback: lấy từ phương thức GetPosition nếu có
+    if tower.GetPosition then
+        local pos = tower:GetPosition()
+        return pos and pos.X
+    end
+    
     return nil
 end
 
-local TowerClass = SafeRequire(player.PlayerScripts.Client.GameClass.TowerClass)
-if not TowerClass then warn("Không thể tải TowerClass - Một số tính năng có thể không hoạt động") end
-
--- Lấy vị trí X của tháp từ hash
-local function GetTowerX(hash)
-    if not TowerClass then return nil end
-    local tower = TowerClass.GetTowers()[hash]
-    if not tower then return nil end
-    
-    local success, pos = pcall(function()
-        local model = tower.Character:GetCharacterModel()
-        local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
-        return root and root.Position
-    end)
-    
-    return success and pos and pos.X or nil
-end
-
--- Hàm dừng ghi và lưu file
+-- Hàm lưu macro
 local function SaveMacro()
     if not recording then return end
     recording = false
     
-    -- Đảm bảo thư mục tồn tại
     if not isfolder("tdx/macros") then
         makefolder("tdx")
         makefolder("tdx/macros")
     end
     
-    -- Tạo tên file (đảm bảo có đuôi .json)
-    local fileName = macroName
-    if not fileName:match("%.json$") then
-        fileName = fileName..".json"
-    end
+    local fileName = macroName:match("%.json$") and macroName or macroName..".json"
     local macroPath = "tdx/macros/"..fileName
     
-    -- Lưu file
     writefile(macroPath, HttpService:JSONEncode(macroData))
     print("💾 Đã lưu macro vào:", macroPath)
-    print("Tổng số hành động đã ghi:", #macroData)
-    
-    return macroPath
+    print("Tổng số hành động:", #macroData)
 end
 
 -- Bắt đầu ghi macro
 local function StartRecording()
     macroData = {}
     recording = true
-    print("🔴 Đã tự động bắt đầu ghi macro... (Tên macro: "..macroName..")")
-    print("📢 Cách dừng ghi:")
-    print("1. Gõ 'stop' trong chat")
-    print("2. Thoát game")
-    print("3. Gọi StopMacroRecording() từ console")
-    
+    print("🔴 Bắt đầu ghi macro... (Tên:", macroName..")")
+    print("📢 Gõ 'stop' trong chat để dừng")
+
     -- Kết nối sự kiện đặt tháp
     local placeConnection = PlaceTowerRemote.OnClientEvent:Connect(function(time, towerType, position, rotation)
         if not recording then return end
@@ -107,55 +121,87 @@ local function StartRecording()
     local upgradeConnection = UpgradeRemote.OnClientEvent:Connect(function(hash, path, _)
         if not recording then return end
         
-        local towerX = GetTowerX(hash)
-        if not towerX then return end
+        -- Lấy thông tin tháp từ hash
+        local tower = TowerClass and TowerClass.GetTowers()[hash]
+        local towerX = tower and GetTowerX(tower)
         
-        local entry = {
-            UpgradeCost = player.leaderstats.Cash.Value,
-            UpgradePath = path,
-            TowerUpgraded = towerX
-        }
+        if towerX then
+            local entry = {
+                UpgradeCost = player.leaderstats.Cash.Value,
+                UpgradePath = path,
+                TowerUpgraded = towerX
+            }
+            
+            table.insert(macroData, entry)
+            print("📝 Đã ghi: Nâng cấp tháp tại X = "..towerX)
+        end
+    end)
+    
+    -- Kết nối sự kiện thay đổi target
+    local targetConnection = TargetRemote.OnClientEvent:Connect(function(hash, queryType)
+        if not recording then return end
         
-        table.insert(macroData, entry)
-        print("📝 Đã ghi: Nâng cấp tháp")
+        -- Lấy thông tin tháp từ hash
+        local tower = TowerClass and TowerClass.GetTowers()[hash]
+        local towerX = tower and GetTowerX(tower)
+        
+        if towerX then
+            local entry = {
+                TowerTargetChange = towerX,
+                TargetWanted = queryType,
+                TargetChangedAt = os.time()
+            }
+            
+            table.insert(macroData, entry)
+            print("📝 Đã ghi: Thay đổi target tháp tại X = "..towerX)
+        end
+    end)
+    
+    -- Kết nối sự kiện bán tháp
+    local sellConnection = SellRemote.OnClientEvent:Connect(function(hash)
+        if not recording then return end
+        
+        -- Lấy thông tin tháp từ hash
+        local tower = TowerClass and TowerClass.GetTowers()[hash]
+        local towerX = tower and GetTowerX(tower)
+        
+        if towerX then
+            local entry = {
+                SellTower = towerX,
+                SellTime = os.time()
+            }
+            
+            table.insert(macroData, entry)
+            print("📝 Đã ghi: Bán tháp tại X = "..towerX)
+        end
     end)
     
     -- Kết nối sự kiện chat
     local chatConnection
     if TextChatService then
         chatConnection = TextChatService.OnIncomingMessage:Connect(function(message)
-            if not recording then return end
             if message.TextSource and message.TextSource.UserId == player.UserId then
                 if string.lower(message.Text) == "stop" then
                     SaveMacro()
-                    print("⏹️ Đã dừng ghi macro theo yêu cầu từ chat")
                 end
             end
         end)
     end
     
-    -- Kết nối sự kiện thoát game
-    local leavingConnection = game:GetService("Players").PlayerRemoving:Connect(function(leavingPlayer)
-        if leavingPlayer == player and recording then
-            SaveMacro()
-            print("⏹️ Đã dừng ghi macro do người chơi thoát game")
-        end
-    end)
-    
-    -- Lưu hàm dừng vào global
+    -- Dọn dẹp khi dừng
     getgenv().StopMacroRecording = function()
         SaveMacro()
         placeConnection:Disconnect()
         upgradeConnection:Disconnect()
+        targetConnection:Disconnect()
+        sellConnection:Disconnect()
         if chatConnection then chatConnection:Disconnect() end
-        leavingConnection:Disconnect()
-        print("⏹️ Đã dừng ghi macro theo yêu cầu thủ công")
     end
 end
 
--- Tự động bắt đầu ghi nếu ở chế độ record
+-- Tự động bắt đầu nếu ở chế độ record
 if getgenv().TDX_Config["Macros"] == "record" then
     StartRecording()
 else
-    print("⏩ Macro Recorder đã tải (Không tự động ghi vì không ở chế độ record)")
-end
+    print("✅ Macro Recorder sẵn sàng (Gõ StartRecording() để bắt đầu ghi)")
+endend
