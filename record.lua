@@ -11,7 +11,7 @@ local config = {
     ["Save Path"] = "tdx/macros/"
 }
 
--- 🧠 Lấy tower từ workspace
+-- 🔍 Tìm tower từ workspace theo UniqueID
 local function FindTowerById(id)
     local towers = workspace:FindFirstChild("Towers")
     if not towers then return nil end
@@ -24,7 +24,7 @@ local function FindTowerById(id)
     return nil
 end
 
--- 💰 Lấy giá đặt & nâng cấp tháp
+-- 💰 Lấy thông tin giá đặt / nâng cấp tháp
 local function GetTowerConfig()
     local TowerClass
     pcall(function()
@@ -49,13 +49,13 @@ local function GetUpgradeCost(towerType, path, level)
     return (upgrade and upgrade[level] and upgrade[level].Cost) or 0
 end
 
--- 💾 Lưu macro
+-- 💾 Lưu file
 local function SaveMacro()
     if not isfolder("tdx") then makefolder("tdx") end
     if not isfolder("tdx/macros") then makefolder("tdx/macros") end
-    local filePath = config["Save Path"] .. config["Macro Name"] .. ".json"
-    writefile(filePath, HttpService:JSONEncode(macroData))
-    if debugMode then print("💾 Đã lưu vào:", filePath) end
+    local path = config["Save Path"] .. config["Macro Name"] .. ".json"
+    writefile(path, HttpService:JSONEncode(macroData))
+    if debugMode then print("💾 Đã lưu vào:", path) end
 end
 
 -- 🛑 Dừng ghi
@@ -66,19 +66,19 @@ local function StopRecording()
     print("⏹️ Dừng ghi macro.")
 end
 
--- Chat "stop"
+-- 🗨️ Nghe lệnh dừng
 player.Chatted:Connect(function(msg)
     if msg:lower() == "stop" and recording then
         StopRecording()
     end
 end)
 
--- ✅ Hook chính xác (không gián đoạn)
-local oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+-- ✅ Hook __namecall an toàn
+hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
     local method = getnamecallmethod()
     local args = { ... }
 
-    if not checkcaller() and recording and (method == "FireServer" or method == "InvokeServer") then
+    if recording and not checkcaller() and (method == "FireServer" or method == "InvokeServer") then
         local name = self.Name
 
         if name == "PlaceTower" then
@@ -113,7 +113,7 @@ local oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                     Timestamp = os.time()
                 })
 
-                if debugMode then print("⬆️ Nâng:", towerType, "| Path:", path, "| Cost:", cost) end
+                if debugMode then print("⬆️ Nâng:", towerType, "| Path:", path, "| Level:", level + 1, "| Cost:", cost) end
             end
 
         elseif name == "ChangeQueryType" then
@@ -125,7 +125,7 @@ local oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                     TargetWanted = args[2],
                     Timestamp = os.time()
                 })
-                if debugMode then print("🎯 Target:", args[2]) end
+                if debugMode then print("🎯 Target ->", args[2]) end
             end
 
         elseif name == "SellTowerRequest" then
@@ -136,13 +136,13 @@ local oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                     TowerSold = tower.Position.X,
                     Timestamp = os.time()
                 })
-                if debugMode then print("💸 Sell:", tower.Position.X) end
+                if debugMode then print("💸 Sell ->", tower.Position.X) end
             end
         end
     end
 
-    return oldNamecall(self, table.unpack(args))
-end)
+    return getrawmetatable(game).__namecall(self, table.unpack(args))
+end))
 
 -- ▶️ Bắt đầu ghi
 getgenv().StartMacroRecording = function()
@@ -153,4 +153,4 @@ getgenv().StartMacroRecording = function()
 end
 
 getgenv().StopMacroRecording = StopRecording
-print("✅ Macro Recorder sẵn sàng. Gõ StartMacroRecording() để bắt đầu.")
+print("✅ Macro Recorder (safe version) đã sẵn sàng.")
