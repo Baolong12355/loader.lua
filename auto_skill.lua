@@ -36,7 +36,7 @@ local skipTowerTypes = {
     ["Sentry"] = true,
 
     -- Tower chỉ có passive skill
-    ["EDJ"] = true,
+    ["EDJ"] = false,
     ["Accelerator"] = true,
     ["Engineer"] = true
 }
