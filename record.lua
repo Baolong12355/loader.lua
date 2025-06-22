@@ -1,240 +1,291 @@
+-- 📜 SCR Recorder Chính Xác - Ronix Ready
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-
--- Ensure LocalPlayer exists
 local LocalPlayer = Players.LocalPlayer
-while not LocalPlayer do
-    task.wait()
-    LocalPlayer = Players.LocalPlayer
+
+-- Danh sách remote cần hook (đúng tên trong game)
+local TARGET_REMOTES = {
+    "PlaceTower",           -- RemoteFunction
+    "TowerUpgradeRequest",  -- RemoteEvent
+    "SellTower",            -- RemoteEvent
+    "ChangeQueryType"       -- RemoteEvent
+}
+
+-- Debug mode (hiển thị chi tiết trong console)
+local DEBUG_MODE = true
+local function debugPrint(...)
+    if DEBUG_MODE then
+        print("[DEBUG]", ...)
+    end
 end
 
--- Safely load TowerClass
+-- Kiểm tra dịch vụ cơ bản
+if not ReplicatedStorage or not LocalPlayer then
+    error("❌ Không thể khởi tạo dịch vụ cần thiết")
+end
+
+-- Tải TowerClass an toàn
 local TowerClass
-local ok, err = pcall(function()
-    TowerClass = require(LocalPlayer.PlayerScripts.Client.GameClass.TowerClass)
+local success, err = pcall(function()
+    TowerClass = require(LocalPlayer.PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
 end)
-if not ok then
-    warn("Failed to load TowerClass:", err)
-    return
+if not success then
+    warn("⚠️ Không thể tải TowerClass: "..tostring(err))
 end
 
--- Verify Remotes folder exists
-local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
-if not Remotes then
-    warn("Remotes folder not found in ReplicatedStorage")
-    return
-end
-
+-- Cấu hình lưu dữ liệu
 local recorded = {}
-local towerPrices = {}
+local SAVE_PATH = "tdx/macros/recorded.json"
+local dirty = false
 
-local SAVE_FOLDER = "tdx/macros"
-local SAVE_NAME = "recorded.json"
-local SAVE_PATH = SAVE_FOLDER .. "/" .. SAVE_NAME
-
--- Initialize folder and file
-if type(makefolder) == "function" and not isfolder(SAVE_FOLDER) then
-    makefolder(SAVE_FOLDER)
+-- Tạo thư mục nếu chưa tồn tại
+if not isfolder("tdx/macros") then
+    makefolder("tdx/macros")
 end
 
-if type(writefile) == "function" and not isfile(SAVE_PATH) then
-    writefile(SAVE_PATH, "[]")
-end
-
--- Load existing data
-if type(readfile) == "function" and isfile(SAVE_PATH) then
-    local ok, data = pcall(function()
-        return HttpService:JSONDecode(readfile(SAVE_PATH))
+-- 💾 Hàm lưu an toàn
+local function save()
+    if #recorded == 0 then return end
+    local success, err = pcall(function()
+        local json = HttpService:JSONEncode(recorded)
+        writefile(SAVE_PATH, json)
+        debugPrint("💾 Đã lưu dữ liệu")
     end)
-    if ok and type(data) == "table" then
-        recorded = data
+    if not success then
+        warn("❌ Lỗi khi lưu: "..tostring(err))
     end
 end
 
--- Add new record function
-local function add(entry)
-    if not entry or type(entry) ~= "table" then return end
-    
-    local ok, result = pcall(function()
-        table.insert(recorded, entry)
-        print("[RECORD]", HttpService:JSONEncode(entry))
-    end)
-    if not ok then
-        warn("[RECORD ERROR]", result)
+-- Tự động lưu mỗi 5 giây
+task.spawn(function()
+    while true do
+        task.wait(5)
+        if dirty then
+            save()
+            dirty = false
+        end
     end
+end)
+
+local function addRecord(entry)
+    if not entry then return end
+    table.insert(recorded, entry)
+    dirty = true
+    debugPrint("📝 Đã ghi:", entry._type or "unknown")
 end
 
--- Get remaining time function
-local function getTimeLeft()
-    local ok, result = pcall(function()
-        local gui = LocalPlayer:WaitForChild("PlayerGui")
-        local interface = gui:WaitForChild("Interface")
-        local gameInfoBar = interface:WaitForChild("GameInfoBar")
-        local timeLeft = gameInfoBar:WaitForChild("TimeLeft")
-        local text = timeLeft:WaitForChild("TimeLeftText").Text
-        
-        local minutes, seconds = text:match("^(%d+):(%d+)$")
-        if not minutes or not seconds then return 0 end
-        return (tonumber(minutes) or 0) * 60 + (tonumber(seconds) or 0)
-    end)
-    return ok and result or 0
-end
-
--- Get tower X position from hash
+-- ✅ Hàm lấy vị trí tower chính xác
 local function GetTowerXFromHash(hash)
-    local tower = TowerClass.GetTower(hash)
-    if not tower or not tower.Character then return nil end
+    if not TowerClass then return nil end
     
-    local model = tower.Character:GetCharacterModel()
-    if not model then return nil end
+    local tower
+    pcall(function()
+        tower = TowerClass:GetTower(hash)
+        if not tower then
+            debugPrint("⚠️ Không tìm thấy tower với hash:", hash)
+            return
+        end
+        
+        local model = tower.Character and tower.Character:GetCharacterModel()
+        if not model then
+            debugPrint("⚠️ Tower không có model")
+            return
+        end
+        
+        local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+        if not root then
+            debugPrint("⚠️ Không tìm thấy root part")
+            return
+        end
+        
+        return tonumber(string.format("%.15f", root.Position.X))
+    end)
     
-    local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
-    return root and tonumber(string.format("%.15f", root.Position.X))
+    return nil
 end
 
--- Load tower prices
-local function loadTowerPrices()
-    local ok, gui = pcall(function()
-        return LocalPlayer:WaitForChild("PlayerGui")
-    end)
-    if not ok then return end
+-- 🔍 Tìm remote trong ReplicatedStorage.Remotes
+local function FindTargetRemote(remoteName)
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    if not remotes then
+        debugPrint("❌ Không tìm thấy thư mục Remotes")
+        return nil
+    end
     
-    local ok, bar = pcall(function()
-        return gui:WaitForChild("Interface"):WaitForChild("BottomBar"):WaitForChild("TowersBar")
-    end)
-    if not ok then return end
+    for _, remote in ipairs(remotes:GetDescendants()) do
+        if remote.Name == remoteName and (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction")) then
+            debugPrint("✅ Đã tìm thấy remote:", remoteName)
+            return remote
+        end
+    end
     
-    for _, tower in ipairs(bar:GetChildren()) do
-        if tower:IsA("ImageButton") and tower:FindFirstChild("CostFrame") then
-            local text = tower.CostFrame:FindFirstChild("CostText")
-            if text then
-                local price = tonumber(text.Text:match("%d+"))
-                if price then
-                    towerPrices[tower.Name] = price
+    debugPrint("⚠️ Không tìm thấy remote:", remoteName)
+    return nil
+end
+
+-- 🎯 Hook từng remote cụ thể
+local function HookSpecificRemote(remote)
+    if not remote then return end
+    
+    local remoteName = remote.Name
+    debugPrint("🛠️ Đang hook remote:", remoteName)
+    
+    if remote:IsA("RemoteFunction") and remoteName == "PlaceTower" then
+        local oldInvoke = remote.InvokeServer
+        remote.InvokeServer = newcclosure(function(self, ...)
+            local args = {...}
+            if #args >= 4 then
+                local a1, towerName, pos, rot = args[1], args[2], args[3], args[4]
+                if typeof(pos) == "Vector3" then
+                    addRecord({
+                        _type = "PlaceTower",
+                        TowerA1 = tostring(a1),
+                        TowerPlaced = towerName,
+                        TowerVector = string.format("%.15f, %.15f, %.15f", pos.X, pos.Y, pos.Z),
+                        Rotation = rot,
+                        Timestamp = os.time()
+                    })
                 end
             end
-        end
+            return oldInvoke(self, ...)
+        end)
+        
+    elseif remote:IsA("RemoteEvent") then
+        local oldFire = remote.FireServer
+        remote.FireServer = newcclosure(function(self, ...)
+            local args = {...}
+            
+            -- Tower Upgrade
+            if remoteName == "TowerUpgradeRequest" and #args >= 2 then
+                local hash, path = args[1], args[2]
+                local x = GetTowerXFromHash(hash)
+                if x then
+                    addRecord({
+                        _type = "TowerUpgrade",
+                        TowerX = x,
+                        UpgradePath = path,
+                        Timestamp = os.time()
+                    })
+                end
+            
+            -- Sell Tower
+            elseif remoteName == "SellTower" and #args >= 1 then
+                local hash = args[1]
+                local x = GetTowerXFromHash(hash)
+                if x then
+                    addRecord({
+                        _type = "SellTower",
+                        TowerX = x,
+                        Timestamp = os.time()
+                    })
+                end
+            
+            -- Change Target
+            elseif remoteName == "ChangeQueryType" and #args >= 2 then
+                local hash, target = args[1], args[2]
+                local x = GetTowerXFromHash(hash)
+                if x then
+                    addRecord({
+                        _type = "ChangeTarget",
+                        TowerX = x,
+                        TargetType = target,
+                        Timestamp = os.time()
+                    })
+                end
+            end
+            
+            return oldFire(self, ...)
+        end)
+    end
+    
+    debugPrint("✅ Đã hook thành công:", remoteName)
+end
+
+-- Khởi tạo hook cho tất cả remote cần thiết
+for _, remoteName in ipairs(TARGET_REMOTES) do
+    local remote = FindTargetRemote(remoteName)
+    if remote then
+        HookSpecificRemote(remote)
+    else
+        warn("⚠️ Không thể hook remote: "..remoteName)
     end
 end
 
--- Initialize tower prices
-loadTowerPrices()
+-- Hook bổ sung bằng __namecall (phương án dự phòng)
+local mt = getrawmetatable(game)
+if mt then
+    local originalNamecall = mt.__namecall
+    setreadonly(mt, false)
 
--- Auto-save data
-if type(writefile) == "function" then
-    task.spawn(function()
-        while task.wait(5) do
-            local ok, json = pcall(HttpService.JSONEncode, HttpService, recorded)
-            if ok and type(json) == "string" then
-                pcall(function()
-                    writefile(SAVE_PATH, json)
-                end)
-            end
-        end
-    end)
-end
+    mt.__namecall = newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        local remoteName = self.Name
 
--- Hook PlaceTower remote
-local rawPlace = Remotes:FindFirstChild("PlaceTower")
-if rawPlace then
-    Remotes.PlaceTower = setmetatable({}, {
-        __index = function(_, key)
-            if key == "InvokeServer" then
-                return function(_, a1, towerName, pos, rotation)
-                    local vectorString = "0, 0, 0"
-                    pcall(function()
-                        vectorString = string.format("%.15f, %.15f, %.15f", pos.X, pos.Y, pos.Z)
-                    end)
-                    
-                    add({
-                        type = "PlaceTower",
-                        a1 = tostring(a1),
-                        tower = towerName,
-                        position = vectorString,
-                        rotation = rotation,
-                        cost = towerPrices[towerName] or 0,
-                        time = getTimeLeft()
+        if not checkcaller() and table.find(TARGET_REMOTES, remoteName) then
+            -- Place Tower (RemoteFunction)
+            if method == "InvokeServer" and remoteName == "PlaceTower" and #args >= 4 then
+                local a1, towerName, pos, rot = args[1], args[2], args[3], args[4]
+                if typeof(pos) == "Vector3" then
+                    addRecord({
+                        _type = "PlaceTower_Namecall",
+                        TowerA1 = tostring(a1),
+                        TowerPlaced = towerName,
+                        TowerVector = string.format("%.15f, %.15f, %.15f", pos.X, pos.Y, pos.Z),
+                        Rotation = rot,
+                        Timestamp = os.time()
                     })
-                    
-                    return rawPlace:InvokeServer(a1, towerName, pos, rotation)
                 end
-            end
-            return rawPlace[key]
-        end
-    })
-end
-
--- Hook SellTower remote
-local rawSell = Remotes:FindFirstChild("SellTower")
-if rawSell then
-    Remotes.SellTower = setmetatable({}, {
-        __index = function(_, key)
-            if key == "FireServer" then
-                return function(_, hash)
+            
+            -- Các RemoteEvents khác
+            elseif method == "FireServer" then
+                -- Tower Upgrade
+                if remoteName == "TowerUpgradeRequest" and #args >= 2 then
+                    local hash, path = args[1], args[2]
                     local x = GetTowerXFromHash(hash)
                     if x then
-                        add({
-                            type = "SellTower",
-                            positionX = x,
-                            time = getTimeLeft()
+                        addRecord({
+                            _type = "TowerUpgrade_Namecall",
+                            TowerX = x,
+                            UpgradePath = path,
+                            Timestamp = os.time()
                         })
                     end
-                    return rawSell:FireServer(hash)
-                end
-            end
-            return rawSell[key]
-        end
-    })
-end
-
--- Hook UpgradeTower remote
-local rawUpgrade = Remotes:FindFirstChild("TowerUpgradeRequest")
-if rawUpgrade then
-    Remotes.TowerUpgradeRequest = setmetatable({}, {
-        __index = function(_, key)
-            if key == "FireServer" then
-                return function(_, hash, path, level)
+                
+                -- Sell Tower
+                elseif remoteName == "SellTower" and #args >= 1 then
+                    local hash = args[1]
                     local x = GetTowerXFromHash(hash)
                     if x then
-                        add({
-                            type = "UpgradeTower",
-                            positionX = x,
-                            path = path,
-                            level = level,
-                            time = getTimeLeft()
+                        addRecord({
+                            _type = "SellTower_Namecall",
+                            TowerX = x,
+                            Timestamp = os.time()
                         })
                     end
-                    return rawUpgrade:FireServer(hash, path, level)
-                end
-            end
-            return rawUpgrade[key]
-        end
-    })
-end
-
--- Hook ChangeTarget remote
-local rawTarget = Remotes:FindFirstChild("ChangeQueryType")
-if rawTarget then
-    Remotes.ChangeQueryType = setmetatable({}, {
-        __index = function(_, key)
-            if key == "FireServer" then
-                return function(_, hash, targetType)
+                
+                -- Change Target
+                elseif remoteName == "ChangeQueryType" and #args >= 2 then
+                    local hash, target = args[1], args[2]
                     local x = GetTowerXFromHash(hash)
                     if x then
-                        add({
-                            type = "ChangeTarget",
-                            positionX = x,
-                            target = targetType,
-                            time = getTimeLeft()
+                        addRecord({
+                            _type = "ChangeTarget_Namecall",
+                            TowerX = x,
+                            TargetType = target,
+                            Timestamp = os.time()
                         })
                     end
-                    return rawTarget:FireServer(hash, targetType)
                 end
             end
-            return rawTarget[key]
         end
-    })
+
+        return originalNamecall(self, ...)
+    end)
+
+    setreadonly(mt, true)
+    debugPrint("✅ Đã hook __namecall backup")
 end
 
-print("✅ Macro Recorder successfully initialized!")
+print("✅ SCR Recorder Chính Xác đã sẵn sàng! Chỉ hook các remote:", table.concat(TARGET_REMOTES, ", "))
