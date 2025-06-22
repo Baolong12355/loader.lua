@@ -2,55 +2,53 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 
--- Load TowerClass
-local TowerClass
-local success, result = pcall(function()
-    return require(player.PlayerScripts.Client.GameClass.TowerClass)
-end)
-if success then
-    TowerClass = result
-else
-    warn("⚠️ Không thể load TowerClass.")
-end
-
--- Cấu hình
 local debugMode = true
 local recording = false
 local macroData = {}
 local oldNamecall
+
 local config = {
     ["Macro Name"] = "macro_" .. os.time(),
     ["Save Path"] = "tdx/macros/"
 }
 
--- 💰 Tính giá
-local function GetTowerCost(towerType, path, level)
-    if not TowerClass then return 0 end
-    local towerConfig
-    pcall(function()
-        towerConfig = TowerClass.GetTowerConfig(towerType)
-    end)
-    if not towerConfig then return 0 end
-    if path and level then
-        local upgradePath = towerConfig.UpgradePathData[path]
-        if upgradePath and upgradePath[level] then
-            return upgradePath[level].Cost or 0
+-- 🧠 Lấy tower từ workspace theo ID
+local function FindTowerById(id)
+    local towers = workspace:FindFirstChild("Towers")
+    if not towers then return nil end
+
+    for _, tower in ipairs(towers:GetChildren()) do
+        if tower:GetAttribute("UniqueID") == id then
+            return tower
         end
-    else
-        return towerConfig.UpgradePathData.BaseLevelData.Cost or 0
     end
-    return 0
+    return nil
 end
 
--- 📈 Lấy level path an toàn
-local function GetCurrentPathLevelSafe(tower, path)
-    if tower and tower.LevelHandler then
-        local handler = tower.LevelHandler
-        if typeof(handler.GetPathLevel) == "function" then
-            return handler:GetPathLevel(path)
-        elseif typeof(handler[path]) == "number" then
-            return handler[path]
-        end
+-- 💰 Lấy giá đặt tháp từ TowerConfig
+local function GetPlaceCost(towerType)
+    local TowerClass
+    pcall(function()
+        TowerClass = require(player.PlayerScripts.Client.GameClass.TowerClass)
+    end)
+    if not TowerClass then return 0 end
+
+    local towerConfig = TowerClass.GetTowerConfig(towerType)
+    return towerConfig and towerConfig.UpgradePathData.BaseLevelData.Cost or 0
+end
+
+-- 💰 Lấy giá nâng cấp
+local function GetUpgradeCost(towerType, path, level)
+    local TowerClass
+    pcall(function()
+        TowerClass = require(player.PlayerScripts.Client.GameClass.TowerClass)
+    end)
+    if not TowerClass then return 0 end
+
+    local towerConfig = TowerClass.GetTowerConfig(towerType)
+    local upgradePath = towerConfig and towerConfig.UpgradePathData[path]
+    if upgradePath and upgradePath[level] then
+        return upgradePath[level].Cost or 0
     end
     return 0
 end
@@ -76,17 +74,17 @@ local function StopRecording()
     end
 end
 
--- 🛑 Chat "stop"
+-- Chat 'stop'
 local function ListenForStopCommand()
     player.Chatted:Connect(function(msg)
         if msg:lower() == "stop" and recording then
-            print("🛑 Phát hiện 'stop', dừng ghi.")
+            print("🛑 Dừng ghi macro (chat 'stop')")
             StopRecording()
         end
     end)
 end
 
--- 🧲 Hook namecall
+-- Hook tất cả remote
 local function HookRemoteCalls()
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         local args = {...}
@@ -94,11 +92,12 @@ local function HookRemoteCalls()
         if not checkcaller() and recording and (method == "FireServer" or method == "InvokeServer") then
             local name = self.Name
 
-            -- Đặt tháp
+            -- 📌 Ghi đặt tháp
             if name == "PlaceTower" then
                 local towerType = args[2]
                 local vec = args[3]
-                local cost = GetTowerCost(towerType)
+                local cost = GetPlaceCost(towerType)
+
                 table.insert(macroData, {
                     Action = "Place",
                     TowerPlaced = towerType,
@@ -107,52 +106,56 @@ local function HookRemoteCalls()
                     Rotation = args[4],
                     Timestamp = os.time()
                 })
+
                 if debugMode then print("🏗️ Đặt tháp:", towerType, "| Cost:", cost) end
 
-            -- Nâng cấp
-            elseif name == "TowerUpgradeRequest" and TowerClass then
-                local tower = TowerClass.GetTowers()[args[1]]
+            -- ⬆️ Ghi nâng cấp
+            elseif name == "TowerUpgradeRequest" then
+                local tower = FindTowerById(args[1])
                 if tower then
                     local path = args[2]
-                    local towerType = tower.Type
-                    local level = GetCurrentPathLevelSafe(tower, path)
-                    local cost = GetTowerCost(towerType, path, level + 1)
+                    local towerType = tower:GetAttribute("TowerType") or "Unknown"
+                    local level = tonumber(tower:GetAttribute("Upgrade_" .. path)) or 0
+                    local cost = GetUpgradeCost(towerType, path, level + 1)
+
                     table.insert(macroData, {
                         Action = "Upgrade",
                         UpgradePath = path,
                         UpgradeCost = cost,
-                        TowerUpgraded = tower:GetPosition().X,
+                        TowerUpgraded = tower.Position.X,
                         Timestamp = os.time()
                     })
+
                     if debugMode then print("⬆️ Nâng cấp:", towerType, "| Path:", path, "| Lvl:", level + 1, "| Cost:", cost) end
                 end
 
-            -- Thay đổi mục tiêu
-            elseif name == "ChangeQueryType" and TowerClass then
-                local tower = TowerClass.GetTowers()[args[1]]
+            -- 🎯 Ghi thay đổi mục tiêu
+            elseif name == "ChangeQueryType" then
+                local tower = FindTowerById(args[1])
                 if tower then
                     table.insert(macroData, {
                         Action = "TargetChange",
-                        TowerTargetChange = tower:GetPosition().X,
+                        TowerTargetChange = tower.Position.X,
                         TargetWanted = args[2],
                         Timestamp = os.time()
                     })
-                    if debugMode then print("🎯 Thay đổi mục tiêu:", args[2]) end
+                    if debugMode then print("🎯 Đổi mục tiêu:", args[2]) end
                 end
 
-            -- Bán tháp
-            elseif name == "SellTowerRequest" and TowerClass then
-                local tower = TowerClass.GetTowers()[args[1]]
+            -- 💸 Ghi bán tháp
+            elseif name == "SellTowerRequest" then
+                local tower = FindTowerById(args[1])
                 if tower then
                     table.insert(macroData, {
                         Action = "Sell",
-                        TowerSold = tower:GetPosition().X,
+                        TowerSold = tower.Position.X,
                         Timestamp = os.time()
                     })
-                    if debugMode then print("💸 Bán tháp tại:", tower:GetPosition().X) end
+                    if debugMode then print("💸 Bán tháp tại:", tower.Position.X) end
                 end
             end
         end
+
         return oldNamecall(self, table.unpack(args))
     end)
 end
@@ -164,11 +167,11 @@ local function StartRecording()
     recording = true
     HookRemoteCalls()
     ListenForStopCommand()
-    print("🔴 Bắt đầu ghi macro... Gõ 'stop' để dừng.")
+    print("🔴 Ghi macro bắt đầu. Chat 'stop' để dừng.")
 end
 
--- 🌍 Gán global
+-- 🌐 Toàn cục
 getgenv().StartMacroRecording = StartRecording
 getgenv().StopMacroRecording = StopRecording
 
-print("✅ Macro Recorder (full version) sẵn sàng")
+print("✅ Macro Recorder (full version) đã sẵn sàng.")
