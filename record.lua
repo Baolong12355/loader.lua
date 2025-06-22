@@ -1,4 +1,4 @@
--- 📜 TDX Macro Recorder (Executor + Chat Toggle + ooooo.json Format)
+-- 📜 TDX Macro Recorder (Executor + /record on|off + ooooo.json Format)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -6,7 +6,7 @@ local LocalPlayer = Players.LocalPlayer
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local TowerClass = require(LocalPlayer.PlayerScripts.Client.GameClass.TowerClass)
 
--- ⚙️ Cấu hình
+-- ⚙️ Cấu hình lưu file
 local SAVE_FOLDER = "tdx/macros"
 local MACRO_NAME = getgenv().TDX_Config and getgenv().TDX_Config["Macro Name"] or "recorded"
 local SAVE_PATH = SAVE_FOLDER .. "/" .. MACRO_NAME .. ".json"
@@ -16,7 +16,6 @@ getgenv().TDX_RecordEnabled = true
 local recorded = {}
 local towerData = {}
 
--- Tạo thư mục nếu chưa có
 if not isfolder(SAVE_FOLDER) then makefolder(SAVE_FOLDER) end
 
 local function add(entry)
@@ -25,7 +24,7 @@ local function add(entry)
 	end
 end
 
--- Tự động lưu định kỳ
+-- Tự động lưu mỗi 5s
 task.spawn(function()
 	while true do
 		task.wait(5)
@@ -130,7 +129,7 @@ Remotes.SellTower.OnClientEvent:Connect(function(hash)
 	add({ SellTower = x })
 end)
 
--- 💬 Chat toggle: /record on | /record off
+-- 💬 Chat command: /record on | /record off
 local function handleChatCommand(msg)
 	local args = string.split(msg:lower(), " ")
 	if args[1] == "/record" then
@@ -144,26 +143,25 @@ local function handleChatCommand(msg)
 	end
 end
 
--- 📦 Tự phát hiện hệ thống chat
+-- 🔁 Chat system compatibility (TextChatService mới + chat cũ)
 local function setupChatCommand()
-	local success, rbxChannel = pcall(function()
-		return game:GetService("TextChatService").TextChannels.RBXGeneral
-	end)
+	local TextChatService = game:GetService("TextChatService")
+	local channel = TextChatService:FindFirstChild("TextChannels") and TextChatService.TextChannels:FindFirstChild("RBXGeneral")
 
-	if success and rbxChannel then
-		-- Chat mới
-		rbxChannel.OnIncomingMessage = function(message)
-			if message.TextSource and message.TextSource.UserId == Players.LocalPlayer.UserId then
+	if channel then
+		channel.OnIncomingMessage = function(message)
+			local source = message.TextSource
+			if source and source.UserId == Players.LocalPlayer.UserId then
 				handleChatCommand(message.Text)
 			end
 		end
 	else
-		-- Chat cũ
-		Players.LocalPlayer.Chatted:Connect(handleChatCommand)
+		-- fallback chat cũ
+		LocalPlayer.Chatted:Connect(handleChatCommand)
 	end
 end
 
 setupChatCommand()
 
-print("🎥 [TDX Macro Recorder] Đã sẵn sàng! Sử dụng: /record on | /record off")
-print("📁 Lưu macro tại: " .. SAVE_PATH)
+print("🎥 [TDX Macro Recorder] Sẵn sàng! Gõ /record on hoặc /record off")
+print("📁 Macro sẽ được lưu vào: " .. SAVE_PATH)
