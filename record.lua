@@ -1,156 +1,125 @@
+-- 📜 TDX Macro Recorder - Đúng định dạng ooooo.json
 local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-local player = Players.LocalPlayer
+local LocalPlayer = Players.LocalPlayer
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local TowerClass = require(LocalPlayer.PlayerScripts.Client.GameClass.TowerClass)
 
-local debugMode = true
-local recording = false
-local macroData = {}
+local SAVE_FOLDER = "tdx/macros"
+local MACRO_NAME = getgenv().TDX_Config and getgenv().TDX_Config["Macro Name"] or "recorded"
+local SAVE_PATH = SAVE_FOLDER .. "/" .. MACRO_NAME .. ".json"
 
-local config = {
-    ["Macro Name"] = "macro_" .. os.time(),
-    ["Save Path"] = "tdx/macros/"
-}
+local recorded = {}
+local towerData = {}
 
--- 🔍 Tìm tower từ workspace theo UniqueID
-local function FindTowerById(id)
-    local towers = workspace:FindFirstChild("Towers")
-    if not towers then return nil end
+if not isfolder(SAVE_FOLDER) then makefolder(SAVE_FOLDER) end
+local function add(entry) table.insert(recorded, entry) end
 
-    for _, tower in ipairs(towers:GetChildren()) do
-        if tower:GetAttribute("UniqueID") == id then
-            return tower
-        end
-    end
-    return nil
-end
-
--- 💰 Lấy thông tin giá đặt / nâng cấp tháp
-local function GetTowerConfig()
-    local TowerClass
-    pcall(function()
-        TowerClass = require(player.PlayerScripts.Client.GameClass.TowerClass)
-    end)
-    return TowerClass
-end
-
-local function GetPlaceCost(towerType)
-    local towerClass = GetTowerConfig()
-    if not towerClass then return 0 end
-    local conf = towerClass.GetTowerConfig(towerType)
-    return conf and conf.UpgradePathData.BaseLevelData.Cost or 0
-end
-
-local function GetUpgradeCost(towerType, path, level)
-    local towerClass = GetTowerConfig()
-    if not towerClass then return 0 end
-    local conf = towerClass.GetTowerConfig(towerType)
-    if not conf then return 0 end
-    local upgrade = conf.UpgradePathData[path]
-    return (upgrade and upgrade[level] and upgrade[level].Cost) or 0
-end
-
--- 💾 Lưu file
-local function SaveMacro()
-    if not isfolder("tdx") then makefolder("tdx") end
-    if not isfolder("tdx/macros") then makefolder("tdx/macros") end
-    local path = config["Save Path"] .. config["Macro Name"] .. ".json"
-    writefile(path, HttpService:JSONEncode(macroData))
-    if debugMode then print("💾 Đã lưu vào:", path) end
-end
-
--- 🛑 Dừng ghi
-local function StopRecording()
-    if not recording then return end
-    recording = false
-    SaveMacro()
-    print("⏹️ Dừng ghi macro.")
-end
-
--- 🗨️ Nghe lệnh dừng
-player.Chatted:Connect(function(msg)
-    if msg:lower() == "stop" and recording then
-        StopRecording()
-    end
+task.spawn(function()
+	while true do
+		task.wait(5)
+		pcall(function()
+			writefile(SAVE_PATH, HttpService:JSONEncode(recorded))
+		end)
+	end
 end)
 
--- ✅ Hook __namecall an toàn
-hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-    local method = getnamecallmethod()
-    local args = { ... }
+local TargetMap = {
+	First = 0, Last = 1, Strongest = 2, Weakest = 3, Closest = 4, Farthest = 5
+}
 
-    if recording and not checkcaller() and (method == "FireServer" or method == "InvokeServer") then
-        local name = self.Name
+-- 📌 Đặt tower
+Remotes.PlaceTower.OnClientEvent:Connect(function(_, towerType, pos, rotation)
+	local config = require(ReplicatedStorage:WaitForChild("TDX_Shared"):WaitForChild("Common"):WaitForChild("ResourceManager")).GetTowerConfig(towerType)
+	local cost = config and config.UpgradePathData.BaseLevelData.Cost or 0
+	local vec = string.format("%.15f, %.15f, %.15f", pos.X, pos.Y, pos.Z)
+	local timeKey = tostring(tick())
 
-        if name == "PlaceTower" then
-            local towerType = args[2]
-            local vec = args[3]
-            local cost = GetPlaceCost(towerType)
+	add({
+		TowerPlaced = towerType,
+		TowerVector = vec,
+		Rotation = rotation,
+		TowerPlaceCost = cost,
+		TowerA1 = timeKey
+	})
 
-            table.insert(macroData, {
-                Action = "Place",
-                TowerPlaced = towerType,
-                TowerPlaceCost = cost,
-                TowerVector = string.format("%.5f, %.5f, %.5f", vec.X, vec.Y, vec.Z),
-                Rotation = args[4],
-                Timestamp = os.time()
-            })
+	task.delay(0.2, function()
+		for hash, tower in pairs(TowerClass.GetTowers()) do
+			local model = tower.Character and tower.Character:GetCharacterModel()
+			local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
+			if root and (root.Position - pos).Magnitude < 0.1 then
+				towerData[hash] = {
+					path1Level = tower.LevelHandler:GetLevelOnPath(1),
+					path2Level = tower.LevelHandler:GetLevelOnPath(2)
+				}
+			end
+		end
+	end)
+end)
 
-            if debugMode then print("🏗️ Đặt:", towerType, "| Cost:", cost) end
+-- 🔼 Nâng cấp
+Remotes.TowerUpgradeRequest.OnClientEvent:Connect(function(hash, path, _)
+	local tower = TowerClass.GetTower(hash)
+	if not tower then return end
 
-        elseif name == "TowerUpgradeRequest" then
-            local tower = FindTowerById(args[1])
-            if tower then
-                local path = args[2]
-                local towerType = tower:GetAttribute("TowerType") or "Unknown"
-                local level = tonumber(tower:GetAttribute("Upgrade_" .. path)) or 0
-                local cost = GetUpgradeCost(towerType, path, level + 1)
+	local model = tower.Character:GetCharacterModel()
+	local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
+	if not root then return end
 
-                table.insert(macroData, {
-                    Action = "Upgrade",
-                    UpgradePath = path,
-                    UpgradeCost = cost,
-                    TowerUpgraded = tower.Position.X,
-                    Timestamp = os.time()
-                })
+	local x = tonumber(string.format("%.15f", root.Position.X))
+	local new1 = tower.LevelHandler:GetLevelOnPath(1)
+	local new2 = tower.LevelHandler:GetLevelOnPath(2)
+	local upgradedPath = path
 
-                if debugMode then print("⬆️ Nâng:", towerType, "| Path:", path, "| Level:", level + 1, "| Cost:", cost) end
-            end
+	local old = towerData[hash]
+	if old then
+		if new1 > old.path1Level then upgradedPath = 1
+		elseif new2 > old.path2Level then upgradedPath = 2 end
+	end
 
-        elseif name == "ChangeQueryType" then
-            local tower = FindTowerById(args[1])
-            if tower then
-                table.insert(macroData, {
-                    Action = "TargetChange",
-                    TowerTargetChange = tower.Position.X,
-                    TargetWanted = args[2],
-                    Timestamp = os.time()
-                })
-                if debugMode then print("🎯 Target ->", args[2]) end
-            end
+	towerData[hash] = { path1Level = new1, path2Level = new2 }
 
-        elseif name == "SellTowerRequest" then
-            local tower = FindTowerById(args[1])
-            if tower then
-                table.insert(macroData, {
-                    Action = "Sell",
-                    TowerSold = tower.Position.X,
-                    Timestamp = os.time()
-                })
-                if debugMode then print("💸 Sell ->", tower.Position.X) end
-            end
-        end
-    end
+	add({
+		TowerUpgraded = x,
+		UpgradePath = upgradedPath,
+		UpgradeCost = tower.LevelHandler:GetLevelUpgradeCost(upgradedPath, 1)
+	})
+end)
 
-    return getrawmetatable(game).__namecall(self, table.unpack(args))
-end))
+-- 🎯 Đổi target
+Remotes.ChangeQueryType.OnClientEvent:Connect(function(hash, targetType)
+	local tower = TowerClass.GetTower(hash)
+	if not tower then return end
 
--- ▶️ Bắt đầu ghi
-getgenv().StartMacroRecording = function()
-    if recording then return end
-    recording = true
-    macroData = {}
-    print("🔴 Đang ghi macro. Chat 'stop' để dừng.")
-end
+	local model = tower.Character:GetCharacterModel()
+	local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
+	if not root then return end
 
-getgenv().StopMacroRecording = StopRecording
-print("✅ Macro Recorder (safe version) đã sẵn sàng.")
+	local x = tonumber(string.format("%.15f", root.Position.X))
+	local targetNum = TargetMap[targetType] or -1
+
+	add({
+		TowerTargetChange = x,
+		TargetWanted = targetNum,
+		TargetChangedAt = math.floor(tick())
+	})
+end)
+
+-- ❌ Bán tower
+Remotes.SellTower.OnClientEvent:Connect(function(hash)
+	local tower = TowerClass.GetTower(hash)
+	if not tower then return end
+
+	local model = tower.Character:GetCharacterModel()
+	local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
+	if not root then return end
+
+	local x = tonumber(string.format("%.15f", root.Position.X))
+
+	add({
+		SellTower = x
+	})
+end)
+
+print("🎥 Đang ghi macro đúng định dạng ooooo.json... sẽ lưu tại:\n📁 " .. SAVE_PATH)
