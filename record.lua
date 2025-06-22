@@ -1,4 +1,4 @@
--- 📜 TDX Macro Recorder (Executor + /record on|off + ooooo.json Format)
+-- 📜 TDX Macro Recorder (hookfunction, luôn ghi, log console, định dạng chuẩn ooooo.json)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -10,7 +10,6 @@ local TowerClass = require(LocalPlayer.PlayerScripts.Client.GameClass.TowerClass
 local SAVE_FOLDER = "tdx/macros"
 local MACRO_NAME = getgenv().TDX_Config and getgenv().TDX_Config["Macro Name"] or "recorded"
 local SAVE_PATH = SAVE_FOLDER .. "/" .. MACRO_NAME .. ".json"
-getgenv().TDX_RecordEnabled = true
 
 -- 📦 Biến toàn cục
 local recorded = {}
@@ -18,18 +17,19 @@ local towerData = {}
 
 if not isfolder(SAVE_FOLDER) then makefolder(SAVE_FOLDER) end
 
+-- Thêm entry mới
 local function add(entry)
-	if getgenv().TDX_RecordEnabled then
-		table.insert(recorded, entry)
-	end
+	print("📝 Ghi entry:", HttpService:JSONEncode(entry))
+	table.insert(recorded, entry)
 end
 
--- Tự động lưu mỗi 5s
+-- Tự động lưu file macro mỗi 5 giây
 task.spawn(function()
 	while true do
 		task.wait(5)
 		pcall(function()
 			writefile(SAVE_PATH, HttpService:JSONEncode(recorded))
+			print("💾 Đã lưu vào:", SAVE_PATH, "| Tổng:", #recorded)
 		end)
 	end
 end)
@@ -52,6 +52,7 @@ local originalInvoke = hookfunction(Remotes.PlaceTower.InvokeServer, function(se
 		TowerPlaceCost = cost
 	})
 
+	-- Ghi level ban đầu
 	task.delay(0.2, function()
 		for hash, tower in pairs(TowerClass.GetTowers()) do
 			local model = tower.Character and tower.Character:GetCharacterModel()
@@ -68,7 +69,7 @@ local originalInvoke = hookfunction(Remotes.PlaceTower.InvokeServer, function(se
 	return originalInvoke(self, towerA1, towerName, pos, rotation)
 end)
 
--- 🔼 Upgrade
+-- 🔼 Nâng cấp tower
 Remotes.TowerUpgradeRequest.OnClientEvent:Connect(function(hash, path, _)
 	local tower = TowerClass.GetTower(hash)
 	if not tower then return end
@@ -97,7 +98,7 @@ Remotes.TowerUpgradeRequest.OnClientEvent:Connect(function(hash, path, _)
 	})
 end)
 
--- 🎯 Change Target
+-- 🎯 Đổi target
 Remotes.ChangeQueryType.OnClientEvent:Connect(function(hash, targetType)
 	local tower = TowerClass.GetTower(hash)
 	if not tower then return end
@@ -116,7 +117,7 @@ Remotes.ChangeQueryType.OnClientEvent:Connect(function(hash, targetType)
 	})
 end)
 
--- ❌ Sell
+-- ❌ Bán tower
 Remotes.SellTower.OnClientEvent:Connect(function(hash)
 	local tower = TowerClass.GetTower(hash)
 	if not tower then return end
@@ -129,39 +130,5 @@ Remotes.SellTower.OnClientEvent:Connect(function(hash)
 	add({ SellTower = x })
 end)
 
--- 💬 Chat command: /record on | /record off
-local function handleChatCommand(msg)
-	local args = string.split(msg:lower(), " ")
-	if args[1] == "/record" then
-		if args[2] == "on" then
-			getgenv().TDX_RecordEnabled = true
-			print("✅ Ghi macro đã bật")
-		elseif args[2] == "off" then
-			getgenv().TDX_RecordEnabled = false
-			print("❌ Ghi macro đã tắt")
-		end
-	end
-end
-
--- 🔁 Chat system compatibility (TextChatService mới + chat cũ)
-local function setupChatCommand()
-	local TextChatService = game:GetService("TextChatService")
-	local channel = TextChatService:FindFirstChild("TextChannels") and TextChatService.TextChannels:FindFirstChild("RBXGeneral")
-
-	if channel then
-		channel.OnIncomingMessage = function(message)
-			local source = message.TextSource
-			if source and source.UserId == Players.LocalPlayer.UserId then
-				handleChatCommand(message.Text)
-			end
-		end
-	else
-		-- fallback chat cũ
-		LocalPlayer.Chatted:Connect(handleChatCommand)
-	end
-end
-
-setupChatCommand()
-
-print("🎥 [TDX Macro Recorder] Sẵn sàng! Gõ /record on hoặc /record off")
-print("📁 Macro sẽ được lưu vào: " .. SAVE_PATH)
+print("🎥 [TDX Macro Recorder] ĐANG GHI LUÔN! Không cần bật")
+print("📁 File macro: " .. SAVE_PATH)
