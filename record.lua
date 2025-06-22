@@ -1,183 +1,231 @@
--- Tower Defense Macro Recorder (Fixed Version)
-local HttpService = game:GetService("HttpService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
-local TextChatService = game:GetService("TextChatService")
-
-local player = Players.LocalPlayer
-local macroData = {}
-local recording = false
-
--- Kiểm tra và lấy cấu hình từ getgenv()
-if not getgenv().TDX_Config then
-    getgenv().TDX_Config = {}
+-- Tower Defense Macro Recorder (Ultimate Robust Version)
+local function SafeWaitForChild(parent, childName, timeout)
+    timeout = timeout or 5
+    local startTime = os.time()
+    local child
+    
+    while os.time() - startTime < timeout do
+        child = parent:FindFirstChild(childName)
+        if child then return child end
+        wait(0.1)
+    end
+    
+    warn("Không tìm thấy "..childName.." sau "..timeout.." giây")
+    return nil
 end
-local config = getgenv().TDX_Config
-local macroName = config["Macro Name"] or "macro_"..os.time()
 
--- Kết nối các RemoteEvent với xử lý lỗi
-local function GetRemote(name)
-    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    if not remotes then
-        warn("Không tìm thấy thư mục Remotes")
+local function Initialize()
+    -- Khởi tạo các service cần thiết
+    local success, services = pcall(function()
+        return {
+            HttpService = game:GetService("HttpService"),
+            ReplicatedStorage = game:GetService("ReplicatedStorage"),
+            Players = game:GetService("Players"),
+            TextChatService = game:GetService("TextChatService")
+        }
+    end)
+    
+    if not success then
+        warn("Không thể khởi tạo services:", services)
         return nil
     end
-    return remotes:FindFirstChild(name)
+    
+    -- Kiểm tra người chơi
+    local player = services.Players.LocalPlayer
+    if not player then
+        warn("Không tìm thấy LocalPlayer")
+        return nil
+    end
+    
+    -- Kiểm tra và khởi tạo cấu hình
+    if not getgenv().TDX_Config then
+        getgenv().TDX_Config = {
+            ["Macro Name"] = "macro_"..os.time(),
+            Macros = "idle"
+        }
+    end
+    
+    return {
+        services = services,
+        player = player,
+        config = getgenv().TDX_Config
+    }
 end
 
-local PlaceTowerRemote = GetRemote("PlaceTower")
-local UpgradeRemote = GetRemote("TowerUpgradeRequest")
-local TargetRemote = GetRemote("ChangeQueryType")
-local SellRemote = GetRemote("SellTower")
+local ctx = Initialize()
+if not ctx then return end
 
-if not (PlaceTowerRemote and UpgradeRemote and TargetRemote and SellRemote) then
-    warn("Không tìm thấy một hoặc nhiều RemoteEvents cần thiết")
-    return
+-- Biến toàn cục
+local macroData = {}
+local recording = false
+local connections = {}
+
+-- Hàm tiện ích
+local function SafeConnect(event, callback)
+    if not event then return nil end
+    local conn = event:Connect(callback)
+    table.insert(connections, conn)
+    return conn
 end
 
--- Hàm lưu file với kiểm tra thư mục
+local function SafeDisconnectAll()
+    for _, conn in ipairs(connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    connections = {}
+end
+
+-- Hàm lưu macro
 local function SaveMacro()
     if not recording then return end
     recording = false
     
-    -- Đảm bảo thư mục tồn tại
-    if not makefolder then
-        warn("Hàm makefolder không khả dụng")
-        return
-    end
-    
-    if not writefile then
-        warn("Hàm writefile không khả dụng")
-        return
-    end
-    
-    if not isfolder then
-        warn("Hàm isfolder không khả dụng")
-        return
-    end
-    
-    if not isfolder("tdx/macros") then
-        pcall(function()
-            makefolder("tdx")
-            makefolder("tdx/macros")
+    -- Kiểmra hàm filesystem
+    if not (writefile and makefolder and isfolder) then
+        local fsAvailable = pcall(function()
+            return writefile and makefolder and isfolder
         end)
+        
+        if not fsAvailable then
+            warn("Hệ thống file không khả dụng")
+            return
+        end
     end
     
-    -- Tạo tên file (đảm bảo có đuôi .json)
-    local fileName = macroName
-    if not fileName:match("%.json$") then
-        fileName = fileName..".json"
+    -- Tạo thư mục
+    if not pcall(function()
+        if not isfolder("tdx") then makefolder("tdx") end
+        if not isfolder("tdx/macros") then makefolder("tdx/macros") end
+    end) then
+        warn("Không thể tạo thư mục lưu macro")
+        return
     end
+    
+    -- Lưu file
+    local fileName = ctx.config["Macro Name"]:gsub("%.json$", "")..".json"
     local macroPath = "tdx/macros/"..fileName
     
-    -- Lưu file với xử lý lỗi
-    local success, err = pcall(function()
-        writefile(macroPath, HttpService:JSONEncode(macroData))
+    local jsonSuccess, jsonData = pcall(function()
+        return ctx.services.HttpService:JSONEncode(macroData)
     end)
     
-    if success then
-        print("💾 Đã lưu macro vào:", macroPath)
-        print("Tổng số hành động đã ghi:", #macroData)
+    if not jsonSuccess then
+        warn("Lỗi khi chuyển đổi JSON:", jsonData)
+        return
+    end
+    
+    local writeSuccess, writeError = pcall(function()
+        writefile(macroPath, jsonData)
+    end)
+    
+    if writeSuccess then
+        print("💾 Đã lưu macro thành công:", macroPath)
+        print("📊 Tổng hành động:", #macroData)
     else
-        warn("Lỗi khi lưu macro:", err)
+        warn("Lỗi khi lưu file:", writeError)
     end
 end
 
--- Bắt đầu ghi macro với xử lý lỗi
+-- Hàm ghi lại hành động
+local function RecordAction(actionType, data)
+    if not recording then return end
+    
+    local action = {
+        type = actionType,
+        time = os.time(),
+        cash = ctx.player.leaderstats.Cash.Value
+    }
+    
+    for k, v in pairs(data) do
+        action[k] = v
+    end
+    
+    table.insert(macroData, action)
+    print("📝 Đã ghi:", actionType)
+end
+
+-- Hàm bắt đầu ghi
 local function StartRecording()
+    if recording then return end
+    
     macroData = {}
     recording = true
-    print("🔴 Đã bắt đầu ghi macro... (Tên macro: "..macroName..")")
-    print("📢 Cách dừng ghi:")
-    print("1. Gõ 'stop' trong chat")
-    print("2. Thoát game")
-    print("3. Gọi StopMacroRecording() từ console")
+    SafeDisconnectAll()
     
-    -- Kiểm tra leaderstats trước khi sử dụng
-    if not player:FindFirstChild("leaderstats") or not player.leaderstats:FindFirstChild("Cash") then
-        warn("Không tìm thấy leaderstats/Cash")
-        return
-    end
-
-    -- Kết nối sự kiện đặt tháp với xử lý nil
-    local placeConnection
-    if PlaceTowerRemote then
-        placeConnection = PlaceTowerRemote.OnClientEvent:Connect(function(time, towerType, position, rotation)
-            if not recording then return end
-            
-            local entry = {
-                TowerPlaceCost = player.leaderstats.Cash.Value,
-                TowerPlaced = towerType,
-                TowerVector = string.format("%.15g, %.15g, %.15g", position.X, position.Y, position.Z),
-                Rotation = rotation,
-                TowerA1 = tostring(time)
-            }
-            
-            table.insert(macroData, entry)
-            print("📝 Đã ghi: Đặt tháp "..towerType)
-        end)
-    else
-        warn("PlaceTowerRemote không tồn tại")
-    end
+    print("🔴 Bắt đầu ghi macro...")
+    print("🔧 Tên macro:", ctx.config["Macro Name"])
+    print("🛑 Gõ 'stop' trong chat để dừng")
     
-    -- Kết nối sự kiện nâng cấp tháp
-    local upgradeConnection
-    if UpgradeRemote then
-        upgradeConnection = UpgradeRemote.OnClientEvent:Connect(function(hash, path, _)
-            if not recording then return end
-            
-            local entry = {
-                UpgradeCost = player.leaderstats.Cash.Value,
-                UpgradePath = path,
-                TowerUpgraded = tostring(hash) -- Sử dụng hash trực tiếp nếu không có TowerClass
-            }
-            
-            table.insert(macroData, entry)
-            print("📝 Đã ghi: Nâng cấp tháp")
-        end)
-    else
-        warn("UpgradeRemote không tồn tại")
-    end
+    -- Kiểm tra Remotes
+    local remotes = SafeWaitForChild(ctx.services.ReplicatedStorage, "Remotes", 5)
+    if not remotes then return end
+    
+    -- Kết nối sự kiện
+    SafeConnect(SafeWaitForChild(remotes, "PlaceTower"), function(time, towerType, position)
+        RecordAction("place", {
+            towerType = towerType,
+            position = {X = position.X, Y = position.Y, Z = position.Z},
+            rotation = 0
+        })
+    end)
+    
+    SafeConnect(SafeWaitForChild(remotes, "TowerUpgradeRequest"), function(hash, path)
+        RecordAction("upgrade", {
+            towerHash = tostring(hash),
+            path = path
+        })
+    end)
+    
+    SafeConnect(SafeWaitForChild(remotes, "ChangeQueryType"), function(hash, queryType)
+        RecordAction("change_target", {
+            towerHash = tostring(hash),
+            queryType = queryType
+        })
+    end)
+    
+    SafeConnect(SafeWaitForChild(remotes, "SellTower"), function(hash)
+        RecordAction("sell", {
+            towerHash = tostring(hash)
+        })
+    end)
     
     -- Kết nối sự kiện chat
-    local chatConnection
-    if TextChatService then
-        chatConnection = TextChatService.OnIncomingMessage:Connect(function(message)
-            if not recording then return end
-            if message.TextSource and message.TextSource.UserId == player.UserId then
-                if string.lower(message.Text) == "stop" then
+    if ctx.services.TextChatService then
+        SafeConnect(ctx.services.TextChatService.OnIncomingMessage, function(message)
+            if message.TextSource and message.TextSource.UserId == ctx.player.UserId then
+                if message.Text:lower() == "stop" then
                     SaveMacro()
-                    print("⏹️ Đã dừng ghi macro theo yêu cầu từ chat")
                 end
             end
         end)
     end
     
     -- Kết nối sự kiện thoát game
-    local leavingConnection = game:GetService("Players").PlayerRemoving:Connect(function(leavingPlayer)
-        if leavingPlayer == player and recording then
+    SafeConnect(ctx.services.Players.PlayerRemoving, function(leavingPlayer)
+        if leavingPlayer == ctx.player then
             SaveMacro()
-            print("⏹️ Đã dừng ghi macro do người chơi thoát game")
         end
     end)
-    
-    -- Lưu hàm dừng vào global
-    getgenv().StopMacroRecording = function()
-        SaveMacro()
-        if placeConnection then placeConnection:Disconnect() end
-        if upgradeConnection then upgradeConnection:Disconnect() end
-        if chatConnection then chatConnection:Disconnect() end
-        if leavingConnection then leavingConnection:Disconnect() end
-        print("⏹️ Đã dừng ghi macro theo yêu cầu thủ công")
-    end
 end
 
--- Tự động bắt đầu ghi nếu ở chế độ record
-if type(getgenv().TDX_Config["Macros"]) == "string" and getgenv().TDX_Config["Macros"] == "record" then
+-- Hàm dừng ghi
+local function StopRecording()
+    if not recording then return end
+    SaveMacro()
+    SafeDisconnectAll()
+end
+
+-- Gán hàm toàn cục
+getgenv().StartMacroRecording = StartRecording
+getgenv().StopMacroRecording = StopRecording
+
+-- Tự động bắt đầu nếu ở chế độ record
+if ctx.config.Macros == "record" then
     local success, err = pcall(StartRecording)
     if not success then
-        warn("Lỗi khi bắt đầu ghi macro:", err)
+        warn("Không thể bắt đầu ghi macro:", err)
     end
 else
-    print("⏩ Macro Recorder đã tải (Không tự động ghi vì không ở chế độ record)")
+    print("✅ Macro Recorder sẵn sàng")
+    print("💡 Sử dụng StartMacroRecording() để bắt đầu")
 end
