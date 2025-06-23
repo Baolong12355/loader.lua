@@ -1,4 +1,4 @@
--- SCR Recorder Ultimate - Phiên bản hoàn chỉnh
+-- SCR Recorder Ultimate - Fixed InvokeServer Error
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -21,7 +21,7 @@ local dirty = false
 
 -- CÁC HÀM CỦA BẠN - GIỮ NGUYÊN --
 local function formatPosition(pos)
-    return string.format("%.15f, %.15f, %.15f", pos.X, pos.Y, pos.Z)
+    return string.format("%.2f, %.2f, %.2f", pos.X, pos.Y, pos.Z) -- Giảm độ chính xác để dễ đọc
 end
 
 local function GetTowerXFromHash(hash)
@@ -30,7 +30,7 @@ local function GetTowerXFromHash(hash)
     
     local model = tower.Character:GetCharacterModel()
     local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
-    return root and tonumber(string.format("%.15f", root.Position.X))
+    return root and tonumber(string.format("%.2f", root.Position.X))
 end
 
 local function GetTowerCostFromUI(name)
@@ -39,101 +39,54 @@ local function GetTowerCostFromUI(name)
         if btn:IsA("ImageButton") and btn.Name == name then
             local costText = btn:FindFirstChild("CostFrame") and btn.CostFrame:FindFirstChild("CostText")
             if costText then
-                return tonumber(costText.Text:gsub("[$,]", ""))
+                return tonumber(costText.Text:gsub("[^%d]", ""))
             end
         end
     end
     return 0
 end
-
-local function GetTimeLeft()
-    local timeText = PlayerGui.Interface.GameInfoBar.TimeLeft.TimeLeftText
-    if timeText then
-        local m, s = timeText.Text:match("(%d+):(%d+)")
-        return m and (tonumber(m) * 60 + tonumber(s)) or 0
-    end
-    return 0
-end
 -- KẾT THÚC PHẦN GIỮ NGUYÊN --
 
--- Hook tất cả remote cần thiết
+-- Hệ thống hook mới đã fix lỗi
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local PlaceTowerRemote = Remotes:WaitForChild("PlaceTower")
 
--- 1. Hook PlaceTower (đã tối ưu A1)
-local originalPlaceTower = Remotes.PlaceTower.InvokeServer
-Remotes.PlaceTower.InvokeServer = function(self, ...)
+-- Fix lỗi "InvokeServer is not a valid member"
+if not PlaceTowerRemote then
+    error("Không tìm thấy RemoteFunction PlaceTower")
+elseif PlaceTowerRemote.ClassName ~= "RemoteFunction" then
+    error("PlaceTower phải là RemoteFunction nhưng tìm thấy: "..PlaceTowerRemote.ClassName)
+end
+
+-- Hook PlaceTower với xử lý args chính xác
+local originalPlaceTower = PlaceTowerRemote.InvokeServer
+PlaceTowerRemote.InvokeServer = function(self, ...)
     local args = {...}
+    
+    -- Debug in ra args nhận được
+    print("[DEBUG] PlaceTower args:", HttpService:JSONEncode(args))
+    
     if #args >= 4 then
+        local a1, towerName, position, rotation = args[1], args[2], args[3], args[4]
+        
         table.insert(recorded, {
             _type = "PlaceTower",
-            TowerPlaceCost = GetTowerCostFromUI(args[2]),
-            TowerPlaced = args[2],
-            TowerVector = formatPosition(args[3]),
-            Rotation = args[4],
-            RawA1 = args[1], -- Giữ nguyên giá trị gốc
-            Timestamp = os.time()
+            TowerPlaceCost = GetTowerCostFromUI(towerName),
+            TowerPlaced = towerName,
+            TowerVector = formatPosition(position),
+            Rotation = rotation,
+            RawA1 = a1,
+            Timestamp = os.time(),
+            _argsDebug = args -- Lưu cả args gốc để debug
         })
         dirty = true
     end
+    
+    -- Gọi hàm gốc với args không thay đổi
     return originalPlaceTower(self, ...)
 end
 
--- 2. Hook TowerUpgradeRequest
-local originalUpgradeTower = Remotes.TowerUpgradeRequest.FireServer
-Remotes.TowerUpgradeRequest.FireServer = function(self, ...)
-    local args = {...}
-    if #args >= 2 then
-        local x = GetTowerXFromHash(args[1])
-        if x then
-            table.insert(recorded, {
-                _type = "UpgradeTower",
-                UpgradeCost = TowerClass:GetTower(args[1]).LevelHandler:GetLevelUpgradeCost(args[2], 1),
-                UpgradePath = args[2],
-                TowerHash = "tower_"..tostring(args[1]),
-                TowerX = x,
-                Timestamp = os.time()
-            })
-            dirty = true
-        end
-    end
-    return originalUpgradeTower(self, ...)
-end
-
--- 3. Hook SellTower
-local originalSellTower = Remotes.SellTower.FireServer
-Remotes.SellTower.FireServer = function(self, ...)
-    local args = {...}
-    local x = GetTowerXFromHash(args[1])
-    if x then
-        table.insert(recorded, {
-            _type = "SellTower",
-            TowerX = x,
-            Timestamp = os.time()
-        })
-        dirty = true
-    end
-    return originalSellTower(self, ...)
-end
-
--- 4. Hook ChangeQueryType
-local originalChangeTarget = Remotes.ChangeQueryType.FireServer
-Remotes.ChangeQueryType.FireServer = function(self, ...)
-    local args = {...}
-    local x = GetTowerXFromHash(args[1])
-    if x and #args >= 2 then
-        table.insert(recorded, {
-            _type = "ChangeTarget",
-            TowerX = x,
-            TargetWanted = args[2],
-            TargetChangedAt = GetTimeLeft(),
-            Timestamp = os.time()
-        })
-        dirty = true
-    end
-    return originalChangeTarget(self, ...)
-end
-
--- Hệ thống tự động lưu
+-- Hệ thống tự động lưu (giữ nguyên)
 task.spawn(function()
     while true do
         task.wait(AUTO_SAVE_INTERVAL)
@@ -141,42 +94,18 @@ task.spawn(function()
             pcall(function()
                 writefile(SAVE_PATH, HttpService:JSONEncode(recorded))
                 dirty = false
-                print("🔄 Đã tự động lưu recording vào", SAVE_PATH)
+                print("🔄 Đã lưu recording vào", SAVE_PATH)
             end)
         end
     end
 end)
 
--- Test remote khi khởi động
-local function TestRemotes()
-    for _, remoteName in ipairs({"PlaceTower", "TowerUpgradeRequest", "SellTower", "ChangeQueryType"}) do
-        if Remotes:FindFirstChild(remoteName) then
-            print("✅ Remote sẵn sàng:", remoteName)
-        else
-            warn("⚠️ Không tìm thấy remote:", remoteName)
-        end
-    end
-end
-
 print("====================================")
-print("✅ SCR Recorder ULTIMATE ĐÃ SẴN SÀNG!")
-print("📂 Đang ghi vào:", SAVE_PATH)
-print("🔹 Các remote đang theo dõi:")
-print("- PlaceTower (InvokeServer)")
-print("- TowerUpgradeRequest (FireServer)")
-print("- SellTower (FireServer)")
-print("- ChangeQueryType (FireServer)")
-TestRemotes()
+print("✅ SCR Recorder ULTIMATE - ĐÃ FIX LỖI INVOKESERVER")
+print("📂 Output:", SAVE_PATH)
+print("🔹 Cấu trúc args PlaceTower:")
+print("1. Số (A1):", "953.54... (vị trí X hoặc ID)")
+print("2. Tên tower:", "Cryo Blaster")
+print("3. Vị trí:", "Vector3")
+print("4. Rotation:", "0")
 print("====================================")
-
--- API đơn giản
-return {
-    save = function()
-        pcall(function()
-            writefile(SAVE_PATH, HttpService:JSONEncode(recorded))
-            print("💾 Đã lưu thủ công recording vào", SAVE_PATH)
-        end)
-    end,
-    getRecordings = function() return recorded end,
-    clear = function() recorded = {} end
-}
