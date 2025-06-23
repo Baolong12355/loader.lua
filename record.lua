@@ -1,111 +1,207 @@
--- SCR Recorder Ultimate - Fixed InvokeServer Error
-local HttpService = game:GetService("HttpService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-local PlayerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local LocalPlayer = Players.LocalPlayer
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Đảm bảo load TowerClass
-local TowerClass = require(Players.LocalPlayer.PlayerScripts.Client.GameClass.TowerClass)
+local interface = playerGui:WaitForChild("Interface")
+local bottomBar = interface:WaitForChild("BottomBar")
+local towersBar = bottomBar:WaitForChild("TowersBar")
 
--- Cấu hình
-local SAVE_PATH = "tdx/macros/recording.json"
-local AUTO_SAVE_INTERVAL = 5
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local output = {}
+local start = os.clock()
 
--- Khởi tạo thư mục
-if not isfolder("tdx") then makefolder("tdx") end
-if not isfolder("tdx/macros") then makefolder("tdx/macros") end
+-- Cache các hàm thường dùng
+local table_insert = table.insert
+local string_format = string.format
+local tonumber = tonumber
+local tostring = tostring
+local ipairs = ipairs
+local pcall = pcall
+local task_wait = task.wait
+local os_clock = os.clock
 
--- Biến toàn cục
-local recorded = {}
-local dirty = false
-
--- CÁC HÀM CỦA BẠN - GIỮ NGUYÊN --
-local function formatPosition(pos)
-    return string.format("%.2f, %.2f, %.2f", pos.X, pos.Y, pos.Z) -- Giảm độ chính xác để dễ đọc
+-- Load TowerClass
+local function SafeRequire(path, timeout)
+    timeout = timeout or 5
+    local t0 = os_clock()
+    while os_clock() - t0 < timeout do
+        local success, result = pcall(function()
+            return require(path)
+        end)
+        if success then return result end
+        task_wait()
+    end
+    return nil
 end
 
-local function GetTowerXFromHash(hash)
-    local tower = TowerClass:GetTower(hash)
-    if not tower or not tower.Character then return nil end
-    
-    local model = tower.Character:GetCharacterModel()
-    local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
-    return root and tonumber(string.format("%.2f", root.Position.X))
+local TowerClass
+local function LoadTowerClass()
+    local ps = LocalPlayer:WaitForChild("PlayerScripts")
+    local client = ps:WaitForChild("Client")
+    local gameClass = client:WaitForChild("GameClass")
+    local towerModule = gameClass:WaitForChild("TowerClass")
+    return SafeRequire(towerModule)
 end
 
-local function GetTowerCostFromUI(name)
-    local towersBar = PlayerGui.Interface.BottomBar.TowersBar
-    for _, btn in ipairs(towersBar:GetChildren()) do
-        if btn:IsA("ImageButton") and btn.Name == name then
-            local costText = btn:FindFirstChild("CostFrame") and btn.CostFrame:FindFirstChild("CostText")
-            if costText then
-                return tonumber(costText.Text:gsub("[^%d]", ""))
+TowerClass = LoadTowerClass()
+if not TowerClass then error("Không thể tải TowerClass") end
+
+-- Lấy giá tower theo tên
+local function getTowerCostByName(towerName)
+    for _, tower in ipairs(towersBar:GetChildren()) do
+        if tower.Name == towerName then
+            local costFrame = tower:FindFirstChild("CostFrame")
+            if costFrame then
+                local costText = costFrame:FindFirstChild("CostText")
+                if costText then
+                    return tonumber(costText.Text) or 0
+                end
             end
         end
     end
     return 0
 end
--- KẾT THÚC PHẦN GIỮ NGUYÊN --
 
--- Hệ thống hook mới đã fix lỗi
-local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local PlaceTowerRemote = Remotes:WaitForChild("PlaceTower")
-
--- Fix lỗi "InvokeServer is not a valid member"
-if not PlaceTowerRemote then
-    error("Không tìm thấy RemoteFunction PlaceTower")
-elseif PlaceTowerRemote.ClassName ~= "RemoteFunction" then
-    error("PlaceTower phải là RemoteFunction nhưng tìm thấy: "..PlaceTowerRemote.ClassName)
+-- Serialize vector3
+local function vecToStr(vec)
+    return string_format("%.5f, %.5f, %.5f", vec.X, vec.Y, vec.Z)
 end
 
--- Hook PlaceTower với xử lý args chính xác
-local originalPlaceTower = PlaceTowerRemote.InvokeServer
-PlaceTowerRemote.InvokeServer = function(self, ...)
-    local args = {...}
+-- Lấy vị trí X của tower bằng hash
+local function GetTowerXFromHash(hash)
+    local towers = TowerClass.GetTowers()
+    if not towers then return nil end
     
-    -- Debug in ra args nhận được
-    print("[DEBUG] PlaceTower args:", HttpService:JSONEncode(args))
-    
-    if #args >= 4 then
-        local a1, towerName, position, rotation = args[1], args[2], args[3], args[4]
-        
-        table.insert(recorded, {
-            _type = "PlaceTower",
-            TowerPlaceCost = GetTowerCostFromUI(towerName),
-            TowerPlaced = towerName,
-            TowerVector = formatPosition(position),
-            Rotation = rotation,
-            RawA1 = a1,
-            Timestamp = os.time(),
-            _argsDebug = args -- Lưu cả args gốc để debug
-        })
-        dirty = true
+    local tower = towers[hash]
+    if not tower then return nil end
+
+    local success, pos = pcall(function()
+        if not tower.Character then return nil end
+        local model = tower.Character:GetCharacterModel()
+        if not model then return nil end
+        local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+        return root and root.Position
+    end)
+
+    if success and pos then
+        return tonumber(string_format("%.3f", pos.X))
     end
-    
-    -- Gọi hàm gốc với args không thay đổi
-    return originalPlaceTower(self, ...)
+    return nil
 end
 
--- Hệ thống tự động lưu (giữ nguyên)
+-- Log đặt tower
+local function logTowerPlacement(args)
+    if type(args) ~= "table" or #args < 3 then return end
+    
+    local towerName = args[2]
+    if type(towerName) ~= "string" then return end
+    
+    local towerCost = getTowerCostByName(towerName)
+    local towerVector = vecToStr(args[3])
+
+    table_insert(output, {
+        TowerPlaceCost = towerCost,
+        TowerPlaced = towerName,
+        TowerVector = towerVector,
+        Rotation = 0,
+        TowerA1 = 0
+    })
+end
+
+-- Log upgrade
+local function logUpgrade(args)
+    if type(args) ~= "table" or #args < 2 then return end
+    
+    local hash = tostring(args[1])
+    local path = args[2]
+
+    local tower = TowerClass.GetTowers()[hash]
+    if not tower or not tower.Config then return end
+
+    local upgradeData = tower.Config.UpgradePathData and tower.Config.UpgradePathData[path]
+    local currentLevel = tower.LevelHandler and tower.LevelHandler:GetLevelOnPath(path) or 0
+    local cost = upgradeData and upgradeData[currentLevel + 1] and upgradeData[currentLevel + 1].Cost or 0
+
+    local x = GetTowerXFromHash(hash)
+    if x then
+        table_insert(output, {
+            TowerUpgraded = tostring(x),
+            UpgradeCost = cost,
+            UpgradePath = path
+        })
+    end
+end
+
+-- Log bán tower
+local function logSell(args)
+    if type(args) ~= "table" or #args < 1 then return end
+    
+    local hash = tostring(args[1])
+    local x = GetTowerXFromHash(hash)
+    if x then
+        table_insert(output, {
+            SellTower = tostring(x)
+        })
+    end
+end
+
+-- Log đổi mục tiêu
+local function logChangeTarget(args)
+    if type(args) ~= "table" or #args < 2 then return end
+    
+    local hash = tostring(args[1])
+    local targetWanted = args[2]
+    local x = GetTowerXFromHash(hash)
+    if x then
+        table_insert(output, {
+            TowerTargetChange = x,
+            TargetWanted = targetWanted,
+            TargetChangedAt = os_clock() - start
+        })
+    end
+end
+
+-- Hook __namecall
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    if not checkcaller() and (method == "FireServer" or method == "InvokeServer") then
+        if not self:IsA("RemoteEvent") and not self:IsA("RemoteFunction") then
+            return oldNamecall(self, ...)
+        end
+
+        local remoteName = tostring(self.Name)
+        local args = {...}
+
+        if remoteName == "PlaceTower" then
+            pcall(logTowerPlacement, args)
+        elseif remoteName == "TowerUpgradeRequest" then
+            pcall(logUpgrade, args)
+        elseif remoteName == "SellTower" then
+            pcall(logSell, args)
+        elseif remoteName == "ChangeQueryType" then
+            pcall(logChangeTarget, args)
+        end
+    end
+
+    return oldNamecall(self, ...)
+end)
+
+-- Auto save
 task.spawn(function()
     while true do
-        task.wait(AUTO_SAVE_INTERVAL)
-        if dirty then
+        task_wait(10)
+        local success, json = pcall(function()
+            return HttpService:JSONEncode(output)
+        end)
+        if success and type(json) == "string" then
             pcall(function()
-                writefile(SAVE_PATH, HttpService:JSONEncode(recorded))
-                dirty = false
-                print("🔄 Đã lưu recording vào", SAVE_PATH)
+                writefile("tdx_macro_record.json", json)
             end)
         end
     end
 end)
 
-print("====================================")
-print("✅ SCR Recorder ULTIMATE - ĐÃ FIX LỖI INVOKESERVER")
-print("📂 Output:", SAVE_PATH)
-print("🔹 Cấu trúc args PlaceTower:")
-print("1. Số (A1):", "953.54... (vị trí X hoặc ID)")
-print("2. Tên tower:", "Cryo Blaster")
-print("3. Vị trí:", "Vector3")
-print("4. Rotation:", "0")
-print("====================================")
+print("✅ Đã bật ghi macro vào tdx_macro_record.json")
