@@ -77,7 +77,7 @@ while task.wait(0.1) do
                         else
                             TowerUseAbilityRequest:InvokeServer(hash, abilityIndex)
                         end
-                        task.wait(0.01) -- Chống spam
+                        task.wait(1) -- Chống spam
                     end
                 end)
             end
