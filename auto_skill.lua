@@ -34,6 +34,7 @@ local skipTowerTypes = {
     ["Railgunner"] = true,
     ["Mine Layer"] = true,
     ["Sentry"] = true,
+    ["Ghost"] = true,
 
     -- Tower chỉ có passive skill
     ["EDJ"] = false,
