@@ -1,8 +1,11 @@
+-- TDX Macro Recorder - Safe Hook Version (only logs, never changes args, always returns original)
+-- Compatible with X position macro replay and avoids "tonumber base out of range" or argument errors
+
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
--- Tìm tên file macro mới chưa tồn tại
+-- Find new macro filename
 local fileIndex = 1
 while isfile("tdx_macro_"..fileIndex..".json") do
     fileIndex += 1
@@ -10,11 +13,10 @@ end
 local fileName = "tdx_macro_"..fileIndex..".json"
 writefile(fileName, "[]")
 
--- Dữ liệu macro và mapping X vị trí
 local macro = {}
 local placedTowers = {}
 
--- Lấy giá tower từ GUI
+-- Get tower price from GUI
 local function get_tower_price_from_gui(towerName)
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if not playerGui then return 0 end
@@ -47,7 +49,7 @@ local function vector3ToString(v3)
     return string.format("%.14f, %.14f, %.14f", v3.X, v3.Y, v3.Z)
 end
 
--- Xử lý từng remote
+-- Only logs, never changes arguments, always returns original
 local function handleRemote(self, args)
     local remoteName = tostring(self.Name)
     if remoteName == "PlaceTower" then
@@ -117,8 +119,8 @@ local function handleRemote(self, args)
     end
 end
 
--- Chuẩn hóa lấy argument
-local function serializeArgs(...)
+-- Argument passthrough for logging only
+local function getArgs(...)
     local args = {...}
     local out = {}
     for i,v in ipairs(args) do out[i] = v end
@@ -127,15 +129,16 @@ end
 
 -- Hook FireServer
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-    local args = serializeArgs(...)
-    handleRemote(self, args)
+    local args = getArgs(...)
+    -- Only log, do not touch/modify/serialize/deserialize
+    pcall(handleRemote, self, args)
     return oldFireServer(self, ...)
 end)
 
 -- Hook InvokeServer
 local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-    local args = serializeArgs(...)
-    handleRemote(self, args)
+    local args = getArgs(...)
+    pcall(handleRemote, self, args)
     return oldInvokeServer(self, ...)
 end)
 
@@ -144,10 +147,10 @@ local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     local method = getnamecallmethod()
     if method == "FireServer" or method == "InvokeServer" then
-        local args = serializeArgs(...)
-        handleRemote(self, args)
+        local args = getArgs(...)
+        pcall(handleRemote, self, args)
     end
     return oldNamecall(self, ...)
 end)
 
-print("✅ Ghi macro TDX (dùng full hook, luôn trả lại hàm gốc, format chuẩn runner) đã bắt đầu. File:", fileName)
+print("✅ Ghi macro TDX (hook an toàn, không sửa args, luôn trả lại hàm gốc, format chuẩn runner) đã bắt đầu. File:", fileName)
