@@ -90,7 +90,7 @@ local function logJsonTargetChange(at, wanted, changedAt)
     saveJson()
 end
 
--- === SERIALIZE CHO MACRO TXT CŨ ===
+-- HÀM serialize giá trị
 local function serialize(value)
     if type(value) == "table" then
         local result = "{"
@@ -105,6 +105,8 @@ local function serialize(value)
         return tostring(value)
     end
 end
+
+-- HÀM serialize tất cả argument
 local function serializeArgs(...)
     local args = {...}
     local output = {}
@@ -114,9 +116,12 @@ local function serializeArgs(...)
     return table.concat(output, ", ")
 end
 
--- === GHI LOG TXT & JSON ===
+-- HÀM log thao tác vào file + log JSON
 local function log(method, self, serializedArgs, ...)
     local name = tostring(self.Name)
+    local text = name .. " " .. serializedArgs .. "\n"
+    print(text)
+
     if name == "PlaceTower" then
         appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
         appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
@@ -154,19 +159,21 @@ local function log(method, self, serializedArgs, ...)
     end
 end
 
--- === HOOKS ===
+-- Hook FireServer
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
     local args = {...}
     log("FireServer", self, serializeArgs(...), ...)
     return oldFireServer(self, ...)
 end)
 
+-- Hook InvokeServer
 local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
     local args = {...}
     log("InvokeServer", self, serializeArgs(...), ...)
     return oldInvokeServer(self, ...)
 end)
 
+-- Hook __namecall
 local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     local method = getnamecallmethod()
