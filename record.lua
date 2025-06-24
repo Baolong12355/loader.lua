@@ -1,22 +1,16 @@
-local startTime = time()
-local offset = 0
+-- ==== DỮ LIỆU JSON ĐỊNH DẠNG MỚI ====
 local fileName = 1
-
--- Tìm tên file mới chưa tồn tại
-while isfile(tostring(fileName)..".txt") do
+while isfile(tostring(fileName)..".json") do
     fileName += 1
 end
-fileName = tostring(fileName)..".txt"
+fileName = tostring(fileName)..".json"
 writefile(fileName, "")
 
--- ==== DỮ LIỆU JSON ĐỊNH DẠNG MỚI ====
 local jsonData = {}
 local towerPriceTable = {}      -- towerName -> price
 local towerUpgradeTable = {}    -- towerX -> { [path]=cost }
-local hashToVector = {}         -- towerX -> vector string, dùng để suy ra vị trí
-local hashToName = {}           -- towerX -> towerName
+local hashToVector = {}         -- towerX -> vector string
 
--- Helper: chuyển Vector3 thành string
 local function vector3ToString(vec)
     if typeof(vec) == "Vector3" then
         return string.format("%.8f, %.8f, %.8f", vec.X, vec.Y, vec.Z)
@@ -39,25 +33,20 @@ end
 
 local function saveJson()
     local encoded = game:GetService("HttpService"):JSONEncode(jsonData)
-    writefile(string.gsub(fileName, ".txt$", ".json"), encoded)
+    writefile(fileName, encoded)
 end
 
--- === HÀM BẠN GỌI TỪ NGOÀI ===
 function SetTowerPlaceCost(towerName, cost) towerPriceTable[towerName] = cost end
 function SetTowerUpgradeCost(towerX, path, cost)
     towerUpgradeTable[towerX] = towerUpgradeTable[towerX] or {}
     towerUpgradeTable[towerX][path] = cost
 end
 
--- ==== GHI JSON ĐÚNG ĐỊNH DẠNG MỚI ====
 local function logJsonPlaceTower(towerName, vec, rotation, towerA1)
     local cost = towerPriceTable[towerName] or 0
     local vectorStr = vector3ToString(vec)
     local x = getXFromVector(vec)
-    if x then
-        hashToVector[x] = vectorStr
-        hashToName[x] = towerName
-    end
+    if x then hashToVector[x] = vectorStr end
     local entry = {
         TowerPlaceCost = cost,
         TowerPlaced = towerName,
@@ -80,6 +69,14 @@ local function logJsonUpgrade(towerX, upgradePath)
     saveJson()
 end
 
+local function logJsonSellTower(towerX)
+    local entry = {
+        TowerSold = towerX
+    }
+    table.insert(jsonData, entry)
+    saveJson()
+end
+
 local function logJsonTargetChange(at, wanted, changedAt)
     local entry = {
         TowerTargetChange = at,
@@ -90,7 +87,28 @@ local function logJsonTargetChange(at, wanted, changedAt)
     saveJson()
 end
 
--- HÀM serialize giá trị
+-- === Bạn cần tự hook/call các hàm sau đây ở script điều khiển của bạn ===
+-- logJsonPlaceTower(towerName, vector3, rotation, towerA1)
+-- logJsonUpgrade(x, path)
+-- logJsonTargetChange(at, wanted, changedAt)
+-- logJsonSellTower(x) <--- GỌI KHI BÁN TOWER
+
+print("✅ JSON logger đã bắt đầu (KHÔNG ghi TXT, chỉ JSON mới, CÓ SELL).")
+
+
+
+local startTime = time()
+local offset = 0
+local fileName = 1
+
+-- Tìm tên file mới chưa tồn tại
+while isfile(tostring(fileName)..".txt") do
+    fileName += 1
+end
+fileName = tostring(fileName)..".txt"
+writefile(fileName, "")
+
+-- Hàm serialize giá trị
 local function serialize(value)
     if type(value) == "table" then
         local result = "{"
@@ -106,7 +124,7 @@ local function serialize(value)
     end
 end
 
--- HÀM serialize tất cả argument
+-- Hàm serialize tất cả argument
 local function serializeArgs(...)
     local args = {...}
     local output = {}
@@ -116,8 +134,8 @@ local function serializeArgs(...)
     return table.concat(output, ", ")
 end
 
--- HÀM log thao tác vào file + log JSON
-local function log(method, self, serializedArgs, ...)
+-- Hàm log thao tác vào file
+local function log(method, self, serializedArgs)
     local name = tostring(self.Name)
     local text = name .. " " .. serializedArgs .. "\n"
     print(text)
@@ -126,10 +144,6 @@ local function log(method, self, serializedArgs, ...)
         appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
         appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
         startTime = time() - offset
-
-        local args = {...}
-        local towerName, vec, rotation = args[1], args[2], args[3]
-        logJsonPlaceTower(towerName, vec, rotation, tick())
 
     elseif name == "SellTower" then
         appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
@@ -141,35 +155,25 @@ local function log(method, self, serializedArgs, ...)
         appendfile(fileName, "TDX:upgradeTower(" .. serializedArgs .. ")\n")
         startTime = time() - offset
 
-        local args = {...}
-        local towerHash = args[1]
-        local upgradePath = tonumber(args[2])
-        local x = getXFromVector(towerHash)
-        logJsonUpgrade(x, upgradePath)
-
+    -- Ghi thêm ChangeQueryType
     elseif name == "ChangeQueryType" then
         appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
         appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
         startTime = time() - offset
-
-    elseif name == "TowerTargetChange" then
-        local args = {...}
-        local at, wanted, changedAt = args[1], args[2], args[3]
-        logJsonTargetChange(at, wanted, changedAt)
     end
 end
 
 -- Hook FireServer
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-    local args = {...}
-    log("FireServer", self, serializeArgs(...), ...)
+    local args = serializeArgs(...)
+    log("FireServer", self, args)
     return oldFireServer(self, ...)
 end)
 
 -- Hook InvokeServer
 local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-    local args = {...}
-    log("InvokeServer", self, serializeArgs(...), ...)
+    local args = serializeArgs(...)
+    log("InvokeServer", self, args)
     return oldInvokeServer(self, ...)
 end)
 
@@ -178,12 +182,10 @@ local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     local method = getnamecallmethod()
     if method == "FireServer" or method == "InvokeServer" then
-        log(method, self, serializeArgs(...), ...)
+        local args = serializeArgs(...)
+        log(method, self, args)
     end
     return oldNamecall(self, ...)
 end)
 
-print("✅ Ghi macro TDX (JSON định dạng mới, hash = X vector) đã bắt đầu.")
-
--- Gọi SetTowerPlaceCost("Tên tower", giá) khi lấy được giá thực tế
--- Gọi SetTowerUpgradeCost(X, path, giá) khi lấy được giá nâng path tại X (X là X của vector vị trí tower)
+print("✅ Ghi macro TDX đã bắt đầu.")
