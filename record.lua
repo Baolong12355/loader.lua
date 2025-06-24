@@ -1,5 +1,5 @@
--- TDX Macro Recorder (Safe, compatible, no argument mutation)
--- Chỉ log, không serialize lại argument, không đổi kiểu dữ liệu, luôn trả đúng args gốc cho hàm gốc
+-- TDX Macro Recorder (Safe, không bỏ sót trứng/nâng cấp)
+-- Ghi lại mọi thao tác đặt, nâng cấp, bán, đổi target, kể cả trường hợp không match tower cũ
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
@@ -49,7 +49,6 @@ local function vector3ToString(v3)
     return string.format("%.14f, %.14f, %.14f", v3.X, v3.Y, v3.Z)
 end
 
--- Chỉ log, không sửa/serialize lại args
 local function handleRemote(self, args)
     local remoteName = tostring(self.Name)
     if remoteName == "PlaceTower" then
@@ -69,54 +68,62 @@ local function handleRemote(self, args)
             tick = timeNow
         }
         local entry = {
+            Type = "PlaceTower",
             TowerPlaceCost = price,
             TowerPlaced = towerName,
             TowerVector = vectorStr,
             Rotation = rotation,
-            TowerA1 = timeNow
+            TowerA1 = timeNow,
+            RawArgs = args
         }
         table.insert(macro, entry)
         save_macro()
     elseif remoteName == "TowerUpgradeRequest" then
         local towerHash = tonumber(args[1])
         local upgradePath = tonumber(args[2])
+        -- Nếu không có info vẫn log lại toàn bộ args
         local info = placedTowers[towerHash]
-        if info then
-            local price = info.price or 0
-            local entry = {
-                UpgradeCost = price,
-                UpgradePath = upgradePath,
-                TowerUpgraded = towerHash
-            }
-            table.insert(macro, entry)
-            save_macro()
-        end
+        local price = info and info.price or nil
+        local entry = {
+            Type = "TowerUpgradeRequest",
+            TowerUpgraded = towerHash,
+            UpgradePath = upgradePath,
+            UpgradeCost = price,
+            RawArgs = args
+        }
+        table.insert(macro, entry)
+        save_macro()
     elseif remoteName == "SellTower" then
         local towerHash = tonumber(args[1])
-        if placedTowers[towerHash] then
-            local entry = {
-                TowerSold = towerHash,
-                SellAt = tick()
-            }
-            table.insert(macro, entry)
-            save_macro()
-        end
+        local info = placedTowers[towerHash]
+        local entry = {
+            Type = "SellTower",
+            TowerSold = towerHash,
+            SellAt = tick(),
+            TowerInfo = info,
+            RawArgs = args
+        }
+        table.insert(macro, entry)
+        save_macro()
     elseif remoteName == "ChangeTarget" or remoteName == "ChangeQueryType" then
         local towerHash = tonumber(args[1])
         local targetWanted = tonumber(args[2])
-        if placedTowers[towerHash] then
-            local entry = {
-                TowerTargetChange = towerHash,
-                TargetWanted = targetWanted,
-                TargetChangedAt = tick()
-            }
-            table.insert(macro, entry)
-            save_macro()
-        end
+        local entry = {
+            Type = remoteName,
+            TowerTargetChange = towerHash,
+            TargetWanted = targetWanted,
+            TargetChangedAt = tick(),
+            RawArgs = args
+        }
+        table.insert(macro, entry)
+        save_macro()
+    -- Ghi lại mọi remote khác nếu muốn
+    -- else
+    --     table.insert(macro,{Type=remoteName,RawArgs=args,Time=tick()})
+    --     save_macro()
     end
 end
 
--- Chỉ lấy args để log, KHÔNG serialize lại, KHÔNG truyền lại!
 local function getArgs(...)
     local args = {...}
     return args
@@ -125,7 +132,6 @@ end
 -- Hook FireServer
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
     local args = getArgs(...)
-    -- Chỉ log, không sửa, không serialize lại
     pcall(handleRemote, self, args)
     return oldFireServer(self, ...)
 end)
@@ -148,4 +154,4 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     return oldNamecall(self, ...)
 end)
 
-print("✅ Ghi macro TDX (hook an toàn, không sửa args, luôn trả lại hàm gốc, format chuẩn runner) đã bắt đầu. File:", fileName)
+print("✅ Ghi macro TDX (full, không mất trứng/nâng cấp, log đầy đủ args) đã bắt đầu. File:", fileName)
