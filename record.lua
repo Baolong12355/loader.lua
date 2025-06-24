@@ -1,4 +1,3 @@
-local HttpService = game:GetService("HttpService")
 local startTime = time()
 local offset = 0
 local fileName = 1
@@ -10,74 +9,76 @@ end
 fileName = tostring(fileName)..".txt"
 writefile(fileName, "")
 
--- Serialize value cho JSON ghi file
+-- Hàm serialize giá trị
 local function serialize(value)
-    if typeof(value) == "Vector3" then
-        return {__type = "Vector3", x = value.X, y = value.Y, z = value.Z}
-    elseif typeof(value) == "CFrame" then
-        return {__type = "CFrame", values = {value:GetComponents()}}
-    elseif type(value) == "table" then
-        local result = {}
+    if type(value) == "table" then
+        local result = "{"
         for k, v in pairs(value) do
-            result[tostring(k)] = serialize(v)
+            result ..= "[" .. serialize(k) .. "]=" .. serialize(v) .. ", "
         end
-        return result
+        if result ~= "{" then
+            result = result:sub(1, -3)
+        end
+        return result .. "}"
     else
-        return value
+        return tostring(value)
     end
 end
 
-local function serializeArgsTable(args)
+-- Hàm serialize tất cả argument
+local function serializeArgs(...)
+    local args = {...}
     local output = {}
     for i, v in ipairs(args) do
         output[i] = serialize(v)
     end
-    return output
+    return table.concat(output, ", ")
 end
 
-local function log(method, self, args)
+-- Hàm log thao tác vào file
+local function log(method, self, serializedArgs)
     local name = tostring(self.Name)
-    local entry = { method = method, name = name, args = serializeArgsTable(args), time = tick() }
-    -- Ghi từng entry JSON ra file, mỗi dòng một entry:
-    appendfile(fileName, HttpService:JSONEncode(entry).."\n")
-    print(name, HttpService:JSONEncode(entry))
+    local text = name.." "..serializedArgs.."\n"
+    print(text)
 
-    -- Ghi thêm các dòng runner TDX nếu muốn
     if name == "PlaceTower" then
-        appendfile(fileName, "-- PlaceTower: "..HttpService:JSONEncode(entry).."\n")
+        appendfile(fileName, "task.wait("..tostring((time() - offset) - startTime)..")\n")
+        appendfile(fileName, "TDX:placeTower("..serializedArgs..")\n")
         startTime = time() - offset
+
     elseif name == "SellTower" then
-        appendfile(fileName, "-- SellTower: "..HttpService:JSONEncode(entry).."\n")
+        appendfile(fileName, "task.wait("..tostring((time() - offset) - startTime)..")\n")
+        appendfile(fileName, "TDX:sellTower("..serializedArgs..")\n")
         startTime = time() - offset
+
     elseif name == "TowerUpgradeRequest" then
-        appendfile(fileName, "-- Upgrade: "..HttpService:JSONEncode(entry).."\n")
+        appendfile(fileName, "task.wait("..tostring((time() - offset) - startTime)..")\n")
+        appendfile(fileName, "TDX:upgradeTower("..serializedArgs..")\n")
         startTime = time() - offset
+
     elseif name == "DifficultyVoteReady" then
         offset = time()
-        appendfile(fileName, "-- DifficultyVoteReady: "..HttpService:JSONEncode(entry).."\n")
+        appendfile(fileName, "TDX:Start('ENTER DIFFICULTY')\n")
         startTime = time() - offset
+
     elseif name == "ChangeQueryType" then
-        appendfile(fileName, "-- ChangeQueryType: "..HttpService:JSONEncode(entry).."\n")
+        appendfile(fileName, "task.wait("..tostring((time() - offset) - startTime)..")\n")
+        appendfile(fileName, "TDX:changeQueryType("..serializedArgs..")\n")
         startTime = time() - offset
     end
 end
 
-local function getArgs(...)
-    local args = {...}
-    return args
-end
-
--- Hook FireServer (hook theo đúng phong cách macro chuẩn)
+-- Hook FireServer
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-    local args = getArgs(...)
-    pcall(log, "FireServer", self, args)
+    local args = serializeArgs(...)
+    log("FireServer", self, args)
     return oldFireServer(self, ...)
 end)
 
 -- Hook InvokeServer
 local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-    local args = getArgs(...)
-    pcall(log, "InvokeServer", self, args)
+    local args = serializeArgs(...)
+    log("InvokeServer", self, args)
     return oldInvokeServer(self, ...)
 end)
 
@@ -86,10 +87,10 @@ local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     local method = getnamecallmethod()
     if method == "FireServer" or method == "InvokeServer" then
-        local args = getArgs(...)
-        pcall(log, method, self, args)
+        local args = serializeArgs(...)
+        log(method, self, args)
     end
     return oldNamecall(self, ...)
 end)
 
-print("✅ Ghi macro TDX đã bắt đầu. File:", fileName)
+print("✅ Ghi macro TDX đã bắt đầu.")
