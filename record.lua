@@ -1,87 +1,64 @@
--- TDX Macro Recorder (Safe, không bỏ sót trứng/nâng cấp)
--- Ghi lại mọi thao tác đặt, nâng cấp, bán, đổi target, kể cả trường hợp không match tower cũ
+local HttpService = game:GetService("HttpService")
+local startTime = time()
+local offset = 0
+local fileName = 1
 
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-
--- Tìm tên file macro chưa bị trùng
-local fileIndex = 1
-while isfile("tdx_macro_"..fileIndex..".txt") do
-    fileIndex += 1
+-- Tìm tên file mới chưa tồn tại
+while isfile(tostring(fileName)..".txt") do
+    fileName += 1
 end
-local fileName = "tdx_macro_"..fileIndex..".txt"
+fileName = tostring(fileName)..".txt"
 writefile(fileName, "")
 
-local macro = {}
-local placedTowers = {}
-
--- Lấy giá tower từ GUI (giá trị tham khảo)
-local function get_tower_price_from_gui(towerName)
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if not playerGui then return 0 end
-    local interface = playerGui:FindFirstChild("Interface")
-    if not interface then return 0 end
-    local bottomBar = interface:FindFirstChild("BottomBar")
-    if not bottomBar then return 0 end
-    local towersBar = bottomBar:FindFirstChild("TowersBar")
-    if not towersBar then return 0 end
-    for _, tower in ipairs(towersBar:GetChildren()) do
-        if tower.Name == towerName then
-            local costFrame = tower:FindFirstChild("CostFrame")
-            if costFrame then
-                local costText = costFrame:FindFirstChild("CostText")
-                if costText then
-                    local num = tonumber(costText.Text:gsub("%D", ""))
-                    return num or 0
-                end
-            end
+-- Serialize value cho JSON ghi file
+local function serialize(value)
+    if typeof(value) == "Vector3" then
+        return {__type = "Vector3", x = value.X, y = value.Y, z = value.Z}
+    elseif typeof(value) == "CFrame" then
+        return {__type = "CFrame", values = {value:GetComponents()}}
+    elseif type(value) == "table" then
+        local result = {}
+        for k, v in pairs(value) do
+            result[tostring(k)] = serialize(v)
         end
+        return result
+    else
+        return value
     end
-    return 0
 end
 
-local function vector3ToString(v3)
-    return string.format("%.14f, %.14f, %.14f", v3.X, v3.Y, v3.Z)
+local function serializeArgsTable(args)
+    local output = {}
+    for i, v in ipairs(args) do
+        output[i] = serialize(v)
+    end
+    return output
 end
 
-local function append_macro(text)
-    appendfile(fileName, text.."\n")
-end
+local function log(method, self, args)
+    local name = tostring(self.Name)
+    local entry = { method = method, name = name, args = serializeArgsTable(args), time = tick() }
+    -- Ghi từng entry JSON ra file, mỗi dòng một entry:
+    appendfile(fileName, HttpService:JSONEncode(entry).."\n")
+    print(name, HttpService:JSONEncode(entry))
 
-local function handleRemote(self, args)
-    local remoteName = tostring(self.Name)
-    if remoteName == "PlaceTower" then
-        local towerName = tostring(args[2])
-        local vector3 = args[3]
-        if typeof(vector3) ~= "Vector3" then return end
-        local vectorStr = vector3ToString(vector3)
-        local rotation = tonumber(args[4]) or 0
-        local timeNow = tostring(tick())
-        local price = get_tower_price_from_gui(towerName)
-        local keyX = tonumber(string.format("%.14f", vector3.X))
-        placedTowers[keyX] = {
-            price = price,
-            towerName = towerName,
-            vector = vectorStr,
-            rotation = rotation,
-            tick = timeNow
-        }
-        -- Ghi từng dòng plain text (appendfile)
-        append_macro("[PlaceTower] " .. towerName .. " | Pos: " .. vectorStr .. " | Rot: " .. rotation .. " | Price: " .. price .. " | Time: " .. timeNow)
-    elseif remoteName == "TowerUpgradeRequest" then
-        local towerHash = tostring(args[1])
-        local upgradePath = tostring(args[2])
-        local info = placedTowers[tonumber(towerHash)]
-        local price = info and info.price or ""
-        append_macro("[Upgrade] TowerHash: " .. towerHash .. " | Path: " .. upgradePath .. " | Price: " .. tostring(price) .. " | Time: " .. tostring(tick()))
-    elseif remoteName == "SellTower" then
-        local towerHash = tostring(args[1])
-        local info = placedTowers[tonumber(towerHash)]
-        append_macro("[Sell] TowerHash: " .. towerHash .. " | Time: " .. tostring(tick()))
-    elseif remoteName == "ChangeTarget" or remoteName == "ChangeQueryType" then
-        local towerHash = tostring(args[1])
-        local targetWanted = tostring(args[2])
-        append_macro("[Target] TowerHash: " .. towerHash .. " | Target: " .. targetWanted .. " | Time: " .. tostring(tick()))
+    -- Ghi thêm các dòng runner TDX nếu muốn
+    if name == "PlaceTower" then
+        appendfile(fileName, "-- PlaceTower: "..HttpService:JSONEncode(entry).."\n")
+        startTime = time() - offset
+    elseif name == "SellTower" then
+        appendfile(fileName, "-- SellTower: "..HttpService:JSONEncode(entry).."\n")
+        startTime = time() - offset
+    elseif name == "TowerUpgradeRequest" then
+        appendfile(fileName, "-- Upgrade: "..HttpService:JSONEncode(entry).."\n")
+        startTime = time() - offset
+    elseif name == "DifficultyVoteReady" then
+        offset = time()
+        appendfile(fileName, "-- DifficultyVoteReady: "..HttpService:JSONEncode(entry).."\n")
+        startTime = time() - offset
+    elseif name == "ChangeQueryType" then
+        appendfile(fileName, "-- ChangeQueryType: "..HttpService:JSONEncode(entry).."\n")
+        startTime = time() - offset
     end
 end
 
@@ -90,17 +67,17 @@ local function getArgs(...)
     return args
 end
 
--- Hook FireServer
+-- Hook FireServer (hook theo đúng phong cách macro chuẩn)
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
     local args = getArgs(...)
-    pcall(handleRemote, self, args)
+    pcall(log, "FireServer", self, args)
     return oldFireServer(self, ...)
 end)
 
 -- Hook InvokeServer
 local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
     local args = getArgs(...)
-    pcall(handleRemote, self, args)
+    pcall(log, "InvokeServer", self, args)
     return oldInvokeServer(self, ...)
 end)
 
@@ -110,9 +87,9 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     local method = getnamecallmethod()
     if method == "FireServer" or method == "InvokeServer" then
         local args = getArgs(...)
-        pcall(handleRemote, self, args)
+        pcall(log, method, self, args)
     end
     return oldNamecall(self, ...)
 end)
 
-print("✅ Ghi macro TDX (full, không mất trứng/nâng cấp, log đầy đủ args, dạng plain text) đã bắt đầu. File:", fileName)
+print("✅ Ghi macro TDX đã bắt đầu. File:", fileName)
