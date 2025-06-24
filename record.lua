@@ -91,67 +91,140 @@ print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
 
 
 local txtFile = "record.txt"
-local outJson = "tdx/macros/y.json"  -- đổi tên nếu cần
+local outJson = "tdx/macros/y.json"
 
-if not isfile(txtFile) then
-    error("Chưa có file record.txt!")
-end
-
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
-local macro = readfile(txtFile)
-local logs = {}
 
--- Helper: Đảm bảo số float giống mẫu
-local function floatfix(x)
-    return tonumber(string.format("%.15g", tonumber(x)))
-end
-
-for line in macro:gmatch("[^\r\n]+") do
-    -- PlaceTower: TDX:placeTower("Name", Vector3.new(x, y, z), rot, a1, cost)
-    local towerName, x, y, z, rot, a1, cost = line:match('TDX:placeTower%(%s*"([^"]+)",%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^,]+),%s*([^,]+),%s*([^,%s%)]+)')
-    if towerName and x and y and z and rot and a1 and cost then
-        table.insert(logs, {
-            TowerPlaceCost = tonumber(cost),
-            TowerPlaced = towerName,
-            TowerVector = string.format("%s, %s, %s", floatfix(x), floatfix(y), floatfix(z)),
-            Rotation = tonumber(rot),
-            TowerA1 = tostring(a1)
-        })
-    else
-        -- UpgradeTower: TDX:upgradeTower(X, path, cost)
-        local X, path, cost = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-        if X and path and cost then
-            table.insert(logs, {
-                UpgradeCost = tonumber(cost),
-                UpgradePath = tonumber(path),
-                TowerUpgraded = floatfix(X)
-            })
-        else
-            -- ChangeTarget: TDX:changeQueryType(X, targetType)
-            local X, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
-            if X and targetType then
-                table.insert(logs, {
-                    ChangeTarget = floatfix(X),
-                    TargetType = tonumber(targetType)
-                })
-            else
-                -- SellTower: TDX:sellTower(X)
-                local X = line:match('TDX:sellTower%(([^%)]+)%)')
-                if X then
-                    table.insert(logs, {
-                        SellTower = floatfix(X)
-                    })
+-- Duy trì cache giá đặt tower (tên -> cost)
+local function GetTowerPlaceCostByName(name)
+    -- Lấy từ UI nếu có (TowersBar)
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if playerGui then
+        local interface = playerGui:FindFirstChild("Interface")
+        local bottomBar = interface and interface:FindFirstChild("BottomBar")
+        local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
+        if towersBar then
+            for _, tower in ipairs(towersBar:GetChildren()) do
+                if tower.Name ~= "TowerTemplate" and not tower:IsA("UIGridLayout") then
+                    local costFrame = tower:FindFirstChild("CostFrame")
+                    local costText = costFrame and costFrame:FindFirstChild("CostText")
+                    if costText and tower.Name == name then
+                        local raw = tostring(costText.Text):gsub("%D", "")
+                        return tonumber(raw) or 0
+                    end
                 end
             end
         end
     end
+    return nil
 end
 
--- Đảm bảo thư mục tdx/macros tồn tại (nếu dùng synapse hoặc executor có makefolder)
+-- Lấy TowerClass
+local function SafeRequire(path)
+    local ok, result = pcall(require, path)
+    return ok and result or nil
+end
+
+local function LoadTowerClass()
+    local ps = player:FindFirstChild("PlayerScripts")
+    local client = ps and ps:FindFirstChild("Client")
+    local gameClass = client and client:FindFirstChild("GameClass")
+    local towerModule = gameClass and gameClass:FindFirstChild("TowerClass")
+    return towerModule and SafeRequire(towerModule)
+end
+
+local TowerClass = nil
+
+-- Helper: giống mẫu
+local function floatfix(x)
+    return tonumber(string.format("%.15g", tonumber(x)))
+end
+
+-- Helper: parse vector "x, y, z"
+local function parseVec(str)
+    local x, y, z = str:match("([-0-9%.]+),%s*([-0-9%.]+),%s*([-0-9%.]+)")
+    return x and tonumber(x), y and tonumber(y), z and tonumber(z)
+end
+
+-- Lấy giá nâng cấp thực tế (theo X, Path, Level)
+local function getUpgradeCostByXandPath(xTarget, path)
+    TowerClass = TowerClass or LoadTowerClass()
+    if not TowerClass then return nil end
+    for _, tower in pairs(TowerClass.GetTowers()) do
+        local model = tower.Character and tower.Character:GetCharacterModel()
+        local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
+        if root and math.abs(root.Position.X - xTarget) < 0.1 then
+            -- Lấy cost nâng cấp path hiện tại
+            local lvl = tower.LevelHandler:GetLevelOnPath(path)
+            local cost = tower.LevelHandler:GetLevelUpgradeCost(path, lvl+1)
+            return cost
+        end
+    end
+    return nil
+end
+
+-- Tự động chuyển đổi liên tục
 if makefolder then
     pcall(function() makefolder("tdx") end)
     pcall(function() makefolder("tdx/macros") end)
 end
 
-writefile(outJson, HttpService:JSONEncode(logs)) 
-print("✅ Đã tạo macro " .. outJson .. " tương thích Macro Runner!")            
+while true do
+    if isfile(txtFile) then
+        local macro = readfile(txtFile)
+        local logs = {}
+        for line in macro:gmatch("[^\r\n]+") do
+            -- PlaceTower: TDX:placeTower("Name", Vector3.new(x, y, z), rot, a1, cost)
+            local towerName, x, y, z, rot, a1, cost = line:match('TDX:placeTower%(%s*"([^"]+)",%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^,]+),%s*([^,]+),%s*([^,%s%)]+)')
+            if towerName and x and y and z and rot and a1 then
+                local realCost = tonumber(cost)
+                if not realCost or realCost == 0 then
+                    realCost = GetTowerPlaceCostByName(towerName) or 0
+                end
+                table.insert(logs, {
+                    TowerPlaceCost = realCost,
+                    TowerPlaced = towerName,
+                    TowerVector = string.format("%s, %s, %s", floatfix(x), floatfix(y), floatfix(z)),
+                    Rotation = tonumber(rot),
+                    TowerA1 = tostring(a1)
+                })
+            else
+                -- UpgradeTower: TDX:upgradeTower(X, path, cost)
+                local X, path, ucost = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+                if X and path then
+                    local realCost = tonumber(ucost)
+                    if not realCost or realCost == 0 then
+                        realCost = getUpgradeCostByXandPath(floatfix(X), tonumber(path)) or 0
+                    end
+                    table.insert(logs, {
+                        UpgradeCost = realCost,
+                        UpgradePath = tonumber(path),
+                        TowerUpgraded = floatfix(X)
+                    })
+                else
+                    -- ChangeTarget: TDX:changeQueryType(X, targetType)
+                    local X, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
+                    if X and targetType then
+                        table.insert(logs, {
+                            ChangeTarget = floatfix(X),
+                            TargetType = tonumber(targetType)
+                        })
+                    else
+                        -- SellTower: TDX:sellTower(X)
+                        local X = line:match('TDX:sellTower%(([^%)]+)%)')
+                        if X then
+                            table.insert(logs, {
+                                SellTower = floatfix(X)
+                            })
+                        end
+                    end
+                end
+            end
+        end
+        writefile(outJson, HttpService:JSONEncode(logs))
+        -- print("✅ [auto] Đã update macro " .. outJson)
+    end
+    wait(2)
+end
