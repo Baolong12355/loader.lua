@@ -9,82 +9,16 @@ end
 fileName = tostring(fileName)..".txt"
 writefile(fileName, "")
 
+local jsonOldFile = string.gsub(fileName, ".txt$", ".json")
+local jsonNewFile = string.gsub(fileName, ".txt$", "_new.json")
+
+--=== DỮ LIỆU JSON LOG (CŨ) ===--
 local jsonData = {}
 local towerPriceTable = {}      -- towerName -> price
-local towerUpgradeTable = {}    -- towerX -> { [path]=cost }
-local hashToVector = {}         -- towerX -> vector string
+local towerUpgradeTable = {}    -- towerHash -> {[path]=cost}
+local towerHashToVector = {}    -- towerHash -> TowerVector string
 
--- Helper: chuyển Vector3 thành string
-local function vector3ToString(vec)
-    if typeof(vec) == "Vector3" then
-        return string.format("%.8f, %.8f, %.8f", vec.X, vec.Y, vec.Z)
-    elseif type(vec) == "table" and vec.X and vec.Y and vec.Z then
-        return string.format("%.8f, %.8f, %.8f", vec.X, vec.Y, vec.Z)
-    end
-    return tostring(vec)
-end
-
-local function getXFromVector(vec)
-    if typeof(vec) == "Vector3" then return vec.X
-    elseif type(vec) == "table" and vec.X then return vec.X
-    elseif type(vec) == "number" then return vec
-    elseif type(vec) == "string" then
-        -- string: "x, y, z" => lấy x
-        local x = tonumber((vec):match("^[^,]+"))
-        return x
-    end
-    return nil
-end
-
-local function saveJson()
-    local encoded = game:GetService("HttpService"):JSONEncode(jsonData)
-    writefile(string.gsub(fileName, ".txt$", ".json"), encoded)
-end
-
-function SetTowerPlaceCost(towerName, cost) towerPriceTable[towerName] = cost end
-function SetTowerUpgradeCost(towerX, path, cost)
-    towerUpgradeTable[towerX] = towerUpgradeTable[towerX] or {}
-    towerUpgradeTable[towerX][path] = cost
-end
-
-local function logJsonPlaceTower(towerName, vec, rotation, towerA1)
-    local cost = towerPriceTable[towerName] or 0
-    local vectorStr = vector3ToString(vec)
-    local x = getXFromVector(vec)
-    if x then hashToVector[x] = vectorStr end
-    local entry = {
-        TowerPlaceCost = cost,
-        TowerPlaced = towerName,
-        TowerVector = vectorStr,
-        Rotation = rotation or 0,
-        TowerA1 = tostring(towerA1 or tick())
-    }
-    table.insert(jsonData, entry)
-    saveJson()
-end
-
-local function logJsonUpgrade(towerX, upgradePath)
-    local cost = (towerUpgradeTable[towerX] and towerUpgradeTable[towerX][upgradePath]) or 0
-    local entry = {
-        UpgradeCost = cost,
-        UpgradePath = upgradePath,
-        TowerUpgraded = towerX
-    }
-    table.insert(jsonData, entry)
-    saveJson()
-end
-
-local function logJsonTargetChange(at, wanted, changedAt)
-    local entry = {
-        TowerTargetChange = at,
-        TargetWanted = wanted,
-        TargetChangedAt = changedAt
-    }
-    table.insert(jsonData, entry)
-    saveJson()
-end
-
--- Macro TXT log không đổi
+-- Helper: serialize value (cũ, giữ lại để không ảnh hưởng logic macro txt)
 local function serialize(value)
     if type(value) == "table" then
         local result = "{"
@@ -108,16 +42,115 @@ local function serializeArgs(...)
     return table.concat(output, ", ")
 end
 
+-- Helper: convert Vector3 to string
+local function vector3ToString(vec)
+    if typeof(vec) == "Vector3" then
+        return string.format("%.8f, %.8f, %.8f", vec.X, vec.Y, vec.Z)
+    elseif type(vec) == "table" and vec.X and vec.Y and vec.Z then
+        return string.format("%.8f, %.8f, %.8f", vec.X, vec.Y, vec.Z)
+    end
+    return tostring(vec)
+end
+
+-- Helper: lấy X từ vector string ("x, y, z"), hoặc từ vector object
+local function getXFromVector(vec)
+    if typeof(vec) == "Vector3" then return vec.X
+    elseif type(vec) == "table" and vec.X then return vec.X
+    elseif type(vec) == "number" then return vec
+    elseif type(vec) == "string" then
+        local x = tonumber((vec):match("^[^,]+"))
+        return x
+    end
+    return nil
+end
+
+-- Helper: save JSON cũ (full hash)
+local function saveJsonOld()
+    local encoded = game:GetService("HttpService"):JSONEncode(jsonData)
+    writefile(jsonOldFile, encoded)
+end
+
+-- Helper: convert và ghi lại JSON mới (chuẩn mới, chỉ X)
+local function rewriteJsonNew()
+    local HttpService = game:GetService("HttpService")
+    local oldData = {}
+    if isfile(jsonOldFile) then
+        oldData = HttpService:JSONDecode(readfile(jsonOldFile))
+    end
+
+    -- hash -> X mapping
+    local hashToX = {}
+    for _, v in ipairs(oldData) do
+        if v.TowerPlaceCost and v.TowerVector then
+            -- Nếu có trường hash, lấy hash->X
+            if v.hash then
+                local x = tonumber((v.TowerVector):match("^[^,]+"))
+                if x then hashToX[v.hash] = x end
+            end
+        end
+    end
+
+    local outData = {}
+    for _, v in ipairs(oldData) do
+        if v.TowerPlaceCost and v.TowerVector then
+            table.insert(outData, v)
+        elseif v.UpgradeCost and v.UpgradePath and v.TowerHash then
+            -- lấy X từ hash
+            local towerX = hashToX[v.TowerHash] or tonumber(v.TowerHash) or 0
+            table.insert(outData, {
+                UpgradeCost = v.UpgradeCost,
+                UpgradePath = v.UpgradePath,
+                TowerUpgraded = towerX
+            })
+        elseif v.TowerTargetChange then
+            table.insert(outData, v)
+        end
+    end
+
+    writefile(jsonNewFile, HttpService:JSONEncode(outData))
+end
+
+-- Các hàm hỗ trợ cập nhật bảng giá
+function SetTowerPlaceCost(towerName, cost)
+    towerPriceTable[towerName] = cost
+end
+function SetTowerUpgradeCost(towerHash, path, cost)
+    towerUpgradeTable[towerHash] = towerUpgradeTable[towerHash] or {}
+    towerUpgradeTable[towerHash][path] = cost
+end
+
+--=== LOGIC GHI LOG (KHÔNG ĐỔI) ===--
 local function log(method, self, serializedArgs, ...)
     local name = tostring(self.Name)
+    local text = name .. " " .. serializedArgs .. "\n"
+    print(text)
+
     if name == "PlaceTower" then
         appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
         appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
         startTime = time() - offset
 
+        -- Ghi JSON cũ
         local args = {...}
-        local towerName, vec, rotation = args[1], args[2], args[3]
-        logJsonPlaceTower(towerName, vec, rotation, tick())
+        local towerName = args[1]
+        local towerVec = vector3ToString(args[2])
+        local rotation = args[3] or 0
+        local towerHash = tostring(args[4] or #jsonData+1)
+
+        local towerCost = towerPriceTable[towerName] or 0
+
+        local towerEntry = {
+            TowerPlaceCost = towerCost,
+            TowerPlaced = towerName,
+            TowerVector = towerVec,
+            Rotation = rotation,
+            TowerA1 = tick(),
+            hash = towerHash -- để tiện chuyển đổi!
+        }
+        table.insert(jsonData, towerEntry)
+        towerHashToVector[towerHash] = towerVec
+        saveJsonOld()
+        rewriteJsonNew()
 
     elseif name == "SellTower" then
         appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
@@ -130,10 +163,26 @@ local function log(method, self, serializedArgs, ...)
         startTime = time() - offset
 
         local args = {...}
-        local towerHash = args[1]
+        local towerHash = tostring(args[1])
         local upgradePath = tonumber(args[2])
-        local x = getXFromVector(towerHash)
-        logJsonUpgrade(x, upgradePath)
+        local upgradeCost = 0
+        if towerUpgradeTable[towerHash] and towerUpgradeTable[towerHash][upgradePath] then
+            upgradeCost = towerUpgradeTable[towerHash][upgradePath]
+        end
+        if not towerUpgradeTable[towerHash] then towerUpgradeTable[towerHash] = {} end
+        if not towerUpgradeTable[towerHash][upgradePath] then
+            towerUpgradeTable[towerHash][upgradePath] = upgradeCost
+        end
+
+        -- Ghi JSON cũ
+        local upgradeEntry = {
+            UpgradeCost = upgradeCost,
+            TowerHash = towerHash,
+            UpgradePath = upgradePath
+        }
+        table.insert(jsonData, upgradeEntry)
+        saveJsonOld()
+        rewriteJsonNew()
 
     elseif name == "ChangeQueryType" then
         appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
@@ -143,7 +192,14 @@ local function log(method, self, serializedArgs, ...)
     elseif name == "TowerTargetChange" then
         local args = {...}
         local at, wanted, changedAt = args[1], args[2], args[3]
-        logJsonTargetChange(at, wanted, changedAt)
+        local targetEntry = {
+            TowerTargetChange = at,
+            TargetWanted = wanted,
+            TargetChangedAt = changedAt
+        }
+        table.insert(jsonData, targetEntry)
+        saveJsonOld()
+        rewriteJsonNew()
     end
 end
 
@@ -171,7 +227,7 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     return oldNamecall(self, ...)
 end)
 
-print("✅ Ghi macro TDX (JSON định dạng mới, hash = X vị trí) đã bắt đầu.")
+print("✅ Macro record + xuất JSON chuẩn mới đồng thời! File _new.json sẽ luôn đúng format bạn cần.")
 
 -- Gọi SetTowerPlaceCost("Tên tower", giá) khi lấy được giá thực tế
--- Gọi SetTowerUpgradeCost(X, path, giá) khi lấy được giá nâng path tại X (X là X của vector vị trí tower)
+-- Gọi SetTowerUpgradeCost(hash, path, giá) khi lấy được giá nâng path (hash là id tower – chính là hash macro cũ dùng)
