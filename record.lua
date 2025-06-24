@@ -1,11 +1,11 @@
--- TDX Macro Recorder - Safe Hook Version (only logs, never changes args, always returns original)
--- Compatible with X position macro replay and avoids "tonumber base out of range" or argument errors
+-- TDX Macro Recorder (Safe, compatible, no argument mutation)
+-- Chỉ log, không serialize lại argument, không đổi kiểu dữ liệu, luôn trả đúng args gốc cho hàm gốc
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
--- Find new macro filename
+-- Tìm tên file macro chưa bị trùng
 local fileIndex = 1
 while isfile("tdx_macro_"..fileIndex..".json") do
     fileIndex += 1
@@ -16,7 +16,7 @@ writefile(fileName, "[]")
 local macro = {}
 local placedTowers = {}
 
--- Get tower price from GUI
+-- Lấy giá tower từ GUI (giá trị tham khảo)
 local function get_tower_price_from_gui(towerName)
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if not playerGui then return 0 end
@@ -49,7 +49,7 @@ local function vector3ToString(v3)
     return string.format("%.14f, %.14f, %.14f", v3.X, v3.Y, v3.Z)
 end
 
--- Only logs, never changes arguments, always returns original
+-- Chỉ log, không sửa/serialize lại args
 local function handleRemote(self, args)
     local remoteName = tostring(self.Name)
     if remoteName == "PlaceTower" then
@@ -78,38 +78,35 @@ local function handleRemote(self, args)
         table.insert(macro, entry)
         save_macro()
     elseif remoteName == "TowerUpgradeRequest" then
-        local towerHash = tostring(args[1])
+        local towerHash = tonumber(args[1])
         local upgradePath = tonumber(args[2])
-        local keyX = tonumber(towerHash)
-        local info = placedTowers[keyX]
+        local info = placedTowers[towerHash]
         if info then
             local price = info.price or 0
             local entry = {
                 UpgradeCost = price,
                 UpgradePath = upgradePath,
-                TowerUpgraded = keyX
+                TowerUpgraded = towerHash
             }
             table.insert(macro, entry)
             save_macro()
         end
     elseif remoteName == "SellTower" then
-        local towerHash = tostring(args[1])
-        local keyX = tonumber(towerHash)
-        if placedTowers[keyX] then
+        local towerHash = tonumber(args[1])
+        if placedTowers[towerHash] then
             local entry = {
-                TowerSold = keyX,
+                TowerSold = towerHash,
                 SellAt = tick()
             }
             table.insert(macro, entry)
             save_macro()
         end
     elseif remoteName == "ChangeTarget" or remoteName == "ChangeQueryType" then
-        local towerHash = tostring(args[1])
+        local towerHash = tonumber(args[1])
         local targetWanted = tonumber(args[2])
-        local keyX = tonumber(towerHash)
-        if placedTowers[keyX] then
+        if placedTowers[towerHash] then
             local entry = {
-                TowerTargetChange = keyX,
+                TowerTargetChange = towerHash,
                 TargetWanted = targetWanted,
                 TargetChangedAt = tick()
             }
@@ -119,18 +116,16 @@ local function handleRemote(self, args)
     end
 end
 
--- Argument passthrough for logging only
+-- Chỉ lấy args để log, KHÔNG serialize lại, KHÔNG truyền lại!
 local function getArgs(...)
     local args = {...}
-    local out = {}
-    for i,v in ipairs(args) do out[i] = v end
-    return out
+    return args
 end
 
 -- Hook FireServer
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
     local args = getArgs(...)
-    -- Only log, do not touch/modify/serialize/deserialize
+    -- Chỉ log, không sửa, không serialize lại
     pcall(handleRemote, self, args)
     return oldFireServer(self, ...)
 end)
