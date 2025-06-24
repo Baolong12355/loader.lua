@@ -2,10 +2,17 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
-local macro = {}
-local placedTowers = {}  -- key: X, value: {price, towerName, vector, rotation, tick}
+-- Tìm tên file macro mới chưa tồn tại
+local fileIndex = 1
+while isfile("tdx_macro_"..fileIndex..".json") do
+    fileIndex += 1
+end
+local fileName = "tdx_macro_"..fileIndex..".json"
+writefile(fileName, "[]")
 
-local fileName = "tdx_macro.json"
+-- Dữ liệu macro và mapping X vị trí
+local macro = {}
+local placedTowers = {}
 
 -- Lấy giá tower từ GUI
 local function get_tower_price_from_gui(towerName)
@@ -36,92 +43,81 @@ local function save_macro()
     writefile(fileName, HttpService:JSONEncode(macro))
 end
 
--- Đặt tower
-local function onPlaceTower(args)
-    -- args = {hash, towerName, vector3, rotation, ...}
-    local towerName = tostring(args[2])
-    local vector3 = args[3]
-    if typeof(vector3) ~= "Vector3" then return end
-    local vectorStr = string.format("%.14f, %.14f, %.14f", vector3.X, vector3.Y, vector3.Z)
-    local rotation = tonumber(args[4]) or 0
-    local timeNow = tostring(tick())
-    local price = get_tower_price_from_gui(towerName)
-    local keyX = tonumber(string.format("%.14f", vector3.X))
-    placedTowers[keyX] = {
-        price = price,
-        towerName = towerName,
-        vector = vectorStr,
-        rotation = rotation,
-        tick = timeNow
-    }
-    local entry = {
-        TowerPlaceCost = price,
-        TowerPlaced = towerName,
-        TowerVector = vectorStr,
-        Rotation = rotation,
-        TowerA1 = timeNow
-    }
-    table.insert(macro, entry)
-    save_macro()
+local function vector3ToString(v3)
+    return string.format("%.14f, %.14f, %.14f", v3.X, v3.Y, v3.Z)
 end
 
--- Nâng cấp tower
-local function onUpgradeTower(args)
-    -- args = {hash, upgradePath, ...}
-    local towerHash = tostring(args[1])
-    local upgradePath = tonumber(args[2])
-    local keyX = tonumber(towerHash)
-    local info = placedTowers[keyX]
-    if info then
-        local price = info.price or 0
+-- Xử lý từng remote
+local function handleRemote(self, args)
+    local remoteName = tostring(self.Name)
+    if remoteName == "PlaceTower" then
+        local towerName = tostring(args[2])
+        local vector3 = args[3]
+        if typeof(vector3) ~= "Vector3" then return end
+        local vectorStr = vector3ToString(vector3)
+        local rotation = tonumber(args[4]) or 0
+        local timeNow = tostring(tick())
+        local price = get_tower_price_from_gui(towerName)
+        local keyX = tonumber(string.format("%.14f", vector3.X))
+        placedTowers[keyX] = {
+            price = price,
+            towerName = towerName,
+            vector = vectorStr,
+            rotation = rotation,
+            tick = timeNow
+        }
         local entry = {
-            UpgradeCost = price,
-            UpgradePath = upgradePath,
-            TowerUpgraded = keyX
+            TowerPlaceCost = price,
+            TowerPlaced = towerName,
+            TowerVector = vectorStr,
+            Rotation = rotation,
+            TowerA1 = timeNow
         }
         table.insert(macro, entry)
         save_macro()
-    else
-        warn("[TDX Macro] Không tìm thấy vị trí X cho hash khi upgrade!")
+    elseif remoteName == "TowerUpgradeRequest" then
+        local towerHash = tostring(args[1])
+        local upgradePath = tonumber(args[2])
+        local keyX = tonumber(towerHash)
+        local info = placedTowers[keyX]
+        if info then
+            local price = info.price or 0
+            local entry = {
+                UpgradeCost = price,
+                UpgradePath = upgradePath,
+                TowerUpgraded = keyX
+            }
+            table.insert(macro, entry)
+            save_macro()
+        end
+    elseif remoteName == "SellTower" then
+        local towerHash = tostring(args[1])
+        local keyX = tonumber(towerHash)
+        if placedTowers[keyX] then
+            local entry = {
+                TowerSold = keyX,
+                SellAt = tick()
+            }
+            table.insert(macro, entry)
+            save_macro()
+        end
+    elseif remoteName == "ChangeTarget" or remoteName == "ChangeQueryType" then
+        local towerHash = tostring(args[1])
+        local targetWanted = tonumber(args[2])
+        local keyX = tonumber(towerHash)
+        if placedTowers[keyX] then
+            local entry = {
+                TowerTargetChange = keyX,
+                TargetWanted = targetWanted,
+                TargetChangedAt = tick()
+            }
+            table.insert(macro, entry)
+            save_macro()
+        end
     end
 end
 
--- Bán tower
-local function onSellTower(args)
-    -- args = {hash, ...}
-    local towerHash = tostring(args[1])
-    local keyX = tonumber(towerHash)
-    if placedTowers[keyX] then
-        local entry = {
-            TowerSold = keyX,
-            SellAt = tick()
-        }
-        table.insert(macro, entry)
-        save_macro()
-    else
-        warn("[TDX Macro] Không tìm thấy vị trí X cho hash khi bán tower!")
-    end
-end
-
--- Đổi target
-local function onChangeTarget(args)
-    -- args = {hash, targetWanted, ...}
-    local towerHash = tostring(args[1])
-    local targetWanted = tonumber(args[2])
-    local keyX = tonumber(towerHash)
-    if placedTowers[keyX] then
-        local entry = {
-            TowerTargetChange = keyX,
-            TargetWanted = targetWanted,
-            TargetChangedAt = tick()
-        }
-        table.insert(macro, entry)
-        save_macro()
-    else
-        warn("[TDX Macro] Không tìm thấy vị trí X cho hash khi đổi target!")
-    end
-end
-
+-- Chuẩn hóa lấy argument
 local function serializeArgs(...)
     local args = {...}
     local out = {}
@@ -129,23 +125,29 @@ local function serializeArgs(...)
     return out
 end
 
+-- Hook FireServer
+local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+    local args = serializeArgs(...)
+    handleRemote(self, args)
+    return oldFireServer(self, ...)
+end)
+
+-- Hook InvokeServer
+local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+    local args = serializeArgs(...)
+    handleRemote(self, args)
+    return oldInvokeServer(self, ...)
+end)
+
+-- Hook __namecall
 local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     local method = getnamecallmethod()
-    if not checkcaller() and (method == "FireServer" or method == "InvokeServer") then
-        local remoteName = self.Name
+    if method == "FireServer" or method == "InvokeServer" then
         local args = serializeArgs(...)
-        if remoteName == "PlaceTower" then
-            onPlaceTower(args)
-        elseif remoteName == "TowerUpgradeRequest" then
-            onUpgradeTower(args)
-        elseif remoteName == "SellTower" then
-            onSellTower(args)
-        elseif remoteName == "ChangeTarget" then
-            onChangeTarget(args)
-        end
+        handleRemote(self, args)
     end
     return oldNamecall(self, ...)
 end)
 
-print("✅ Macro TDX (chuẩn format, chạy tốt với runner của bạn) đã HOẠT ĐỘNG.")
+print("✅ Ghi macro TDX (dùng full hook, luôn trả lại hàm gốc, format chuẩn runner) đã bắt đầu. File:", fileName)
