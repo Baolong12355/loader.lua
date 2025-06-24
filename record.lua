@@ -38,22 +38,22 @@ end
 -- Hàm log thao tác vào file
 local function log(method, self, serializedArgs)
     local name = tostring(self.Name)
-    local text = name.." "..serializedArgs.."\n"
+    local text = name .. " " .. serializedArgs .. "\n"
     print(text)
 
     if name == "PlaceTower" then
-        appendfile(fileName, "task.wait("..tostring((time() - offset) - startTime)..")\n")
-        appendfile(fileName, "TDX:placeTower("..serializedArgs..")\n")
+        appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
         startTime = time() - offset
 
     elseif name == "SellTower" then
-        appendfile(fileName, "task.wait("..tostring((time() - offset) - startTime)..")\n")
-        appendfile(fileName, "TDX:sellTower("..serializedArgs..")\n")
+        appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
         startTime = time() - offset
 
     elseif name == "TowerUpgradeRequest" then
-        appendfile(fileName, "task.wait("..tostring((time() - offset) - startTime)..")\n")
-        appendfile(fileName, "TDX:upgradeTower("..serializedArgs..")\n")
+        appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:upgradeTower(" .. serializedArgs .. ")\n")
         startTime = time() - offset
 
     elseif name == "DifficultyVoteReady" then
@@ -61,9 +61,10 @@ local function log(method, self, serializedArgs)
         appendfile(fileName, "TDX:Start('ENTER DIFFICULTY')\n")
         startTime = time() - offset
 
+    -- Ghi thêm ChangeQueryType
     elseif name == "ChangeQueryType" then
-        appendfile(fileName, "task.wait("..tostring((time() - offset) - startTime)..")\n")
-        appendfile(fileName, "TDX:changeQueryType("..serializedArgs..")\n")
+        appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
         startTime = time() - offset
     end
 end
