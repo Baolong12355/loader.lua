@@ -92,21 +92,58 @@ print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
 local txtFile = "record.txt"
 local outJson = "tdx/macros/y.json"
 
--- Tải config tower
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
+
 local TDX_Shared = game:GetService("ReplicatedStorage"):WaitForChild("TDX_Shared")
 local Common = TDX_Shared:WaitForChild("Common")
 local ResourceManager = require(Common:WaitForChild("ResourceManager"))
 
-local HttpService = game:GetService("HttpService")
+-- Lấy giá đặt tower từ GUI
+local function GetTowerPlaceCostByName(name)
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if not playerGui then return 0 end
+    local interface = playerGui:FindFirstChild("Interface")
+    if not interface then return 0 end
+    local bottomBar = interface:FindFirstChild("BottomBar")
+    if not bottomBar then return 0 end
+    local towersBar = bottomBar:FindFirstChild("TowersBar")
+    if not towersBar then return 0 end
+    for _, tower in ipairs(towersBar:GetChildren()) do
+        if tower.Name == name then
+            local costFrame = tower:FindFirstChild("CostFrame")
+            local costText = costFrame and costFrame:FindFirstChild("CostText")
+            if costText then
+                local raw = tostring(costText.Text):gsub("%D", "")
+                return tonumber(raw) or 0
+            end
+        end
+    end
+    return 0
+end
 
--- Tạo folder nếu cần
+-- Lấy giá nâng cấp từ config
+local function GetUpgradeCost(towerName, path, targetLevel, discount)
+    local towerConfig = ResourceManager.GetTowerConfig(towerName)
+    if not towerConfig then return 0 end
+    local pathData = towerConfig.UpgradePathData["Path"..path.."Data"]
+    if not pathData then return 0 end
+    local upgradeInfo = pathData[targetLevel]
+    if not upgradeInfo then return 0 end
+    local baseCost = upgradeInfo.Cost
+    local finalCost = baseCost * (1 - (discount or 0))
+    finalCost = math.floor(finalCost)
+    return finalCost
+end
+
+-- Map x (tọa độ X) -> thông tin đặt tower
+local x2tower = {}
+
 if makefolder then
     pcall(function() makefolder("tdx") end)
     pcall(function() makefolder("tdx/macros") end)
 end
-
--- Map hash -> towerName, đặt khi placeTower
-local hash2tower = {} -- hash => {name=..., vector=...}
 
 while true do
     if isfile(txtFile) then
@@ -115,55 +152,63 @@ while true do
         local macroLines = {}
         for l in macro:gmatch("[^\r\n]+") do table.insert(macroLines, l) end
 
-        -- Quét từng thao tác
         for idx, line in ipairs(macroLines) do
-            -- PlaceTower
-            local x, name, y, rot, z, a1 = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+            -- PlaceTower: log x2tower
+            local x, name, y, rot, z, a1 = line:match('TDX:placeTower%(([^,]+),%s*"([^"]+)",%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
             if x and name and y and rot and z and a1 then
-                name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
-                local vector = string.format("%.8g, %.8g, %.8g", tonumber(x), tonumber(y), tonumber(z))
-                -- Tạo fake hash, trên thực tế nếu macro gốc log hash thì dùng hash thật
-                local hash = vector.."_"..name
-                -- Lưu ánh xạ hash -> tên để tra sau này
-                hash2tower[hash] = {name=name, vector=vector}
-                -- Lấy giá đặt tower từ config
-                local towerConfig = ResourceManager.GetTowerConfig(name)
-                local cost = towerConfig and towerConfig.Cost or 0
+                local fx = tonumber(x)
+                x2tower[fx] = {name=name, y=tonumber(y), z=tonumber(z), rot=tonumber(rot), a1=a1}
+                local cost = GetTowerPlaceCostByName(name)
                 table.insert(logs, {
                     TowerPlaceCost = cost,
                     TowerPlaced = name,
-                    TowerVector = vector,
+                    TowerVector = string.format("%.8g, %.8g, %.8g", fx, tonumber(y), tonumber(z)),
                     Rotation = tonumber(rot),
-                    TowerA1 = tostring(a1),
-                    Hash = hash -- log lại hash để upgrade tra
+                    TowerA1 = tostring(a1)
                 })
             else
-                -- UpgradeTower
-                local hash, path, dummy = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-                if hash and path then
-                    local towerInfo = hash2tower[hash]
+                -- UpgradeTower: log UpgradeCost, UpgradePath, TowerUpgraded = x
+                local x, path, levelBefore, discount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+                if x and path and levelBefore then
+                    local fx = tonumber(x)
+                    local towerInfo = x2tower[fx]
                     if towerInfo then
-                        local towerName = towerInfo.name
-                        -- Phải log lại cấp path trước khi nâng mới đúng (giả sử cấp path hiện tại là curLevel)
-                        -- Ở đây ví dụ macro gốc đã log cấp path trước khi nâng ở biến dummy, hoặc bạn tự quản lý biến này.
-                        local curLevel = tonumber(dummy)
-                        -- Lấy giá nâng cấp từ config:
-                        local towerConfig = ResourceManager.GetTowerConfig(towerName)
-                        local pathData = towerConfig and towerConfig.UpgradePathData["Path"..path.."Data"]
-                        local upgradeInfo = pathData and pathData[curLevel+1]
-                        local upgradeCost = (upgradeInfo and upgradeInfo.Cost) or 0
+                        local upgradeCost = GetUpgradeCost(towerInfo.name, tonumber(path), tonumber(levelBefore)+1, tonumber(discount) or 0)
                         table.insert(logs, {
                             UpgradeCost = upgradeCost,
                             UpgradePath = tonumber(path),
-                            TowerUpgraded = towerInfo.vector
+                            TowerUpgraded = fx
                         })
                     end
+                else
+                    -- SellTower: log SellTower = x
+                    local x = line:match('TDX:sellTower%(([^%)]+)%)')
+                    if x then
+                        local fx = tonumber(x)
+                        if x2tower[fx] then
+                            table.insert(logs, {
+                                SellTower = fx
+                            })
+                        end
+                    else
+                        -- ChangeTarget: log TowerTargetChange = x, TargetWanted, TargetChangedAt
+                        local x, target, tick = line:match('TDX:changeQueryType%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+                        if x and target and tick then
+                            local fx = tonumber(x)
+                            if x2tower[fx] then
+                                table.insert(logs, {
+                                    TowerTargetChange = fx,
+                                    TargetWanted = tonumber(target),
+                                    TargetChangedAt = tonumber(tick)
+                                })
+                            end
+                        end
+                    end
                 end
-                -- Các thao tác khác giữ nguyên...
             end
         end
 
         writefile(outJson, HttpService:JSONEncode(logs))
     end
-    wait(0.1)
+    wait(0.15)
 end
