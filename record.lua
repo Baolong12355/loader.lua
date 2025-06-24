@@ -89,7 +89,8 @@ end)
 
 print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
 
--- Rewrite macro: lấy giá nâng cấp path ngay trước thao tác, xử lý "$" và giá thay đổi
+-- Rewrite macro TDX cho logger txt định dạng gồm task.wait(...) và thao tác TDX:...
+-- BỎ QUA các dòng task.wait, chỉ xuất thao tác macro runner
 
 local txtFile = "record.txt"
 local outJson = "tdx/macros/y.json"
@@ -170,7 +171,7 @@ task.spawn(function()
                 hash2pos[tostring(hash)] = {x = floatfix(pos.X), y = floatfix(pos.Y), z = floatfix(pos.Z)}
             end
         end
-        task.wait()
+        task.wait(0.05)
     end
 end)
 
@@ -185,55 +186,60 @@ while true do
         local logs = {}
 
         for line in macro:gmatch("[^\r\n]+") do
-            -- PlaceTower
-            local x, name, y, rot, z, a1 = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-            if x and name and y and rot and z and a1 then
-                name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
-                local cost = GetTowerPlaceCostByName(name)
-                local vector = string.format("%.8g, %.8g, %.8g", floatfix(x), floatfix(y), floatfix(z))
-                table.insert(logs, {
-                    TowerPlaceCost = cost,
-                    TowerPlaced = name,
-                    TowerVector = vector,
-                    Rotation = floatfix(rot),
-                    TowerA1 = tostring(floatfix(a1))
-                })
+            -- Bỏ qua task.wait
+            if line:match("^task%.wait") then
+                -- skip
             else
-                -- UpgradeTower
-                local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),')
-                if hash and path then
-                    local tower = TowerClass and TowerClass.GetTowers()[hash]
-                    local upgradeCost = GetUpgradeCost(tower, tonumber(path))
-                    local pos = tower and GetTowerPosition(tower)
-                    if pos then
-                        table.insert(logs, {
-                            UpgradeCost = upgradeCost,
-                            UpgradePath = tonumber(path),
-                            TowerUpgraded = floatfix(pos.X)
-                        })
-                    end
+                -- PlaceTower
+                local x, name, y, rot, z, a1 = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+                if x and name and y and rot and z and a1 then
+                    name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
+                    local cost = GetTowerPlaceCostByName(name)
+                    local vector = string.format("%.8g, %.8g, %.8g", floatfix(x), floatfix(y), floatfix(z))
+                    table.insert(logs, {
+                        TowerPlaceCost = cost,
+                        TowerPlaced = name,
+                        TowerVector = vector,
+                        Rotation = floatfix(rot),
+                        TowerA1 = tostring(floatfix(a1))
+                    })
                 else
-                    -- ChangeQueryType
-                    local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
-                    if hash and targetType then
+                    -- UpgradeTower
+                    local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),')
+                    if hash and path then
                         local tower = TowerClass and TowerClass.GetTowers()[hash]
+                        local upgradeCost = GetUpgradeCost(tower, tonumber(path))
                         local pos = tower and GetTowerPosition(tower)
                         if pos then
                             table.insert(logs, {
-                                ChangeTarget = floatfix(pos.X),
-                                TargetType = tonumber(targetType)
+                                UpgradeCost = upgradeCost,
+                                UpgradePath = tonumber(path),
+                                TowerUpgraded = floatfix(pos.X)
                             })
                         end
                     else
-                        -- SellTower
-                        local hash = line:match('TDX:sellTower%(([^%)]+)%)')
-                        if hash then
+                        -- ChangeQueryType
+                        local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
+                        if hash and targetType then
                             local tower = TowerClass and TowerClass.GetTowers()[hash]
                             local pos = tower and GetTowerPosition(tower)
                             if pos then
                                 table.insert(logs, {
-                                    SellTower = floatfix(pos.X)
+                                    ChangeTarget = floatfix(pos.X),
+                                    TargetType = tonumber(targetType)
                                 })
+                            end
+                        else
+                            -- SellTower
+                            local hash = line:match('TDX:sellTower%(([^%)]+)%)')
+                            if hash then
+                                local tower = TowerClass and TowerClass.GetTowers()[hash]
+                                local pos = tower and GetTowerPosition(tower)
+                                if pos then
+                                    table.insert(logs, {
+                                        SellTower = floatfix(pos.X)
+                                    })
+                                end
                             end
                         end
                     end
