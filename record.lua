@@ -1,6 +1,6 @@
 local startTime = time()
 local offset = 0
-local fileName = "record_1.txt"  -- <--- ĐẶT TÊN FILE CỐ ĐỊNH Ở ĐÂY
+local fileName = "record.txt"  -- <--- ĐẶT TÊN FILE CỐ ĐỊNH Ở ĐÂY
 
 -- Nếu file đã tồn tại thì xóa để tạo mới
 if isfile(fileName) then
@@ -90,72 +90,68 @@ end)
 print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
 
 
+local txtFile = "record.txt"
+local outJson = "tdx/macros/y.json"  -- đổi tên nếu cần
 
-local txtFile = "record_1.txt"
-local jsonFile = "record_1.json"
-local outFile = "record_1_rewritten.json"
-
--- Helper: parse vector string "x, y, z"
-local function parseVector(str)
-    local x, y, z = string.match(str, "([-0-9%.]+),%s*([-0-9%.]+),%s*([-0-9%.]+)")
-    if x and y and z then return tonumber(x), tonumber(y), tonumber(z) end
+if not isfile(txtFile) then
+    error("Chưa có file record.txt!")
 end
 
--- Parse macro TXT, lấy mapping hash <-> vector theo thời gian
-local macro = readfile(txtFile)
-local hashToVector = {}
-local liveTowers = {}  -- hash -> vector
-for line in macro:gmatch("[^\r\n]+") do
-    if line:find("TDX:placeTower") then
-        -- TDX:placeTower("TowerName", Vector3.new(x, y, z), rot, hash, ...)
-        local towerName, x, y, z, rot, hash = line:match('TDX:placeTower%(%s*"([^"]+)",%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^,]+),%s*([^,%s%)]+)')
-        if hash then
-            liveTowers[hash] = {x=tonumber(x), y=tonumber(y), z=tonumber(z)}
-            hashToVector[hash] = string.format("%s, %s, %s", x, y, z)
-        end
-    elseif line:find("TDX:sellTower") then
-        -- TDX:sellTower(hash)
-        local hash = line:match("TDX:sellTower%(([^%)]+)%)")
-        if hash then
-            liveTowers[hash] = nil
-        end
-    end
-end
-
--- Đọc JSON log gốc
 local HttpService = game:GetService("HttpService")
-local logArr = HttpService:JSONDecode(readfile(jsonFile))
-local rewritten = {}
+local macro = readfile(txtFile)
+local logs = {}
 
--- Rewrite từng record
-for i, rec in ipairs(logArr) do
-    if rec.TowerPlaceCost then
-        -- Đặt tower: giữ nguyên format, bổ sung hash nếu muốn
-        table.insert(rewritten, rec)
-    elseif rec.UpgradeCost then
-        -- Nâng cấp: tìm hash thực với vector X hiện tại (an toàn hơn)
-        local towerX = rec.TowerUpgraded or rec.TowerHash
-        local resolvedHash
-        if towerX then
-            -- Nếu hash vẫn còn, dùng
-            for h, v in pairs(liveTowers) do
-                if math.abs(v.x - tonumber(towerX)) < 1e-5 then
-                    resolvedHash = h
-                    break
+-- Helper: Đảm bảo số float giống mẫu
+local function floatfix(x)
+    return tonumber(string.format("%.15g", tonumber(x)))
+end
+
+for line in macro:gmatch("[^\r\n]+") do
+    -- PlaceTower: TDX:placeTower("Name", Vector3.new(x, y, z), rot, a1, cost)
+    local towerName, x, y, z, rot, a1, cost = line:match('TDX:placeTower%(%s*"([^"]+)",%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^,]+),%s*([^,]+),%s*([^,%s%)]+)')
+    if towerName and x and y and z and rot and a1 and cost then
+        table.insert(logs, {
+            TowerPlaceCost = tonumber(cost),
+            TowerPlaced = towerName,
+            TowerVector = string.format("%s, %s, %s", floatfix(x), floatfix(y), floatfix(z)),
+            Rotation = tonumber(rot),
+            TowerA1 = tostring(a1)
+        })
+    else
+        -- UpgradeTower: TDX:upgradeTower(X, path, cost)
+        local X, path, cost = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+        if X and path and cost then
+            table.insert(logs, {
+                UpgradeCost = tonumber(cost),
+                UpgradePath = tonumber(path),
+                TowerUpgraded = floatfix(X)
+            })
+        else
+            -- ChangeTarget: TDX:changeQueryType(X, targetType)
+            local X, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
+            if X and targetType then
+                table.insert(logs, {
+                    ChangeTarget = floatfix(X),
+                    TargetType = tonumber(targetType)
+                })
+            else
+                -- SellTower: TDX:sellTower(X)
+                local X = line:match('TDX:sellTower%(([^%)]+)%)')
+                if X then
+                    table.insert(logs, {
+                        SellTower = floatfix(X)
+                    })
                 end
             end
         end
-        table.insert(rewritten, {
-            UpgradeCost = rec.UpgradeCost,
-            UpgradePath = rec.UpgradePath,
-            TowerUpgraded = towerX -- hoặc resolvedHash nếu cần
-        })
-    elseif rec.TowerTargetChange then
-        table.insert(rewritten, rec)
-    elseif rec.TowerSold then
-        table.insert(rewritten, rec)
     end
 end
 
-writefile(outFile, HttpService:JSONEncode(rewritten))
-print("✅ Đã rewrite JSON an toàn, đối chiếu hash từ TXT macro!")
+-- Đảm bảo thư mục tdx/macros tồn tại (nếu dùng synapse hoặc executor có makefolder)
+if makefolder then
+    pcall(function() makefolder("tdx") end)
+    pcall(function() makefolder("tdx/macros") end)
+end
+
+writefile(outJson, HttpService:JSONEncode(logs)) 
+print("✅ Đã tạo macro " .. outJson .. " tương thích Macro Runner!")            
