@@ -252,3 +252,113 @@ while true do
     end
     wait(0.22)
 end
+
+
+
+
+
+
+
+-- Script vừa lấy giá nâng cấp hiện tại từng tower/path, vừa PATCH lại log thành giá cũ (giá trước đó) LIÊN TỤC
+-- File log sẽ được patch lại liên tục mỗi patch_interval giây
+
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local PlayerScripts = Player:WaitForChild("PlayerScripts")
+
+-- Đường dẫn file
+local log_file = "tdx/macros/y.json"             -- File log gốc (chỉnh lại nếu khác)
+local output_file = log_file                          -- Patch đè lên file gốc
+local price_file = "tdx/macros/prices.json"           -- Xuất file giá hiện tại từng tower/path
+local patch_interval = 0                              -- Số giây lặp lại patch log (tuỳ chỉnh)
+
+-- Hàm require an toàn
+local function SafeRequire(module)
+    local success, result = pcall(require, module)
+    return success and result or nil
+end
+
+-- Lấy giá nâng cấp hiện tại từng tower/path và xuất ra file
+local function ExportCurrentPrices()
+    local prices = {}
+    local client = PlayerScripts:WaitForChild("Client")
+    local gameClass = client:WaitForChild("GameClass")
+    local towerModule = gameClass:WaitForChild("TowerClass")
+    local TowerClass = SafeRequire(towerModule)
+    if not TowerClass then
+        print("ERROR: Không tìm thấy TowerClass")
+        return
+    end
+    local towers = TowerClass.GetTowers()
+    if towers then
+        for _, tower in pairs(towers) do
+            if type(tower) == "table" and tower.LevelHandler then
+                local tid = tostring(tower)
+                prices[tid] = prices[tid] or {}
+                for path = 1, 2 do
+                    local lvl = tower.LevelHandler:GetLevelOnPath(path)
+                    local max = tower.LevelHandler:GetMaxLevel()
+                    if lvl < max then
+                        local ok, cost = pcall(function()
+                            return tower.LevelHandler:GetLevelUpgradeCost(path, 1)
+                        end)
+                        if ok and type(cost) == "number" then
+                            prices[tid][tostring(path)] = cost
+                        end
+                    end
+                end
+            end
+        end
+    end
+    writefile(price_file, HttpService:JSONEncode(prices))
+    print("Đã xuất giá nâng cấp từng tower/path vào:", price_file)
+end
+
+-- Hàm PATCH log: mỗi dòng UpgradeCost sẽ thành giá cũ đúng cho tower/path
+local function PatchLog()
+    -- Đọc toàn bộ log vào table lines
+    local data = readfile(log_file)
+    if not data or #data == 0 then return end
+    local lines = {}
+    for line in string.gmatch(data, "[^\r\n]+") do
+        table.insert(lines, line)
+    end
+
+    local last_cost = {} -- last_cost[tower][path] = giá gần nhất trước đó
+
+    -- Hàm parse từng dòng log
+    local function parse_line(line)
+        local cost, path, tower = string.match(line, [["UpgradeCost":([%d%.%-]+),"UpgradePath":(%d+),"TowerUpgraded":([%d%.%-]+)]])
+        if cost and path and tower then
+            return tonumber(cost), tostring(path), tostring(tower)
+        end
+        return nil
+    end
+
+    -- Duyệt và patch
+    local patched = {}
+    for _, line in ipairs(lines) do
+        local cost, path, tower = parse_line(line)
+        if path and tower then
+            last_cost[tower] = last_cost[tower] or {}
+            if last_cost[tower][path] then
+                line = line:gsub([["UpgradeCost":[%d%.%-]+]], [["UpgradeCost:"]]..last_cost[tower][path])
+            end
+            last_cost[tower][path] = cost
+        end
+        table.insert(patched, line)
+    end
+
+    writefile(output_file, table.concat(patched, "\n"))
+    print("Đã PATCH xong log!")
+end
+
+-- Chạy xuất giá 1 lần lúc đầu
+ExportCurrentPrices()
+
+print("Bắt đầu PATCH log liên tục mỗi "..patch_interval.." giây...")
+while true do
+    PatchLog()
+    wait(patch_interval)
+end
