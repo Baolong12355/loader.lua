@@ -1,14 +1,14 @@
 local startTime = time()
 local offset = 0
-local fileName = "record.txt"  -- <--- ĐẶT TÊN FILE CỐ ĐỊNH Ở ĐÂY
+local fileName = "record.txt"  -- <--- Äáº¶T TĂN FILE Cá» Äá»NH á» ÄĂ‚Y
 
--- Nếu file đã tồn tại thì xóa để tạo mới
+-- Náº¿u file Ä‘Ă£ tá»“n táº¡i thĂ¬ xĂ³a Ä‘á»ƒ táº¡o má»›i
 if isfile(fileName) then
     delfile(fileName)
 end
 writefile(fileName, "")
 
--- Hàm serialize giá trị
+-- HĂ m serialize giĂ¡ trá»‹
 local function serialize(value)
     if type(value) == "table" then
         local result = "{"
@@ -24,7 +24,7 @@ local function serialize(value)
     end
 end
 
--- Hàm serialize tất cả argument
+-- HĂ m serialize táº¥t cáº£ argument
 local function serializeArgs(...)
     local args = {...}
     local output = {}
@@ -34,7 +34,7 @@ local function serializeArgs(...)
     return table.concat(output, ", ")
 end
 
--- Hàm log thao tác vào file
+-- HĂ m log thao tĂ¡c vĂ o file
 local function log(method, self, serializedArgs)
     local name = tostring(self.Name)
     local text = name .. " " .. serializedArgs .. "\n"
@@ -87,10 +87,9 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     return oldNamecall(self, ...)
 end)
 
-print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
+print("âœ… Ghi macro TDX Ä‘Ă£ báº¯t Ä‘áº§u (luĂ´n dĂ¹ng tĂªn record.txt).")
 
--- ⚙️ Script rewrite TDX macro chuẩn
--- Ghi đúng hash → tọa độ X, UpgradeCost trước khi nâng cấp, ghi JSON chuẩn
+-- Script rewrite macro TDX: Ă¡nh xáº¡ hash <-> vá»‹ trĂ­ liĂªn tá»¥c, láº¥y giĂ¡ nĂ¢ng cáº¥p Ä‘Ăºng, xuáº¥t macro runner dáº¡ng X
 
 local txtFile = "record.txt"
 local outJson = "tdx/macros/y.json"
@@ -100,7 +99,7 @@ local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
--- Hàm require an toàn
+-- HĂ m require an toĂ n
 local function SafeRequire(module)
     local success, result = pcall(require, module)
     return success and result or nil
@@ -113,122 +112,129 @@ do
     local gameClass = client:WaitForChild("GameClass")
     local towerModule = gameClass:WaitForChild("TowerClass")
     TowerClass = SafeRequire(towerModule)
-    if not TowerClass then
-        warn("❌ Không thể load TowerClass")
-        return
-    end
 end
 
--- Làm gọn số
+-- Láº¥y vá»‹ trĂ­ tower
+local function GetTowerPosition(tower)
+    if not tower or not tower.Character then return nil end
+    local model = tower.Character:GetCharacterModel()
+    local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+    return root and root.Position or nil
+end
+
+-- LĂ m Ä‘áº¹p sá»‘
 local function floatfix(x)
     return tonumber(string.format("%.8g", tonumber(x)))
 end
 
--- Lấy vị trí X của tower theo hash
-local hash2pos = {}
-
-task.spawn(function()
-    while true do
-        for hash, tower in pairs(TowerClass.GetTowers()) do
-            local char = tower.Character
-            if char then
-                local model = char:GetCharacterModel()
-                local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
-                if root then
-                    hash2pos[tostring(hash)] = {
-                        x = floatfix(root.Position.X),
-                        y = floatfix(root.Position.Y),
-                        z = floatfix(root.Position.Z)
-                    }
-                end
-            end
-        end
-        task.wait(0.1)
-    end
-end)
-
--- Lấy giá đặt tower từ giao diện
+-- Láº¥y giĂ¡ Ä‘áº·t tower
 local function GetTowerPlaceCostByName(name)
-    local gui = player:FindFirstChild("PlayerGui")
-    local bar = gui and gui:FindFirstChild("Interface") and gui.Interface:FindFirstChild("BottomBar") and gui.Interface.BottomBar:FindFirstChild("TowersBar")
-    if not bar then return 0 end
-    for _, btn in ipairs(bar:GetChildren()) do
-        if btn.Name == name then
-            local text = btn:FindFirstChild("CostFrame") and btn.CostFrame:FindFirstChild("CostText")
-            if text then
-                return tonumber(text.Text:gsub("%D", "")) or 0
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if not playerGui then return 0 end
+    local interface = playerGui:FindFirstChild("Interface")
+    if not interface then return 0 end
+    local bottomBar = interface:FindFirstChild("BottomBar")
+    if not bottomBar then return 0 end
+    local towersBar = bottomBar:FindFirstChild("TowersBar")
+    if not towersBar then return 0 end
+    for _, tower in ipairs(towersBar:GetChildren()) do
+        if tower.Name == name then
+            local costFrame = tower:FindFirstChild("CostFrame")
+            local costText = costFrame and costFrame:FindFirstChild("CostText")
+            if costText then
+                local raw = tostring(costText.Text):gsub("%D", "")
+                return tonumber(raw) or 0
             end
         end
     end
     return 0
 end
 
--- Lấy giá nâng cấp path (level hiện tại → level kế tiếp)
-local function GetUpgradeCost(tower, path)
-    if not tower or not tower.LevelHandler then return 0 end
-    local level = tower.LevelHandler:GetLevelOnPath(path)
-    local max = tower.LevelHandler:GetMaxLevel()
-    if level >= max then return 0 end
-    local ok, cost = pcall(function()
-        return tower.LevelHandler:GetLevelUpgradeCost(path, 1)
-    end)
-    return (ok and tonumber(cost)) and math.floor(cost) or 0
+-- Parse giĂ¡ nĂ¢ng cáº¥p path (láº¥y sá»‘ thĂ´i)
+local function ParseUpgradeCost(costStr)
+    local num = tostring(costStr):gsub("[^%d]", "")
+    return tonumber(num) or 0
 end
 
--- Tạo folder nếu chưa có
+-- Láº¥y giĂ¡ nĂ¢ng cáº¥p hiá»‡n táº¡i (lá»c kĂ½ tá»± láº¡)
+local function GetUpgradeCost(tower, path)
+    if not tower or not tower.LevelHandler then return 0 end
+    local lvl = tower.LevelHandler:GetLevelOnPath(path)
+    local ok, cost = pcall(function()
+        return tower.LevelHandler:GetLevelUpgradeCost(path, lvl+1)
+    end)
+    if ok and cost then
+        return ParseUpgradeCost(cost)
+    end
+    return 0
+end
+
+-- Ănh xáº¡ liĂªn tá»¥c hash <-> vá»‹ trĂ­
+local hash2pos = {}
+task.spawn(function()
+    while true do
+        for hash, tower in pairs(TowerClass and TowerClass.GetTowers() or {}) do
+            local pos = GetTowerPosition(tower)
+            if pos then
+                hash2pos[tostring(hash)] = {x = floatfix(pos.X), y = floatfix(pos.Y), z = floatfix(pos.Z)}
+            end
+        end
+        task.wait(0.1)
+    end
+end)
+
 if makefolder then
     pcall(function() makefolder("tdx") end)
     pcall(function() makefolder("tdx/macros") end)
 end
 
--- Main loop
 while true do
     if isfile(txtFile) then
-        local raw = readfile(txtFile)
+        local macro = readfile(txtFile)
         local logs = {}
 
-        for line in raw:gmatch("[^\r\n]+") do
+        for line in macro:gmatch("[^\r\n]+") do
             -- PlaceTower
             local x, name, y, rot, z, a1 = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
             if x and name and y and rot and z and a1 then
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
                 local cost = GetTowerPlaceCostByName(name)
-                local vec = string.format("%.8g, %.8g, %.8g", floatfix(x), floatfix(y), floatfix(z))
+                local vector = string.format("%.8g, %.8g, %.8g", floatfix(x), floatfix(y), floatfix(z))
                 table.insert(logs, {
                     TowerPlaceCost = cost,
                     TowerPlaced = name,
-                    TowerVector = vec,
+                    TowerVector = vector,
                     Rotation = floatfix(rot),
                     TowerA1 = tostring(floatfix(a1))
                 })
             else
                 -- UpgradeTower
-                local hash, path = line:match("TDX:upgradeTower%(([^,]+),%s*([^%)]+)%)")
+                local hash, path, dummy = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
                 if hash and path then
-                    local tower = TowerClass.GetTowers()[hash]
                     local pos = hash2pos[tostring(hash)]
-                    local cost = GetUpgradeCost(tower, tonumber(path))
-                    if pos and cost > 0 then
+                    local tower = TowerClass and TowerClass.GetTowers()[hash]
+                    local upgradeCost = GetUpgradeCost(tower, tonumber(path))
+                    if pos then
                         table.insert(logs, {
-                            UpgradeCost = cost,
+                            UpgradeCost = upgradeCost,
                             UpgradePath = tonumber(path),
-                            TowerUpgraded = pos.x -- ✅ đúng X
+                            TowerUpgraded = pos.x
                         })
                     end
                 else
                     -- ChangeQueryType
-                    local hash, targetType = line:match("TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)")
+                    local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
                     if hash and targetType then
                         local pos = hash2pos[tostring(hash)]
                         if pos then
                             table.insert(logs, {
-                                TargetType = tonumber(targetType),
-                                ChangeTarget = pos.x
+                                ChangeTarget = pos.x,
+                                TargetType = tonumber(targetType)
                             })
                         end
                     else
                         -- SellTower
-                        local hash = line:match("TDX:sellTower%(([^%)]+)%)")
+                        local hash = line:match('TDX:sellTower%(([^%)]+)%)')
                         if hash then
                             local pos = hash2pos[tostring(hash)]
                             if pos then
