@@ -127,7 +127,7 @@ while task.wait(0.1) do
                                     else
                                         TowerUseAbilityRequest:InvokeServer(unpack(args))
                                     end
-                                    task.wait(1)
+                                    task.wait(0.25)
                                     return
                                 end
                             else
@@ -138,7 +138,7 @@ while task.wait(0.1) do
                                     else
                                         TowerUseAbilityRequest:InvokeServer(hash, abilityIndex)
                                     end
-                                    task.wait(1)
+                                    task.wait(0.25)
                                 end
                             end
                         else
@@ -155,7 +155,7 @@ while task.wait(0.1) do
                                 else
                                     TowerUseAbilityRequest:InvokeServer(unpack(args))
                                 end
-                                task.wait(1)
+                                task.wait(0.25)
                                 return
                             end
                         end
@@ -172,7 +172,7 @@ while task.wait(0.1) do
                         else
                             TowerUseAbilityRequest:InvokeServer(hash, abilityIndex)
                         end
-                        task.wait(1)
+                        task.wait(0.25)
                     end
                 end)
             end
