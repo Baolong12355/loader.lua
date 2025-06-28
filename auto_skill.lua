@@ -51,7 +51,8 @@ local directionalTowerTypes = {
     ["Ice Breaker"] = true,
     ["Mobster"] = true,
     ["Golden Mobster"] = true,
-    ["Artillery"] = true
+    ["Artillery"] = true,
+    ["Golden Mine Layer"] = true
 }
 
 -- 📌 Vị trí kẻ địch đầu tiên
