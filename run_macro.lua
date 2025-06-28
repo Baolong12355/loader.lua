@@ -81,7 +81,7 @@ for i, entry in ipairs(macro) do
 		}
 		WaitForCash(entry.TowerPlaceCost)
 		Remotes.PlaceTower:InvokeServer(unpack(args))
-		task.wait(0.2)
+		task.wait()
 
 	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
 		local towerX = tonumber(entry.TowerUpgraded)
@@ -97,7 +97,7 @@ for i, entry in ipairs(macro) do
 		end
 		WaitForCash(entry.UpgradeCost)
 		Remotes.TowerUpgradeRequest:FireServer(hash, entry.UpgradePath, 1)
-		task.wait(0.2)
+		task.wait()
 
 	elseif entry.ChangeTarget and entry.TargetType then
 		local towerX = tonumber(entry.ChangeTarget)
@@ -106,14 +106,14 @@ for i, entry in ipairs(macro) do
 		local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 		if not hp or hp <= 0 then continue end
 		Remotes.ChangeQueryType:FireServer(hash, entry.TargetType)
-		task.wait(0.2)
+		task.wait()
 
 	elseif entry.SellTower then
 		local towerX = tonumber(entry.SellTower)
 		local hash = GetTowerByX(towerX)
 		if hash then
 			Remotes.SellTower:FireServer(hash)
-			task.wait(0.2)
+			task.wait()
 		end
 	end
 end
