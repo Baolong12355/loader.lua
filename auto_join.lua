@@ -1,4 +1,4 @@
--- ✅ Auto Join Map - TDX (Đã thêm kiểm tra TRANSPORTING)
+-- ✅ Auto Join Map - TDX (Đã thêm Remote đổi party + kiểm tra TRANSPORTING)
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -6,13 +6,25 @@ local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 local config = getgenv().TDX_Config or {}
 local targetMapName = config["Map"] or "HAKUREI SHRINE"
-local expectedPlaceId = 9503261072 -- lobby TDX
+local expectedPlaceId = 9503261072
 
--- Các hàm giữ nguyên từ bản gốc
-local function isInLobby() return game.PlaceId == expectedPlaceId end
+-- Map cần đổi bằng Remote (ghi đúng tên, phân biệt hoa thường)
+local specialMaps = {
+    ["Halloween Part 1"] = true,
+    ["Halloween Part 2"] = true,
+    ["Halloween Part 3"] = true,
+    ["Halloween Part 4"] = true,
+    ["Tower Battles"] = true,
+    ["Christmas24Part1"] = true,
+    ["Christmas24Part2"] = true
+}
+
+local function isInLobby()
+    return game.PlaceId == expectedPlaceId
+end
 
 local function matchMap(a, b)
-    return (a or ""):lower():gsub("%s+", "") == (b or ""):lower():gsub("%s+", "")
+    return tostring(a or "") == tostring(b or "")
 end
 
 local function enterDetectorExact(detector)
@@ -23,11 +35,33 @@ local function enterDetectorExact(detector)
     end
 end
 
+local function trySetMapIfNeeded()
+    if specialMaps[targetMapName] then
+        -- 🔁 Đổi chế độ sang Party trước
+        local argsPartyType = { "Party" }
+        ReplicatedStorage:WaitForChild("Network"):WaitForChild("ClientChangePartyTypeRequest"):FireServer(unpack(argsPartyType))
+        print("⚙️ Đã đổi sang chế độ Party")
+
+        -- 🎯 Chọn map
+        local argsMap = { targetMapName }
+        ReplicatedStorage:WaitForChild("Network"):WaitForChild("ClientChangePartyMapRequest"):FireServer(unpack(argsMap))
+        print("🎯 Đã chọn map:", targetMapName)
+
+        task.wait(1.5)
+
+        -- ▶️ Bắt đầu game
+        ReplicatedStorage:WaitForChild("Network"):WaitForChild("ClientStartGameRequest"):FireServer()
+        print("🚀 Đã gửi yêu cầu bắt đầu game")
+    end
+end
+
 local function tryEnterMap()
     if not isInLobby() then
         warn("⛔ Đã rời khỏi lobby TDX. Dừng script.")
         return false
     end
+
+    trySetMapIfNeeded()
 
     local LeaveQueue = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("LeaveQueue")
     local roots = {Workspace:FindFirstChild("APCs"), Workspace:FindFirstChild("APCs2")}
@@ -45,7 +79,6 @@ local function tryEnterMap()
                     local plrCountLabel = displayscreen and displayscreen:FindFirstChild("plrcount")
                     local statusLabel = displayscreen and displayscreen:FindFirstChild("status")
 
-                    -- Đoạn code bạn yêu cầu thêm
                     if detector and mapLabel and plrCountLabel and statusLabel then
                         if matchMap(mapLabel.Text, targetMapName) then
                             if statusLabel.Text == "TRANSPORTING..." then
@@ -79,10 +112,10 @@ local function tryEnterMap()
             end
         end
     end
+
     return true
 end
 
--- Main loop giữ nguyên
 while isInLobby() do
     local ok, result = pcall(tryEnterMap)
     if not ok then
