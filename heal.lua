@@ -1,40 +1,44 @@
-local Players = game:GetService("Players")
-local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local hrp = character:WaitForChild("HumanoidRootPart")
+local player = game.Players.LocalPlayer
+local camera = workspace.CurrentCamera
 local playerGui = player:WaitForChild("PlayerGui")
 
--- 🔍 Tìm Prompt gốc từ Map
-local promptPart = workspace:FindFirstChild("Game")
-if promptPart then
-	promptPart = promptPart:FindFirstChild("Map")
+-- Tìm Prompt gốc
+local prompt = workspace.Game.Map.ProximityPrompts:FindFirstChild("Prompt")
+if prompt then
+	prompt = prompt:FindFirstChildWhichIsA("ProximityPrompt")
 end
-if promptPart then
-	promptPart = promptPart:FindFirstChild("ProximityPrompts")
-end
-if promptPart then
-	promptPart = promptPart:FindFirstChild("Prompt")
-end
-if not promptPart then
-	warn("Không tìm thấy Prompt Part trong map.")
-	return
-end
-
--- 🎯 Lấy Prompt gốc
-local prompt = promptPart:FindFirstChildWhichIsA("ProximityPrompt")
 if not prompt then
-	warn("Không tìm thấy ProximityPrompt bên trong Part.")
+	warn("Không tìm thấy Prompt gốc.")
 	return
 end
 
--- ✅ Gắn Prompt vào nhân vật
-prompt.Parent = hrp
+-- ⚙️ Cấu hình Prompt
 prompt.RequiresLineOfSight = false
 prompt.MaxActivationDistance = 999999
 prompt.HoldDuration = 999999
 prompt.Enabled = true
 
--- 🔁 Tự động giữ Prompt vĩnh viễn
+-- 🧱 Tạo Part phía trước Camera
+local fakePart = Instance.new("Part")
+fakePart.Name = "CameraPromptPart"
+fakePart.Size = Vector3.new(1, 1, 1)
+fakePart.Transparency = 1
+fakePart.Anchored = true
+fakePart.CanCollide = false
+fakePart.Parent = workspace
+
+-- Prompt gắn vào part này
+prompt.Parent = fakePart
+
+-- Cập nhật vị trí part mỗi frame: nằm ngay trước camera (trung tâm nhìn)
+game:GetService("RunService").RenderStepped:Connect(function()
+	if camera and fakePart then
+		local camCF = camera.CFrame
+		fakePart.CFrame = camCF * CFrame.new(0, 0, -3) -- trước camera 3 studs
+	end
+end)
+
+-- 🔁 Giữ Prompt liên tục
 task.spawn(function()
 	while true do
 		if prompt and prompt.Enabled then
@@ -46,21 +50,10 @@ task.spawn(function()
 	end
 end)
 
--- 🔁 Tự bật lại nếu Prompt bị disable
-task.spawn(function()
-	while true do
-		if prompt and not prompt.Enabled then
-			prompt.Enabled = true
-		end
-		task.wait(1)
-	end
-end)
-
--- 🧹 Xoá GUI Prompt nếu nó xuất hiện trong PlayerGui
+-- 🧹 Xoá GUI nếu có
 local function xoaGuiPrompt()
 	local existed = playerGui:FindFirstChild("ProximityPrompts")
 	if existed then existed:Destroy() end
-
 	playerGui.ChildAdded:Connect(function(child)
 		if child.Name == "ProximityPrompts" then
 			task.wait()
