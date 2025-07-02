@@ -29,7 +29,7 @@ prompt.Enabled = true
 -- 🧱 Tạo Part cực kỳ nhỏ và vô hình, không ảnh hưởng gì
 local ghostPart = Instance.new("Part")
 ghostPart.Name = "PromptCamPart"
-ghostPart.Size = Vector3.new(0.1, 0.1, 0.1)
+ghostPart.Size = Vector3.new(0.0001, 0.0001, 0.0001)
 ghostPart.Transparency = 1
 ghostPart.Anchored = true
 ghostPart.CanCollide = false
