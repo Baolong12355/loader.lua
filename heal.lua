@@ -1,27 +1,66 @@
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
 local playerGui = player:WaitForChild("PlayerGui")
 
--- 🔄 Hàm tìm Prompt gốc trong map
-local function findPrompt()
-	local container = workspace:FindFirstChild("Game")
-	if not container then return nil end
-	container = container:FindFirstChild("Map")
-	if not container then return nil end
-	container = container:FindFirstChild("ProximityPrompts")
-	if not container then return nil end
-	container = container:FindFirstChild("Prompt")
-	if not container then return nil end
-	return container:FindFirstChildWhichIsA("ProximityPrompt")
+-- 🔍 Tìm Prompt gốc từ Map
+local promptPart = workspace:FindFirstChild("Game")
+if promptPart then
+	promptPart = promptPart:FindFirstChild("Map")
+end
+if promptPart then
+	promptPart = promptPart:FindFirstChild("ProximityPrompts")
+end
+if promptPart then
+	promptPart = promptPart:FindFirstChild("Prompt")
+end
+if not promptPart then
+	warn("Không tìm thấy Prompt Part trong map.")
+	return
 end
 
--- 🧹 Xóa GUI khi nó xuất hiện trong PlayerGui
-local function setupGuiDestroy()
-	-- Xoá ngay nếu đã tồn tại
-	local existing = playerGui:FindFirstChild("ProximityPrompts")
-	if existing then existing:Destroy() end
+-- 🎯 Lấy Prompt gốc
+local prompt = promptPart:FindFirstChildWhichIsA("ProximityPrompt")
+if not prompt then
+	warn("Không tìm thấy ProximityPrompt bên trong Part.")
+	return
+end
 
-	-- Theo dõi nếu xuất hiện lại
+-- ✅ Gắn Prompt vào nhân vật
+prompt.Parent = hrp
+prompt.RequiresLineOfSight = false
+prompt.MaxActivationDistance = 999999
+prompt.HoldDuration = 999999
+prompt.Enabled = true
+
+-- 🔁 Tự động giữ Prompt vĩnh viễn
+task.spawn(function()
+	while true do
+		if prompt and prompt.Enabled then
+			pcall(function()
+				prompt:InputHoldBegin()
+			end)
+		end
+		task.wait(0.5)
+	end
+end)
+
+-- 🔁 Tự bật lại nếu Prompt bị disable
+task.spawn(function()
+	while true do
+		if prompt and not prompt.Enabled then
+			prompt.Enabled = true
+		end
+		task.wait(1)
+	end
+end)
+
+-- 🧹 Xoá GUI Prompt nếu nó xuất hiện trong PlayerGui
+local function xoaGuiPrompt()
+	local existed = playerGui:FindFirstChild("ProximityPrompts")
+	if existed then existed:Destroy() end
+
 	playerGui.ChildAdded:Connect(function(child)
 		if child.Name == "ProximityPrompts" then
 			task.wait()
@@ -30,25 +69,4 @@ local function setupGuiDestroy()
 	end)
 end
 
-setupGuiDestroy()
-
--- 🔁 Vòng lặp giữ Prompt liên tục
-task.spawn(function()
-	while true do
-		local prompt = findPrompt()
-		if prompt then
-			-- Đảm bảo giữ từ xa
-			prompt.MaxActivationDistance = 999999
-			prompt.RequiresLineOfSight = false
-
-			if not prompt.Enabled then
-				prompt.Enabled = true
-			end
-
-			pcall(function()
-				prompt:InputHoldBegin()
-			end)
-		end
-		task.wait(0.5)
-	end
-end)
+xoaGuiPrompt()
