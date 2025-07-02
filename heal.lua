@@ -1,40 +1,50 @@
-local player = game.Players.LocalPlayer
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- Tìm Prompt gốc
-local prompt = workspace.Game.Map.ProximityPrompts:FindFirstChild("Prompt")
-if prompt then
-	prompt = prompt:FindFirstChildWhichIsA("ProximityPrompt")
-end
-if not prompt then
-	warn("Không tìm thấy Prompt gốc.")
+local promptPart = workspace:FindFirstChild("Game")
+if promptPart then promptPart = promptPart:FindFirstChild("Map") end
+if promptPart then promptPart = promptPart:FindFirstChild("ProximityPrompts") end
+if promptPart then promptPart = promptPart:FindFirstChild("Prompt") end
+if not promptPart then
+	warn("Không tìm thấy Part chứa Prompt.")
 	return
 end
 
--- ⚙️ Cấu hình Prompt
+local prompt = promptPart:FindFirstChildWhichIsA("ProximityPrompt")
+if not prompt then
+	warn("Không tìm thấy ProximityPrompt.")
+	return
+end
+
+-- Cấu hình Prompt
 prompt.RequiresLineOfSight = false
 prompt.MaxActivationDistance = 999999
 prompt.HoldDuration = 999999
 prompt.Enabled = true
 
--- 🧱 Tạo Part phía trước Camera
-local fakePart = Instance.new("Part")
-fakePart.Name = "CameraPromptPart"
-fakePart.Size = Vector3.new(1, 1, 1)
-fakePart.Transparency = 1
-fakePart.Anchored = true
-fakePart.CanCollide = false
-fakePart.Parent = workspace
+-- 🧱 Tạo Part cực kỳ nhỏ và vô hình, không ảnh hưởng gì
+local ghostPart = Instance.new("Part")
+ghostPart.Name = "PromptCamPart"
+ghostPart.Size = Vector3.new(0.1, 0.1, 0.1)
+ghostPart.Transparency = 1
+ghostPart.Anchored = true
+ghostPart.CanCollide = false
+ghostPart.CanQuery = false
+ghostPart.CanTouch = false
+ghostPart.Parent = workspace
 
--- Prompt gắn vào part này
-prompt.Parent = fakePart
+-- Gắn Prompt gốc vào Part này
+prompt.Parent = ghostPart
 
--- Cập nhật vị trí part mỗi frame: nằm ngay trước camera (trung tâm nhìn)
-game:GetService("RunService").RenderStepped:Connect(function()
-	if camera and fakePart then
+-- 🔁 Cập nhật Part để luôn đứng trước camera
+RunService.RenderStepped:Connect(function()
+	if camera and ghostPart then
 		local camCF = camera.CFrame
-		fakePart.CFrame = camCF * CFrame.new(0, 0, -3) -- trước camera 3 studs
+		ghostPart.CFrame = camCF * CFrame.new(0, 0, -3) -- trước camera 3 studs
 	end
 end)
 
