@@ -1,40 +1,31 @@
--- 📌 Auto chọn chế độ trong trận và bấm bắt đầu
+-- 📌 Script Auto Vote Chế Độ (Raw Version)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
 
--- Chờ remote vote (tối đa 10s)
-local voteRemote, readyRemote
-for i = 1, 100 do
-	voteRemote = remotes:FindFirstChild("DifficultyVoteCast")
-	readyRemote = remotes:FindFirstChild("DifficultyVoteReady")
-	if voteRemote and readyRemote then break end
-	task.wait(0.1)
-end
+-- 🔎 Tìm Remote Events
+local voteRemote = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("DifficultyVoteCast", true) -- Tìm sâu trong thư mục
+local readyRemote = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("DifficultyVoteReady", true)
 
+-- ❌ Thoát nếu không tìm thấy Remote
 if not voteRemote then
-	warn("⚠️ Không tìm thấy DifficultyVoteCast")
-	return
+    warn("⚠️ KHÔNG TÌM THẤY REMOTE VOTE!")
+    return
 end
 
--- Lấy cấu hình
-local config = getgenv().TDX_Config or {}
-local rawVote = config["Auto Difficulty"]
+-- ⚡ Lấy chế độ từ config (dùng nguyên bản)
+local mode = getgenv().TDX_Config and getgenv().TDX_Config["Auto Difficulty"]
 
-if not rawVote then
-	warn("⚠️ Không có cấu hình Auto Difficulty")
-	return
+if not mode then
+    warn("⚠️ CHƯA CÀI ĐẶT CHẾ ĐỘ TỰ ĐỘNG!")
+    return
 end
 
--- Định dạng lại chuỗi vote (vd: "easy" → "Easy")
-local mode = rawVote:sub(1,1):upper() .. rawVote:sub(2):lower()
-
--- Gửi vote chọn chế độ
+-- 🚀 Gửi vote (dùng tên gốc)
 voteRemote:FireServer(mode)
-print("📌 Đã chọn chế độ:", mode)
+print("✅ ĐÃ CHỌN CHẾ ĐỘ (RAW):", mode)
 
--- Nếu có remote "READY", gửi luôn để bắt đầu
+-- ⏳ Tự động bấm BẮT ĐẦU sau 2s
 if readyRemote then
-	task.wait(2)
-	readyRemote:FireServer()
-	print("▶️ Đã bấm BẮT ĐẦU trận.")
+    task.wait(2)
+    readyRemote:FireServer()
+    print("🎮 ĐÃ KÍCH HOẠT BẮT ĐẦU!")
 end
