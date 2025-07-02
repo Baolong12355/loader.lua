@@ -1,66 +1,54 @@
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-local character = player.Character or player.CharacterAdded:Wait()
-local hrp = character:WaitForChild("HumanoidRootPart")
 
--- Lấy Prompt gốc từ map
-local promptPart = workspace.Game.Map.ProximityPrompts:FindFirstChild("Prompt")
-if not promptPart then
-    warn("Không tìm thấy Prompt gốc.")
-    return
+-- 🔄 Hàm tìm Prompt gốc trong map
+local function findPrompt()
+	local container = workspace:FindFirstChild("Game")
+	if not container then return nil end
+	container = container:FindFirstChild("Map")
+	if not container then return nil end
+	container = container:FindFirstChild("ProximityPrompts")
+	if not container then return nil end
+	container = container:FindFirstChild("Prompt")
+	if not container then return nil end
+	return container:FindFirstChildWhichIsA("ProximityPrompt")
 end
 
-local prompt = promptPart:FindFirstChildWhichIsA("ProximityPrompt")
-if not prompt then
-    warn("Không tìm thấy ProximityPrompt bên trong.")
-    return
-end
-
--- Gắn Prompt gốc vào người
-prompt.Parent = hrp
-prompt.RequiresLineOfSight = false
-prompt.MaxActivationDistance = 999999
-prompt.HoldDuration = 999999
-prompt.Enabled = true
-
--- Xoá GUI nếu nó xuất hiện ở PlayerGui.ProximityPrompts
+-- 🧹 Xóa GUI khi nó xuất hiện trong PlayerGui
 local function setupGuiDestroy()
-    playerGui.ChildAdded:Connect(function(child)
-        if child.Name == "ProximityPrompts" then
-            task.wait()
-            child:Destroy()
-        end
-    end)
-    local existing = playerGui:FindFirstChild("ProximityPrompts")
-    if existing then
-        existing:Destroy()
-    end
+	-- Xoá ngay nếu đã tồn tại
+	local existing = playerGui:FindFirstChild("ProximityPrompts")
+	if existing then existing:Destroy() end
+
+	-- Theo dõi nếu xuất hiện lại
+	playerGui.ChildAdded:Connect(function(child)
+		if child.Name == "ProximityPrompts" then
+			task.wait()
+			child:Destroy()
+		end
+	end)
 end
 
 setupGuiDestroy()
 
--- Xóa GUI nếu Prompt hiện
-prompt.PromptShown:Connect(function(ui)
-    ui:Destroy()
-end)
-
--- Giữ Prompt mãi mãi
+-- 🔁 Vòng lặp giữ Prompt liên tục
 task.spawn(function()
-    while true do
-        if prompt.Enabled then
-            prompt:InputHoldBegin()
-        end
-        task.wait(0.5)
-    end
-end)
+	while true do
+		local prompt = findPrompt()
+		if prompt then
+			-- Đảm bảo giữ từ xa
+			prompt.MaxActivationDistance = 999999
+			prompt.RequiresLineOfSight = false
 
--- Luôn bật lại nếu bị game tắt
-task.spawn(function()
-    while true do
-        if not prompt.Enabled then
-            prompt.Enabled = true
-        end
-        task.wait(0.5)
-    end
+			if not prompt.Enabled then
+				prompt.Enabled = true
+			end
+
+			pcall(function()
+				prompt:InputHoldBegin()
+			end)
+		end
+		task.wait(0.5)
+	end
 end)
