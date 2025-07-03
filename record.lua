@@ -89,7 +89,7 @@ end)
 
 print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
 
--- Script rewrite macro TDX: ánh xạ hash <-> vị trí liên tục, lấy giá nâng cấp đúng, xuất macro runner dạng X
+-- Script rewrite macro TDX: ánh xạ hash <-> vị trí X liên tục, lấy giá nâng cấp đúng, xuất macro runner dạng X
 
 local txtFile = "record.txt"
 local outJson = "tdx/macros/y.json"
@@ -158,6 +158,7 @@ local function GetUpgradeCost(tower, path)
     return 0
 end
 
+-- Liên tục ánh xạ hash -> pos
 local hash2pos = {}
 task.spawn(function()
     while true do
@@ -182,21 +183,21 @@ while true do
         local logs = {}
 
         for line in macro:gmatch("[^\r\n]+") do
-            -- Đúng thứ tự: a1, name, x, y, z, rot
+            -- Đặt tower: a1, name, x, y, z, rot
             local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
             if a1 and name and x and y and z and rot then
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
                 local cost = GetTowerPlaceCostByName(name)
                 local vector = x .. ", " .. y .. ", " .. z
                 table.insert(logs, {
-                    TowerA1 = tostring(a1),
+                    TowerPlaceCost = tonumber(cost) or 0,
                     TowerPlaced = name,
                     TowerVector = vector,
                     Rotation = rot,
-                    TowerPlaceCost = cost
+                    TowerA1 = tostring(a1)
                 })
             else
-                -- UpgradeTower
+                -- Nâng cấp tower
                 local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*[^%)]+%)')
                 if hash and path then
                     local pos = hash2pos[tostring(hash)]
@@ -204,13 +205,13 @@ while true do
                     local upgradeCost = GetUpgradeCost(tower, tonumber(path))
                     if pos then
                         table.insert(logs, {
+                            TowerUpgraded = pos.x,
                             UpgradeCost = upgradeCost,
-                            UpgradePath = tonumber(path),
-                            TowerUpgraded = pos.x
+                            UpgradePath = tonumber(path)
                         })
                     end
                 else
-                    -- ChangeQueryType
+                    -- Đổi target
                     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
                     if hash and targetType then
                         local pos = hash2pos[tostring(hash)]
@@ -221,7 +222,7 @@ while true do
                             })
                         end
                     else
-                        -- SellTower
+                        -- Bán tower
                         local hash = line:match('TDX:sellTower%(([^%)]+)%)')
                         if hash then
                             local pos = hash2pos[tostring(hash)]
