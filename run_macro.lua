@@ -1,4 +1,4 @@
--- [TDX] Macro Runner - Position X Matching Upgrade Support (PlaceTower retry until success)
+-- [TDX] Macro Runner - Position X Matching Upgrade Support (PlaceTower retry until success - fixed cost bug)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -64,9 +64,9 @@ local function WaitForCash(amount)
 end
 
 -- Lặp lại đặt tower cho đến khi thành công (tower xuất hiện đúng vị trí)
-local function PlaceTowerRepeat(args, towerX)
+local function PlaceTowerRepeat(args, towerX, cost)
     while true do
-        WaitForCash(args[3]) -- args[3] là cost
+        WaitForCash(cost)
         Remotes.PlaceTower:InvokeServer(unpack(args))
         task.wait(0.1)
         local hash, tower = FindTowerByX(towerX, false)
@@ -124,7 +124,7 @@ for i, entry in ipairs(macro) do
 			entry.TowerPlaceCost
 		}
 		local towerX = pos.X
-		PlaceTowerRepeat(args, towerX)
+		PlaceTowerRepeat(args, towerX, entry.TowerPlaceCost)
 
 	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
 		local towerX = tonumber(entry.TowerUpgraded)
