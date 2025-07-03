@@ -42,7 +42,7 @@ local function GetTowerByX(xTarget, unsure)
 		end)
 		if success and pos then
 			local dist = math.abs(pos.X - xTarget)
-			local match = (unsure and dist <= 0.15) or (not unsure and dist < 0.1)
+			local match = (unsure and dist <= 0.9) or (not unsure and dist < 0.9)
 			if match then
 				local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 				if hp and hp > 0 then
@@ -82,7 +82,7 @@ local function PlaceTowerUntilSuccess(args, posX, towerName)
 			break
 		end
 		warn("[RETRY] Đặt tower thất bại, thử lại:", towerName, "tại X =", posX)
-		task.wait(0.2)
+		task.wait(0.1)
 	end
 end
 
@@ -94,11 +94,11 @@ local function UpgradeTowerUnsure(towerX, upgradePath)
 			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 			if hp and hp > 0 then
 				Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
-				task.wait(0.2)
+				task.wait(0.1)
 				return
 			end
 		end
-		task.wait(0.2)
+		task.wait()
 	end
 end
 
@@ -136,7 +136,7 @@ for i, entry in ipairs(macro) do
 			PlaceTowerUntilSuccess(args, pos.X, entry.TowerPlaced)
 		else
 			Remotes.PlaceTower:InvokeServer(unpack(args))
-			task.wait(0.2)
+			task.wait(0.1)
 		end
 
 	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
@@ -157,7 +157,7 @@ for i, entry in ipairs(macro) do
 			end
 			WaitForCash(entry.UpgradeCost)
 			Remotes.TowerUpgradeRequest:FireServer(hash, entry.UpgradePath, 1)
-			task.wait(0.2)
+			task.wait(0.1)
 		end
 
 	elseif entry.ChangeTarget and entry.TargetType then
@@ -167,14 +167,14 @@ for i, entry in ipairs(macro) do
 		local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 		if not hp or hp <= 0 then continue end
 		Remotes.ChangeQueryType:FireServer(hash, entry.TargetType)
-		task.wait(0.2)
+		task.wait(0.1)
 
 	elseif entry.SellTower then
 		local towerX = tonumber(entry.SellTower)
 		local hash = GetTowerByX(towerX, false)
 		if hash then
 			Remotes.SellTower:FireServer(hash)
-			task.wait(0.2)
+			task.wait(0.1)
 		end
 	end
 end
