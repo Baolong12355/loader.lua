@@ -1,4 +1,4 @@
--- [TDX] Macro Runner - Position X Matching Upgrade Support (with config mode, optimized unsure repeat, and PlaceTower retry)
+-- [TDX] Macro Runner - Position X Matching Upgrade Support (with PlaceTower retry, giữ nguyên cấu trúc gốc)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -6,9 +6,7 @@ local player = Players.LocalPlayer
 local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
----------------------------------------------------------------------
--- Utility: Safe Require
----------------------------------------------------------------------
+-- Load TowerClass
 local function SafeRequire(path, timeout)
 	timeout = timeout or 5
 	local t0 = os.clock()
@@ -22,9 +20,6 @@ local function SafeRequire(path, timeout)
 	return nil
 end
 
----------------------------------------------------------------------
--- Utility: Load TowerClass
----------------------------------------------------------------------
 local function LoadTowerClass()
 	local ps = player:WaitForChild("PlayerScripts")
 	local client = ps:WaitForChild("Client")
@@ -36,89 +31,78 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
----------------------------------------------------------------------
--- Utility: Find tower by X position (normal/unsure)
----------------------------------------------------------------------
-local function FindTowerByX(xTarget, unsureMode)
-    local bestHash, bestTower, bestDist
-    for hash, tower in pairs(TowerClass.GetTowers()) do
-        local success, pos = pcall(function()
-            local model = tower.Character:GetCharacterModel()
-            local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
-            return root and root.Position
-        end)
-        if success and pos then
-            local dist = math.abs(pos.X - xTarget)
-            local match = (unsureMode and dist <= 0.99) or (not unsureMode and dist < 0.99)
-            if match then
-                local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
-                if hp and hp > 0 then
-                    if not bestDist or dist < bestDist then
-                        bestHash, bestTower, bestDist = hash, tower, dist
-                    end
-                end
-            end
-        end
-    end
-    return bestHash, bestTower
+-- Lấy hash tower theo vị trí X (±0.1 hoặc ±0.15 cho unsure)
+local function GetTowerByX(xTarget, unsure)
+	local bestHash, bestTower, bestDist
+	for hash, tower in pairs(TowerClass.GetTowers()) do
+		local success, pos = pcall(function()
+			local model = tower.Character:GetCharacterModel()
+			local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
+			return root and root.Position
+		end)
+		if success and pos then
+			local dist = math.abs(pos.X - xTarget)
+			local match = (unsure and dist <= 0.15) or (not unsure and dist < 0.1)
+			if match then
+				local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+				if hp and hp > 0 then
+					if not bestDist or dist < bestDist then
+						bestHash, bestTower, bestDist = hash, tower, dist
+					end
+				end
+			end
+		end
+	end
+	return bestHash, bestTower
 end
 
----------------------------------------------------------------------
--- Utility: Wait for enough cash
----------------------------------------------------------------------
+-- Chờ có đủ tiền
 local function WaitForCash(amount)
 	while cashStat.Value < amount do
 		task.wait()
 	end
 end
 
----------------------------------------------------------------------
--- Utility: Retry PlaceTower until success
----------------------------------------------------------------------
-local function PlaceTowerRetry(args, posX, towerName, retryWait)
-    retryWait = retryWait or 0.1
-    while true do
-        Remotes.PlaceTower:InvokeServer(unpack(args))
-        -- Kiểm tra tower đã xuất hiện tại vị trí X & còn sống (max 2s)
-        local placed = false
-        local t0 = tick()
-        repeat
-            task.wait()
-            local hash, tower = FindTowerByX(posX, true)
-            if hash and tower then
-                placed = true
-                break
-            end
-        until tick() - t0 > 2
-        if placed then
-            break
-        end
-        warn("[RETRY] Đặt tower thất bại, thử lại:", towerName, "tại X =", posX)
-        task.wait(retryWait)
-    end
+-- Đặt tower lặp lại đến khi thấy tower xuất hiện ở vị trí X (±0.15)
+local function PlaceTowerUntilSuccess(args, posX, towerName)
+	while true do
+		Remotes.PlaceTower:InvokeServer(unpack(args))
+		-- Kiểm tra tower đã xuất hiện tại vị trí X & còn sống (timeout 2s)
+		local placed = false
+		local t0 = tick()
+		repeat
+			task.wait(0.15)
+			local hash, tower = GetTowerByX(posX, true)
+			if hash and tower then
+				placed = true
+				break
+			end
+		until tick() - t0 > 2
+		if placed then
+			break
+		end
+		warn("[RETRY] Đặt tower thất bại, thử lại:", towerName, "tại X =", posX)
+		task.wait(0.2)
+	end
 end
 
----------------------------------------------------------------------
--- Utility: Upgrade tower unsure mode (loop until success)
----------------------------------------------------------------------
+-- Nâng cấp tower ở chế độ unsure: lặp đến khi thành công
 local function UpgradeTowerUnsure(towerX, upgradePath)
-    while true do
-        local hash, tower = FindTowerByX(towerX, true)
-        if hash and tower then
-            local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
-            if hp and hp > 0 then
-                Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
-                task.wait(0.1)
-                return -- Thành công, thoát vòng lặp
-            end
-        end
-        task.wait() -- Đợi rồi thử lại
-    end
+	while true do
+		local hash, tower = GetTowerByX(towerX, true)
+		if hash and tower then
+			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+			if hp and hp > 0 then
+				Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
+				task.wait(0.2)
+				return
+			end
+		end
+		task.wait(0.2)
+	end
 end
 
----------------------------------------------------------------------
--- Load macro file & config
----------------------------------------------------------------------
+-- Load macro file và config
 local config = getgenv().TDX_Config or {}
 local macroName = config["Macro Name"] or "y"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
@@ -136,11 +120,8 @@ if not success then
 	error("Lỗi khi đọc macro")
 end
 
----------------------------------------------------------------------
--- MAIN: Run macro
----------------------------------------------------------------------
+-- Chạy macro
 for i, entry in ipairs(macro) do
-	------------------- PLACE TOWER --------------------
 	if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
 		local pos = Vector3.new(unpack(entry.TowerVector:split(", ")))
 		local args = {
@@ -150,22 +131,21 @@ for i, entry in ipairs(macro) do
 			tonumber(entry.Rotation or 0)
 		}
 		WaitForCash(entry.TowerPlaceCost)
-		local mode = entry.PlaceMode or globalPlaceMode
-		if mode == "unsure" then
-			PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
+		local placeMode = entry.PlaceMode or globalPlaceMode
+		if placeMode == "unsure" then
+			PlaceTowerUntilSuccess(args, pos.X, entry.TowerPlaced)
 		else
 			Remotes.PlaceTower:InvokeServer(unpack(args))
-			task.wait(0.1)
+			task.wait(0.2)
 		end
 
-	------------------- UPGRADE TOWER ------------------
 	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
 		local towerX = tonumber(entry.TowerUpgraded)
 		local mode = entry.UpgradeMode or globalUpgradeMode
 		if mode == "unsure" then
 			UpgradeTowerUnsure(towerX, entry.UpgradePath)
 		else
-			local hash, tower = FindTowerByX(towerX, false)
+			local hash, tower = GetTowerByX(towerX, false)
 			if not hash or not tower then
 				warn("[SKIP] Không tìm thấy tower tại X =", towerX)
 				continue
@@ -177,26 +157,24 @@ for i, entry in ipairs(macro) do
 			end
 			WaitForCash(entry.UpgradeCost)
 			Remotes.TowerUpgradeRequest:FireServer(hash, entry.UpgradePath, 1)
-			task.wait(0.1)
+			task.wait(0.2)
 		end
 
-	------------------- CHANGE TARGET ------------------
 	elseif entry.ChangeTarget and entry.TargetType then
 		local towerX = tonumber(entry.ChangeTarget)
-		local hash, tower = FindTowerByX(towerX, false)
+		local hash, tower = GetTowerByX(towerX, false)
 		if not hash or not tower then continue end
 		local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 		if not hp or hp <= 0 then continue end
 		Remotes.ChangeQueryType:FireServer(hash, entry.TargetType)
-		task.wait(0.1)
+		task.wait(0.2)
 
-	------------------- SELL TOWER ---------------------
 	elseif entry.SellTower then
 		local towerX = tonumber(entry.SellTower)
-		local hash = FindTowerByX(towerX, false)
+		local hash = GetTowerByX(towerX, false)
 		if hash then
 			Remotes.SellTower:FireServer(hash)
-			task.wait(0.1)
+			task.wait(0.2)
 		end
 	end
 end
