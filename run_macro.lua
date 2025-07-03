@@ -1,4 +1,4 @@
--- [TDX] Macro Runner - Position X Matching Upgrade Support (with config mode)
+-- [TDX] Macro Runner - Position X Matching Upgrade Support (with config mode & optimized unsure repeat)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -31,33 +31,29 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
--- Lấy hash tower theo vị trí X (±0.1)
-local function GetTowerByX(xTarget)
-	for hash, tower in pairs(TowerClass.GetTowers()) do
-		local success, pos = pcall(function()
-			local model = tower.Character:GetCharacterModel()
-			local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
-			return root and root.Position
-		end)
-		if success and pos and math.abs(pos.X - xTarget) < 0.1 then
-			return hash, tower
-		end
-	end
-	return nil
-end
-
--- Tìm tower với bước 0.1 quanh x, trả về hash đầu tiên tìm thấy còn sống
-local function GetTowerByXUnsure(xTarget)
-	for delta = -0.1, 0.1, 0.1 do
-		local hash, tower = GetTowerByX(xTarget + delta)
-		if hash and tower then
-			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
-			if hp and hp > 0 then
-				return hash, tower
-			end
-		end
-	end
-	return nil
+-- Tìm tower theo X, với tuỳ chọn unsure (tìm quanh vị trí)
+local function FindTowerByX(xTarget, unsureMode)
+    local bestHash, bestTower, bestDist
+    for hash, tower in pairs(TowerClass.GetTowers()) do
+        local success, pos = pcall(function()
+            local model = tower.Character:GetCharacterModel()
+            local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
+            return root and root.Position
+        end)
+        if success and pos then
+            local dist = math.abs(pos.X - xTarget)
+            local match = (unsureMode and dist <= 0.95) or (not unsureMode and dist < 0.9)
+            if match then
+                local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+                if hp and hp > 0 then
+                    if not bestDist or dist < bestDist then
+                        bestHash, bestTower, bestDist = hash, tower, dist
+                    end
+                end
+            end
+        end
+    end
+    return bestHash, bestTower
 end
 
 -- Chờ có đủ tiền
@@ -65,6 +61,22 @@ local function WaitForCash(amount)
 	while cashStat.Value < amount do
 		task.wait()
 	end
+end
+
+-- Nâng cấp tower ở chế độ unsure: lặp đến khi thành công
+local function UpgradeTowerUnsure(towerX, upgradePath)
+    while true do
+        local hash, tower = FindTowerByX(towerX, true)
+        if hash and tower then
+            local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+            if hp and hp > 0 then
+                Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
+                task.wait(0.1)
+                return -- Thành công, thoát vòng lặp
+            end
+        end
+        task.wait() -- Đợi rồi thử lại
+    end
 end
 
 -- Load macro file và config
@@ -102,15 +114,9 @@ for i, entry in ipairs(macro) do
 		local towerX = tonumber(entry.TowerUpgraded)
 		local mode = entry.UpgradeMode or globalUpgradeMode
 		if mode == "unsure" then
-			local hash, tower = GetTowerByXUnsure(towerX)
-			if not hash or not tower then
-				warn("[SKIP][unsure] Không tìm thấy tower quanh X =", towerX)
-				continue
-			end
-			Remotes.TowerUpgradeRequest:FireServer(hash, entry.UpgradePath, 1)
-			task.wait(0.1)
+			UpgradeTowerUnsure(towerX, entry.UpgradePath)
 		else
-			local hash, tower = GetTowerByX(towerX)
+			local hash, tower = FindTowerByX(towerX, false)
 			if not hash or not tower then
 				warn("[SKIP] Không tìm thấy tower tại X =", towerX)
 				continue
@@ -127,7 +133,7 @@ for i, entry in ipairs(macro) do
 
 	elseif entry.ChangeTarget and entry.TargetType then
 		local towerX = tonumber(entry.ChangeTarget)
-		local hash, tower = GetTowerByX(towerX)
+		local hash, tower = FindTowerByX(towerX, false)
 		if not hash or not tower then continue end
 		local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 		if not hp or hp <= 0 then continue end
@@ -136,7 +142,7 @@ for i, entry in ipairs(macro) do
 
 	elseif entry.SellTower then
 		local towerX = tonumber(entry.SellTower)
-		local hash = GetTowerByX(towerX)
+		local hash = FindTowerByX(towerX, false)
 		if hash then
 			Remotes.SellTower:FireServer(hash)
 			task.wait(0.1)
