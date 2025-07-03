@@ -89,16 +89,18 @@ end)
 
 print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
 
--- Script rewrite macro TDX: ánh xạ hash <-> vị trí X liên tục, lấy giá nâng cấp đúng, xuất macro runner dạng X
+-- Script chuyển đổi record.txt thành macro runner (dùng trục X), với thứ tự trường upgrade là: UpgradeCost, UpgradePath, TowerUpgraded
+-- Đặt script này trong môi trường Roblox hoặc môi trường hỗ trợ các API Roblox tương ứng
 
 local txtFile = "record.txt"
-local outJson = "tdx/macros/y.json"
+local outJson = "tdx/macros/x.json"
 
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
+-- Safe require tower module
 local function SafeRequire(module)
     local success, result = pcall(require, module)
     return success and result or nil
@@ -158,7 +160,7 @@ local function GetUpgradeCost(tower, path)
     return 0
 end
 
--- Liên tục ánh xạ hash -> pos
+-- Ánh xạ hash -> pos liên tục
 local hash2pos = {}
 task.spawn(function()
     while true do
@@ -197,7 +199,7 @@ while true do
                     TowerA1 = tostring(a1)
                 })
             else
-                -- Nâng cấp tower
+                -- Nâng cấp tower: chuyển đổi đúng thứ tự UpgradeCost, UpgradePath, TowerUpgraded (X)
                 local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*[^%)]+%)')
                 if hash and path then
                     local pos = hash2pos[tostring(hash)]
@@ -205,9 +207,9 @@ while true do
                     local upgradeCost = GetUpgradeCost(tower, tonumber(path))
                     if pos then
                         table.insert(logs, {
-                            TowerUpgraded = pos.x,
                             UpgradeCost = upgradeCost,
-                            UpgradePath = tonumber(path)
+                            UpgradePath = tonumber(path),
+                            TowerUpgraded = pos.x
                         })
                     end
                 else
