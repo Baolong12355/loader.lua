@@ -99,13 +99,11 @@ local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
--- Hàm require an toàn
 local function SafeRequire(module)
     local success, result = pcall(require, module)
     return success and result or nil
 end
 
--- Load TowerClass
 local TowerClass
 do
     local client = PlayerScripts:WaitForChild("Client")
@@ -114,7 +112,6 @@ do
     TowerClass = SafeRequire(towerModule)
 end
 
--- Lấy vị trí tower
 local function GetTowerPosition(tower)
     if not tower or not tower.Character then return nil end
     local model = tower.Character:GetCharacterModel()
@@ -122,7 +119,6 @@ local function GetTowerPosition(tower)
     return root and root.Position or nil
 end
 
--- Lấy giá đặt tower
 local function GetTowerPlaceCostByName(name)
     local playerGui = player:FindFirstChild("PlayerGui")
     if not playerGui then return 0 end
@@ -145,13 +141,11 @@ local function GetTowerPlaceCostByName(name)
     return 0
 end
 
--- Parse giá nâng cấp path (lấy số thôi)
 local function ParseUpgradeCost(costStr)
     local num = tostring(costStr):gsub("[^%d]", "")
     return tonumber(num) or 0
 end
 
--- Lấy giá nâng cấp hiện tại (lọc ký tự lạ)
 local function GetUpgradeCost(tower, path)
     if not tower or not tower.LevelHandler then return 0 end
     local lvl = tower.LevelHandler:GetLevelOnPath(path)
@@ -164,7 +158,6 @@ local function GetUpgradeCost(tower, path)
     return 0
 end
 
--- Ánh xạ liên tục hash <-> vị trí
 local hash2pos = {}
 task.spawn(function()
     while true do
@@ -189,22 +182,22 @@ while true do
         local logs = {}
 
         for line in macro:gmatch("[^\r\n]+") do
-            -- PlaceTower
-            local x, name, y, rot, z, a1 = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-            if x and name and y and rot and z and a1 then
+            -- Đúng thứ tự: a1, name, x, y, z, rot
+            local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+            if a1 and name and x and y and z and rot then
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
                 local cost = GetTowerPlaceCostByName(name)
                 local vector = x .. ", " .. y .. ", " .. z
                 table.insert(logs, {
-                    TowerPlaceCost = cost,
+                    TowerA1 = tostring(a1),
                     TowerPlaced = name,
                     TowerVector = vector,
                     Rotation = rot,
-                    TowerA1 = tostring(a1)
+                    TowerPlaceCost = cost
                 })
             else
                 -- UpgradeTower
-                local hash, path, dummy = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+                local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*[^%)]+%)')
                 if hash and path then
                     local pos = hash2pos[tostring(hash)]
                     local tower = TowerClass and TowerClass.GetTowers()[hash]
