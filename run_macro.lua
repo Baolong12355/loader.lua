@@ -1,4 +1,4 @@
--- [TDX] Macro Runner - Position X Matching Upgrade Support (PlaceTower retry until success - robust TowerVector parsing)
+-- [TDX] Macro Runner - Position X Matching Upgrade Support (PlaceTower retry until success - robust TowerVector parsing, strong type checking)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -40,7 +40,7 @@ local function FindTowerByX(xTarget, unsureMode)
             local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
             return root and root.Position
         end)
-        if success and pos then
+        if success and pos and typeof(pos) == "Vector3" then
             local dist = math.abs(pos.X - xTarget)
             local match = (unsureMode and dist <= 0.95) or (not unsureMode and dist < 0.91)
             if match then
@@ -58,6 +58,7 @@ end
 
 -- Chờ có đủ tiền
 local function WaitForCash(amount)
+    assert(type(amount) == "number", "[WaitForCash] amount must be number!")
 	while cashStat.Value < amount do
 		task.wait()
 	end
@@ -65,6 +66,7 @@ end
 
 -- Lặp lại đặt tower cho đến khi thành công (tower xuất hiện đúng vị trí)
 local function PlaceTowerRepeat(args, towerX, cost)
+    assert(type(cost) == "number", "[PlaceTowerRepeat] cost must be number!")
     while true do
         WaitForCash(cost)
         Remotes.PlaceTower:InvokeServer(unpack(args))
@@ -81,6 +83,7 @@ end
 
 -- Nâng cấp tower ở chế độ unsure: lặp đến khi thành công
 local function UpgradeTowerUnsure(towerX, upgradePath)
+    assert(type(towerX) == "number", "[UpgradeTowerUnsure] towerX must be number!")
     while true do
         local hash, tower = FindTowerByX(towerX, true)
         if hash and tower then
@@ -134,6 +137,9 @@ for i, entry in ipairs(macro) do
 
 	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
 		local towerX = tonumber(entry.TowerUpgraded)
+        if not towerX then
+            error("TowerUpgraded không hợp lệ: " .. tostring(entry.TowerUpgraded))
+        end
 		local mode = entry.UpgradeMode or globalUpgradeMode
 		if mode == "unsure" then
 			UpgradeTowerUnsure(towerX, entry.UpgradePath)
@@ -148,6 +154,7 @@ for i, entry in ipairs(macro) do
 				warn("[SKIP] Tower tại X =", towerX, "đã chết")
 				continue
 			end
+            assert(type(entry.UpgradeCost) == "number", "[Upgrade] UpgradeCost phải là số!")
 			WaitForCash(entry.UpgradeCost)
 			Remotes.TowerUpgradeRequest:FireServer(hash, entry.UpgradePath, 1)
 			task.wait(0.1)
@@ -155,6 +162,9 @@ for i, entry in ipairs(macro) do
 
 	elseif entry.ChangeTarget and entry.TargetType then
 		local towerX = tonumber(entry.ChangeTarget)
+        if not towerX then
+            error("ChangeTarget không hợp lệ: " .. tostring(entry.ChangeTarget))
+        end
 		local hash, tower = FindTowerByX(towerX, false)
 		if not hash or not tower then continue end
 		local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
@@ -164,6 +174,9 @@ for i, entry in ipairs(macro) do
 
 	elseif entry.SellTower then
 		local towerX = tonumber(entry.SellTower)
+        if not towerX then
+            error("SellTower không hợp lệ: " .. tostring(entry.SellTower))
+        end
 		local hash = FindTowerByX(towerX, false)
 		if hash then
 			Remotes.SellTower:FireServer(hash)
