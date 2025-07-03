@@ -1,14 +1,14 @@
 local startTime = time()
 local offset = 0
-local fileName = "record.txt"  -- <--- Äáº¶T TĂN FILE Cá» Äá»NH á» ÄĂ‚Y
+local fileName = "record.txt"  -- <--- ĐẶT TÊN FILE CỐ ĐỊNH Ở ĐÂY
 
--- Náº¿u file Ä‘Ă£ tá»“n táº¡i thĂ¬ xĂ³a Ä‘á»ƒ táº¡o má»›i
+-- Nếu file đã tồn tại thì xóa để tạo mới
 if isfile(fileName) then
     delfile(fileName)
 end
 writefile(fileName, "")
 
--- HĂ m serialize giĂ¡ trá»‹
+-- Hàm serialize giá trị
 local function serialize(value)
     if type(value) == "table" then
         local result = "{"
@@ -24,7 +24,7 @@ local function serialize(value)
     end
 end
 
--- HĂ m serialize táº¥t cáº£ argument
+-- Hàm serialize tất cả argument
 local function serializeArgs(...)
     local args = {...}
     local output = {}
@@ -34,29 +34,29 @@ local function serializeArgs(...)
     return table.concat(output, ", ")
 end
 
--- HĂ m log thao tĂ¡c vĂ o file
+-- Hàm log thao tác vào file
 local function log(method, self, serializedArgs)
     local name = tostring(self.Name)
     local text = name .. " " .. serializedArgs .. "\n"
     print(text)
 
     if name == "PlaceTower" then
-        appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
         appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
         startTime = time() - offset
 
     elseif name == "SellTower" then
-        appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
         appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
         startTime = time() - offset
 
     elseif name == "TowerUpgradeRequest" then
-        appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
         appendfile(fileName, "TDX:upgradeTower(" .. serializedArgs .. ")\n")
         startTime = time() - offset
 
     elseif name == "ChangeQueryType" then
-        appendfile(fileName, "task.wait(" .. tostring((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
         appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
         startTime = time() - offset
     end
@@ -87,9 +87,9 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     return oldNamecall(self, ...)
 end)
 
-print("âœ… Ghi macro TDX Ä‘Ă£ báº¯t Ä‘áº§u (luĂ´n dĂ¹ng tĂªn record.txt).")
+print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
 
--- Script rewrite macro TDX: Ă¡nh xáº¡ hash <-> vá»‹ trĂ­ liĂªn tá»¥c, láº¥y giĂ¡ nĂ¢ng cáº¥p Ä‘Ăºng, xuáº¥t macro runner dáº¡ng X
+-- Script rewrite macro TDX: ánh xạ hash <-> vị trí liên tục, lấy giá nâng cấp đúng, xuất macro runner dạng X
 
 local txtFile = "record.txt"
 local outJson = "tdx/macros/y.json"
@@ -99,7 +99,7 @@ local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
--- HĂ m require an toĂ n
+-- Hàm require an toàn
 local function SafeRequire(module)
     local success, result = pcall(require, module)
     return success and result or nil
@@ -114,7 +114,7 @@ do
     TowerClass = SafeRequire(towerModule)
 end
 
--- Láº¥y vá»‹ trĂ­ tower
+-- Lấy vị trí tower
 local function GetTowerPosition(tower)
     if not tower or not tower.Character then return nil end
     local model = tower.Character:GetCharacterModel()
@@ -122,12 +122,7 @@ local function GetTowerPosition(tower)
     return root and root.Position or nil
 end
 
--- LĂ m Ä‘áº¹p sá»‘
-local function floatfix(x)
-    return tonumber(string.format("%.8g", tonumber(x)))
-end
-
--- Láº¥y giĂ¡ Ä‘áº·t tower
+-- Lấy giá đặt tower
 local function GetTowerPlaceCostByName(name)
     local playerGui = player:FindFirstChild("PlayerGui")
     if not playerGui then return 0 end
@@ -150,13 +145,13 @@ local function GetTowerPlaceCostByName(name)
     return 0
 end
 
--- Parse giĂ¡ nĂ¢ng cáº¥p path (láº¥y sá»‘ thĂ´i)
+-- Parse giá nâng cấp path (lấy số thôi)
 local function ParseUpgradeCost(costStr)
     local num = tostring(costStr):gsub("[^%d]", "")
     return tonumber(num) or 0
 end
 
--- Láº¥y giĂ¡ nĂ¢ng cáº¥p hiá»‡n táº¡i (lá»c kĂ½ tá»± láº¡)
+-- Lấy giá nâng cấp hiện tại (lọc ký tự lạ)
 local function GetUpgradeCost(tower, path)
     if not tower or not tower.LevelHandler then return 0 end
     local lvl = tower.LevelHandler:GetLevelOnPath(path)
@@ -169,14 +164,14 @@ local function GetUpgradeCost(tower, path)
     return 0
 end
 
--- Ănh xáº¡ liĂªn tá»¥c hash <-> vá»‹ trĂ­
+-- Ánh xạ liên tục hash <-> vị trí
 local hash2pos = {}
 task.spawn(function()
     while true do
         for hash, tower in pairs(TowerClass and TowerClass.GetTowers() or {}) do
             local pos = GetTowerPosition(tower)
             if pos then
-                hash2pos[tostring(hash)] = {x = floatfix(pos.X), y = floatfix(pos.Y), z = floatfix(pos.Z)}
+                hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
             end
         end
         task.wait(0.1)
@@ -199,13 +194,13 @@ while true do
             if x and name and y and rot and z and a1 then
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
                 local cost = GetTowerPlaceCostByName(name)
-                local vector = string.format("%.8g, %.8g, %.8g", floatfix(x), floatfix(y), floatfix(z))
+                local vector = x .. ", " .. y .. ", " .. z
                 table.insert(logs, {
                     TowerPlaceCost = cost,
                     TowerPlaced = name,
                     TowerVector = vector,
-                    Rotation = floatfix(rot),
-                    TowerA1 = tostring(floatfix(a1))
+                    Rotation = rot,
+                    TowerA1 = tostring(a1)
                 })
             else
                 -- UpgradeTower
