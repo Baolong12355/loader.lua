@@ -1,4 +1,3 @@
--- [TDX] Macro Runner: Place/Upgrade/Sell/ChangeTarget - Place "unsure" dùng Y, Sell/Change cũng dùng Y nếu Place là unsure
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -64,22 +63,22 @@ local function WaitForCash(amount)
 	end
 end
 
--- Đặt tower: retry cho đến khi ra đúng vị trí (Y nếu unsure, X nếu thường)
-local function PlaceTowerRetry(args, axisValue, useY, towerName)
+-- Đặt tower: luôn dùng X (kể cả unsure)
+local function PlaceTowerRetry(args, axisValue, towerName)
 	while true do
 		Remotes.PlaceTower:InvokeServer(unpack(args))
 		local placed = false
 		local t0 = tick()
 		repeat
 			task.wait(0.1)
-			local hash, tower = GetTowerByAxis(axisValue, useY)
+			local hash, tower = GetTowerByAxis(axisValue, false)
 			if hash and tower then
 				placed = true
 				break
 			end
 		until tick() - t0 > 2
 		if placed then break end
-		warn("[RETRY] Đặt tower thất bại, thử lại:", towerName, (useY and "Y" or "X"), "=", axisValue)
+		warn("[RETRY] Đặt tower thất bại, thử lại:", towerName, "X =", axisValue)
 		task.wait()
 	end
 end
@@ -100,10 +99,10 @@ local function UpgradeTowerRetry(axisValue, upgradePath)
 	end
 end
 
--- ChangeTarget: retry, dùng X hoặc Y tùy PlaceMode
-local function ChangeTargetRetry(axisValue, targetType, useY)
+-- ChangeTarget: retry, luôn dùng X
+local function ChangeTargetRetry(axisValue)
 	while true do
-		local hash, tower = GetTowerByAxis(axisValue, useY)
+		local hash, tower = GetTowerByAxis(axisValue, false)
 		if hash and tower then
 			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 			if hp and hp > 0 then
@@ -116,14 +115,14 @@ local function ChangeTargetRetry(axisValue, targetType, useY)
 	end
 end
 
--- SellTower: retry, dùng X hoặc Y tùy PlaceMode
-local function SellTowerRetry(axisValue, useY)
+-- SellTower: retry, luôn dùng X
+local function SellTowerRetry(axisValue)
 	while true do
-		local hash = GetTowerByAxis(axisValue, useY)
+		local hash = GetTowerByAxis(axisValue, false)
 		if hash then
 			Remotes.SellTower:FireServer(hash)
 			task.wait(0.1)
-			local stillExist = GetTowerByAxis(axisValue, useY)
+			local stillExist = GetTowerByAxis(axisValue, false)
 			if not stillExist then
 				return
 			end
@@ -161,28 +160,20 @@ for i, entry in ipairs(macro) do
 			tonumber(entry.Rotation or 0)
 		}
 		WaitForCash(entry.TowerPlaceCost)
-		local placeMode = entry.PlaceMode or globalPlaceMode
-		-- Lưu ý: quyết định cho các thao tác tiếp theo
-		_G.__TDX_PLACE_UNSURE = (placeMode == "unsure")
-		if _G.__TDX_PLACE_UNSURE then
-			PlaceTowerRetry(args, pos.Y, true, entry.TowerPlaced)    -- unsure: dùng Y
-		else
-			PlaceTowerRetry(args, pos.X, false, entry.TowerPlaced)   -- normal: dùng X
-		end
+		PlaceTowerRetry(args, pos.X, entry.TowerPlaced) -- luôn dùng X
 
 	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
 		local axisValue = tonumber(entry.TowerUpgraded)
-		UpgradeTowerRetry(axisValue, entry.UpgradePath) -- luôn dùng X, luôn retry
+		UpgradeTowerRetry(axisValue, entry.UpgradePath) -- luôn dùng X
 
 	elseif entry.ChangeTarget and entry.TargetType then
 		local axisValue = tonumber(entry.ChangeTarget)
-		-- Dùng Y nếu Place là unsure, X nếu thường
-		ChangeTargetRetry(axisValue, entry.TargetType, _G.__TDX_PLACE_UNSURE or false)
+		local targetType = entry.TargetType
+		ChangeTargetRetry(axisValue, targetType) -- luôn dùng X
 
 	elseif entry.SellTower then
 		local axisValue = tonumber(entry.SellTower)
-		-- Dùng Y nếu Place là unsure, X nếu thường
-		SellTowerRetry(axisValue, _G.__TDX_PLACE_UNSURE or false)
+		SellTowerRetry(axisValue) -- luôn dùng X
 	end
 end
 
