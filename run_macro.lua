@@ -1,4 +1,4 @@
--- [TDX] Macro Runner - Position X Matching Upgrade Support (with config mode & optimized unsure repeat)
+-- [TDX] Macro Runner - Position X Matching Upgrade Support (PlaceTower retry until success)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -42,7 +42,7 @@ local function FindTowerByX(xTarget, unsureMode)
         end)
         if success and pos then
             local dist = math.abs(pos.X - xTarget)
-            local match = (unsureMode and dist <= 0.95) or (not unsureMode and dist < 0.9)
+            local match = (unsureMode and dist <= 0.95) or (not unsureMode and dist < 0.91)
             if match then
                 local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
                 if hp and hp > 0 then
@@ -63,6 +63,22 @@ local function WaitForCash(amount)
 	end
 end
 
+-- Lặp lại đặt tower cho đến khi thành công (tower xuất hiện đúng vị trí)
+local function PlaceTowerRepeat(args, towerX)
+    while true do
+        WaitForCash(args[3]) -- args[3] là cost
+        Remotes.PlaceTower:InvokeServer(unpack(args))
+        task.wait(0.1)
+        local hash, tower = FindTowerByX(towerX, false)
+        if hash and tower then
+            local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+            if hp and hp > 0 then
+                return
+            end
+        end
+    end
+end
+
 -- Nâng cấp tower ở chế độ unsure: lặp đến khi thành công
 local function UpgradeTowerUnsure(towerX, upgradePath)
     while true do
@@ -75,7 +91,7 @@ local function UpgradeTowerUnsure(towerX, upgradePath)
                 return -- Thành công, thoát vòng lặp
             end
         end
-        task.wait() -- Đợi rồi thử lại
+        task.wait()
     end
 end
 
@@ -104,11 +120,11 @@ for i, entry in ipairs(macro) do
 			tonumber(entry.TowerA1),
 			entry.TowerPlaced,
 			pos,
-			tonumber(entry.Rotation or 0)
+			tonumber(entry.Rotation or 0),
+			entry.TowerPlaceCost
 		}
-		WaitForCash(entry.TowerPlaceCost)
-		Remotes.PlaceTower:InvokeServer(unpack(args))
-		task.wait(0.1)
+		local towerX = pos.X
+		PlaceTowerRepeat(args, towerX)
 
 	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
 		local towerX = tonumber(entry.TowerUpgraded)
