@@ -1,4 +1,4 @@
--- [TDX] Macro Runner - Position X Matching Upgrade Support (PlaceTower retry until success - fixed cost bug)
+-- [TDX] Macro Runner - Position X Matching Upgrade Support (PlaceTower retry until success - robust TowerVector parsing)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -115,7 +115,13 @@ end
 -- Chạy macro
 for i, entry in ipairs(macro) do
 	if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
-		local pos = Vector3.new(unpack(entry.TowerVector:split(", ")))
+		-- Phân tách TowerVector an toàn
+		local x, y, z = string.match(entry.TowerVector, "([^,]+),%s*([^,]+),%s*([^,]+)")
+		x, y, z = tonumber(x), tonumber(y), tonumber(z)
+		if not x or not y or not z then
+			error("TowerVector không hợp lệ: " .. tostring(entry.TowerVector))
+		end
+		local pos = Vector3.new(x, y, z)
 		local args = {
 			tonumber(entry.TowerA1),
 			entry.TowerPlaced,
