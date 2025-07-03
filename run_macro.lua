@@ -1,4 +1,4 @@
--- [TDX] Macro Runner - Position X Matching Upgrade Support
+-- [TDX] Macro Runner - Position X Matching Upgrade Support (with config mode)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -46,6 +46,20 @@ local function GetTowerByX(xTarget)
 	return nil
 end
 
+-- Tìm tower với bước 0.1 quanh x, trả về hash đầu tiên tìm thấy còn sống
+local function GetTowerByXUnsure(xTarget)
+	for delta = -0.1, 0.1, 0.1 do
+		local hash, tower = GetTowerByX(xTarget + delta)
+		if hash and tower then
+			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+			if hp and hp > 0 then
+				return hash, tower
+			end
+		end
+	end
+	return nil
+end
+
 -- Chờ có đủ tiền
 local function WaitForCash(amount)
 	while cashStat.Value < amount do
@@ -53,10 +67,11 @@ local function WaitForCash(amount)
 	end
 end
 
--- Load macro file
+-- Load macro file và config
 local config = getgenv().TDX_Config or {}
 local macroName = config["Macro Name"] or "y"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
+local globalUpgradeMode = config["UpgradeMode"] or "normal" -- "unsure" hoặc "normal"
 
 if not isfile(macroPath) then
 	error("Không tìm thấy macro file: " .. macroPath)
@@ -85,19 +100,30 @@ for i, entry in ipairs(macro) do
 
 	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
 		local towerX = tonumber(entry.TowerUpgraded)
-		local hash, tower = GetTowerByX(towerX)
-		if not hash or not tower then
-			warn("[SKIP] Không tìm thấy tower tại X =", towerX)
-			continue
+		local mode = entry.UpgradeMode or globalUpgradeMode
+		if mode == "unsure" then
+			local hash, tower = GetTowerByXUnsure(towerX)
+			if not hash or not tower then
+				warn("[SKIP][unsure] Không tìm thấy tower quanh X =", towerX)
+				continue
+			end
+			Remotes.TowerUpgradeRequest:FireServer(hash, entry.UpgradePath, 1)
+			task.wait(0.2)
+		else
+			local hash, tower = GetTowerByX(towerX)
+			if not hash or not tower then
+				warn("[SKIP] Không tìm thấy tower tại X =", towerX)
+				continue
+			end
+			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+			if not hp or hp <= 0 then
+				warn("[SKIP] Tower tại X =", towerX, "đã chết")
+				continue
+			end
+			WaitForCash(entry.UpgradeCost)
+			Remotes.TowerUpgradeRequest:FireServer(hash, entry.UpgradePath, 1)
+			task.wait(0.2)
 		end
-		local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
-		if not hp or hp <= 0 then
-			warn("[SKIP] Tower tại X =", towerX, "đã chết")
-			continue
-		end
-		WaitForCash(entry.UpgradeCost)
-		Remotes.TowerUpgradeRequest:FireServer(hash, entry.UpgradePath, 1)
-		task.wait(0.2)
 
 	elseif entry.ChangeTarget and entry.TargetType then
 		local towerX = tonumber(entry.ChangeTarget)
