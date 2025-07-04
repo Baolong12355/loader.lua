@@ -30,18 +30,16 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
--- ✅ Tìm tower theo X hoặc Y (dùng tower.CFrame.Position)
-local function GetTowerByAxis(axisValue, useY)
+-- Tìm tower theo X
+local function GetTowerByAxis(axisValue)
 	local bestHash, bestTower, bestDist
 	for hash, tower in pairs(TowerClass.GetTowers()) do
 		local success, pos = pcall(function()
 			return tower.CFrame.Position
 		end)
 		if success and pos then
-			local val = useY and pos.Y or pos.X
-			local dist = math.abs(val - axisValue)
-			local match = dist <= 0.2
-			if match then
+			local dist = math.abs(pos.X - axisValue)
+			if dist <= 1 then
 				local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 				if hp and hp > 0 then
 					if not bestDist or dist < bestDist then
@@ -61,7 +59,7 @@ local function WaitForCash(amount)
 	end
 end
 
--- Đặt tower: luôn dùng X
+-- Đặt tower
 local function PlaceTowerRetry(args, axisValue, towerName)
 	while true do
 		Remotes.PlaceTower:InvokeServer(unpack(args))
@@ -69,7 +67,7 @@ local function PlaceTowerRetry(args, axisValue, towerName)
 		local t0 = tick()
 		repeat
 			task.wait(0.1)
-			local hash, tower = GetTowerByAxis(axisValue, false)
+			local hash, tower = GetTowerByAxis(axisValue)
 			if hash and tower then
 				placed = true
 				break
@@ -81,31 +79,29 @@ local function PlaceTowerRetry(args, axisValue, towerName)
 	end
 end
 
--- Nâng cấp tower: retry
+-- ✅ Nâng cấp tower (đã sửa lỗi skip)
 local function UpgradeTowerRetry(axisValue, upgradePath)
 	while true do
-		local hash, tower = GetTowerByAxis(axisValue, false)
+		local hash, tower = GetTowerByAxis(axisValue)
 		if hash and tower then
 			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 			if hp and hp > 0 then
 				Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
-				task.wait(0.1)
-				return
+				break -- ✅ chỉ thoát khi upgrade được, vẫn cho phép macro gọi lại lần nữa nếu cần
 			end
 		end
-		task.wait()
+		task.wait(0.1)
 	end
 end
 
--- ChangeTarget: retry
+-- Đổi mục tiêu
 local function ChangeTargetRetry(axisValue)
 	while true do
-		local hash, tower = GetTowerByAxis(axisValue, false)
+		local hash, tower = GetTowerByAxis(axisValue)
 		if hash and tower then
 			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 			if hp and hp > 0 then
 				Remotes.ChangeQueryType:FireServer(hash, targetType)
-				task.wait(0.1)
 				return
 			end
 		end
@@ -113,27 +109,27 @@ local function ChangeTargetRetry(axisValue)
 	end
 end
 
--- SellTower: retry
+-- Bán tower
 local function SellTowerRetry(axisValue)
 	while true do
-		local hash = GetTowerByAxis(axisValue, false)
+		local hash = GetTowerByAxis(axisValue)
 		if hash then
 			Remotes.SellTower:FireServer(hash)
 			task.wait(0.1)
-			local stillExist = GetTowerByAxis(axisValue, false)
+			local stillExist = GetTowerByAxis(axisValue)
 			if not stillExist then
 				return
 			end
 		end
-		task.wait()
+		task.wait(0.1)
 	end
 end
 
--- Load macro file
+-- Load macro
 local config = getgenv().TDX_Config or {}
 local macroName = config["Macro Name"] or "y"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
-local globalPlaceMode = config["PlaceMode"] or "normal" -- "unsure" hoặc "normal"
+local globalPlaceMode = config["PlaceMode"] or "normal"
 
 if not isfile(macroPath) then
 	error("Không tìm thấy macro file: " .. macroPath)
