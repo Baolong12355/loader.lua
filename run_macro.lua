@@ -30,7 +30,7 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
--- ✅ Lấy vị trí tower bằng CFrame thay vì mô hình
+-- Tìm tower theo X (hoặc Y nếu useY = true)
 local function GetTowerByAxis(axisValue, useY)
 	local bestHash, bestTower, bestDist
 	for hash, tower in pairs(TowerClass.GetTowers()) do
@@ -60,7 +60,7 @@ local function WaitForCash(amount)
 	end
 end
 
--- Đặt tower: luôn dùng X (kể cả unsure)
+-- Đặt tower: luôn dùng X
 local function PlaceTowerRetry(args, axisValue, towerName)
 	while true do
 		Remotes.PlaceTower:InvokeServer(unpack(args))
@@ -80,7 +80,7 @@ local function PlaceTowerRetry(args, axisValue, towerName)
 	end
 end
 
--- Nâng cấp tower
+-- Nâng cấp tower: retry, luôn dùng X (kể cả unsure)
 local function UpgradeTowerRetry(axisValue, upgradePath)
 	while true do
 		local hash, tower = GetTowerByAxis(axisValue, false)
@@ -96,7 +96,7 @@ local function UpgradeTowerRetry(axisValue, upgradePath)
 	end
 end
 
--- Đổi target
+-- ChangeTarget: retry, luôn dùng X
 local function ChangeTargetRetry(axisValue, targetType)
 	while true do
 		local hash, tower = GetTowerByAxis(axisValue, false)
@@ -112,7 +112,7 @@ local function ChangeTargetRetry(axisValue, targetType)
 	end
 end
 
--- Bán tower
+-- SellTower: retry, luôn dùng X
 local function SellTowerRetry(axisValue)
 	while true do
 		local hash = GetTowerByAxis(axisValue, false)
@@ -128,11 +128,10 @@ local function SellTowerRetry(axisValue)
 	end
 end
 
--- Load macro file
+-- Load macro file và config
 local config = getgenv().TDX_Config or {}
 local macroName = config["Macro Name"] or "y"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
-local globalPlaceMode = config["PlaceMode"] or "normal" -- "unsure" hoặc "normal"
 
 if not isfile(macroPath) then
 	error("Không tìm thấy macro file: " .. macroPath)
@@ -161,7 +160,7 @@ for i, entry in ipairs(macro) do
 
 	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
 		local axisValue = tonumber(entry.TowerUpgraded)
-		UpgradeTowerRetry(axisValue, entry.UpgradePath)
+		UpgradeTowerRetry(axisValue, entry.UpgradePath) -- luôn X, kể cả unsure
 
 	elseif entry.ChangeTarget and entry.TargetType then
 		local axisValue = tonumber(entry.ChangeTarget)
