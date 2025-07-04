@@ -79,18 +79,32 @@ local function PlaceTowerRetry(args, axisValue, towerName)
 	end
 end
 
--- ✅ Nâng cấp tower: retry theo chế độ
+-- Nâng cấp tower: luôn kiểm tra kết quả
 local function UpgradeTowerRetry(axisValue, upgradePath)
-	local maxTries = (globalPlaceMode == "normal") and 3 or math.huge
+	local isUnsure = globalPlaceMode == "unsure"
+	local maxTries = isUnsure and math.huge or 3
 	local tries = 0
 
 	while tries < maxTries do
 		local hash, tower = GetTowerByAxis(axisValue)
 		if hash and tower then
 			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
-			if hp and hp > 0 then
+			local upgradeComp = tower.UpgradeComponent
+			local currentLevel = upgradeComp and upgradeComp:GetUpgradeLevel(upgradePath)
+
+			if hp and hp > 0 and currentLevel ~= nil then
 				Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
-				break
+
+				-- kiểm tra cấp độ sau khi upgrade
+				local t0 = tick()
+				repeat
+					task.wait(0.1)
+					local _, newTower = GetTowerByAxis(axisValue)
+					local newLevel = newTower and newTower.UpgradeComponent and newTower.UpgradeComponent:GetUpgradeLevel(upgradePath)
+					if newLevel and newLevel > currentLevel then
+						return -- ✅ upgrade thành công
+					end
+				until tick() - t0 > 2
 			end
 		end
 		tries += 1
@@ -160,8 +174,11 @@ for i, entry in ipairs(macro) do
 		WaitForCash(entry.TowerPlaceCost)
 		PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
 
-	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
+	elseif entry.TowerUpgraded and entry.UpgradePath then
 		local axisValue = tonumber(entry.TowerUpgraded)
+		if globalPlaceMode == "normal" and entry.UpgradeCost then
+			WaitForCash(entry.UpgradeCost)
+		end
 		UpgradeTowerRetry(axisValue, entry.UpgradePath)
 
 	elseif entry.ChangeTarget and entry.TargetType then
