@@ -40,7 +40,7 @@ local function GetTowerByAxis(axisValue, useY)
 		if success and pos then
 			local val = useY and pos.Y or pos.X
 			local dist = math.abs(val - axisValue)
-			local match = dist <= 1
+			local match = dist <= 0.2
 			if match then
 				local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 				if hp and hp > 0 then
