@@ -30,12 +30,14 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
--- Tìm tower theo X
+-- Tìm tower theo X bằng model vị trí
 local function GetTowerByAxis(axisValue)
 	local bestHash, bestTower, bestDist
 	for hash, tower in pairs(TowerClass.GetTowers()) do
 		local success, pos = pcall(function()
-			return tower.CFrame.Position
+			local model = tower.Character:GetCharacterModel()
+			local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
+			return root and root.Position
 		end)
 		if success and pos then
 			local dist = math.abs(pos.X - axisValue)
@@ -95,14 +97,13 @@ local function UpgradeTowerRetry(axisValue, upgradePath)
 			if hp and hp > 0 and currentLevel ~= nil then
 				Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
 
-				-- kiểm tra cấp độ sau khi upgrade
 				local t0 = tick()
 				repeat
 					task.wait(0.1)
 					local _, newTower = GetTowerByAxis(axisValue)
 					local newLevel = newTower and newTower.UpgradeComponent and newTower.UpgradeComponent:GetUpgradeLevel(upgradePath)
 					if newLevel and newLevel > currentLevel then
-						return -- ✅ upgrade thành công
+						return
 					end
 				until tick() - t0 > 2
 			end
@@ -183,8 +184,7 @@ for i, entry in ipairs(macro) do
 
 	elseif entry.ChangeTarget and entry.TargetType then
 		local axisValue = tonumber(entry.ChangeTarget)
-		local targetType = entry.TargetType
-		ChangeTargetRetry(axisValue, targetType)
+		ChangeTargetRetry(axisValue, entry.TargetType)
 
 	elseif entry.SellTower then
 		local axisValue = tonumber(entry.SellTower)
