@@ -30,7 +30,7 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
--- Tìm tower theo X (hoặc Y nếu useY = true)
+-- ✅ Tìm tower theo X hoặc Y (dùng tower.CFrame.Position)
 local function GetTowerByAxis(axisValue, useY)
 	local bestHash, bestTower, bestDist
 	for hash, tower in pairs(TowerClass.GetTowers()) do
@@ -40,7 +40,8 @@ local function GetTowerByAxis(axisValue, useY)
 		if success and pos then
 			local val = useY and pos.Y or pos.X
 			local dist = math.abs(val - axisValue)
-			if dist <= 1 then
+			local match = dist <= 1
+			if match then
 				local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 				if hp and hp > 0 then
 					if not bestDist or dist < bestDist then
@@ -80,7 +81,7 @@ local function PlaceTowerRetry(args, axisValue, towerName)
 	end
 end
 
--- Nâng cấp tower: retry, luôn dùng X (kể cả unsure)
+-- Nâng cấp tower: retry
 local function UpgradeTowerRetry(axisValue, upgradePath)
 	while true do
 		local hash, tower = GetTowerByAxis(axisValue, false)
@@ -96,8 +97,8 @@ local function UpgradeTowerRetry(axisValue, upgradePath)
 	end
 end
 
--- ChangeTarget: retry, luôn dùng X
-local function ChangeTargetRetry(axisValue, targetType)
+-- ChangeTarget: retry
+local function ChangeTargetRetry(axisValue)
 	while true do
 		local hash, tower = GetTowerByAxis(axisValue, false)
 		if hash and tower then
@@ -112,7 +113,7 @@ local function ChangeTargetRetry(axisValue, targetType)
 	end
 end
 
--- SellTower: retry, luôn dùng X
+-- SellTower: retry
 local function SellTowerRetry(axisValue)
 	while true do
 		local hash = GetTowerByAxis(axisValue, false)
@@ -124,14 +125,15 @@ local function SellTowerRetry(axisValue)
 				return
 			end
 		end
-		task.wait(0.1)
+		task.wait()
 	end
 end
 
--- Load macro file và config
+-- Load macro file
 local config = getgenv().TDX_Config or {}
 local macroName = config["Macro Name"] or "y"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
+local globalPlaceMode = config["PlaceMode"] or "normal" -- "unsure" hoặc "normal"
 
 if not isfile(macroPath) then
 	error("Không tìm thấy macro file: " .. macroPath)
@@ -160,12 +162,12 @@ for i, entry in ipairs(macro) do
 
 	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
 		local axisValue = tonumber(entry.TowerUpgraded)
-		UpgradeTowerRetry(axisValue, entry.UpgradePath) -- luôn X, kể cả unsure
+		UpgradeTowerRetry(axisValue, entry.UpgradePath)
 
 	elseif entry.ChangeTarget and entry.TargetType then
 		local axisValue = tonumber(entry.ChangeTarget)
-		local targetType = entry.TargetType
-		ChangeTargetRetry(axisValue, targetType)
+		targetType = entry.TargetType
+		ChangeTargetRetry(axisValue)
 
 	elseif entry.SellTower then
 		local axisValue = tonumber(entry.SellTower)
