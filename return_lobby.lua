@@ -65,3 +65,27 @@ if gameOverScreen then
         end
     end)
 end
+
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local screen = player:WaitForChild("PlayerGui"):WaitForChild("Interface"):WaitForChild("CutsceneScreen")
+
+local function fireOnce()
+    local args = { true }
+    ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CutsceneVoteCast"):FireServer(unpack(args))
+end
+
+if screen.Visible then
+    fireOnce()
+else
+    local connection
+    connection = screen:GetPropertyChangedSignal("Visible"):Connect(function()
+        if screen.Visible then
+            fireOnce()
+            connection:Disconnect()
+        end
+    end)
+end
