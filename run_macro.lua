@@ -79,23 +79,27 @@ local function PlaceTowerRetry(args, axisValue, towerName)
 	end
 end
 
--- ✅ Nâng cấp tower (đã sửa lỗi skip)
+-- ✅ Nâng cấp tower: retry theo chế độ
 local function UpgradeTowerRetry(axisValue, upgradePath)
-	while true do
+	local maxTries = (globalPlaceMode == "normal") and 3 or math.huge
+	local tries = 0
+
+	while tries < maxTries do
 		local hash, tower = GetTowerByAxis(axisValue)
 		if hash and tower then
 			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 			if hp and hp > 0 then
 				Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
-				break -- ✅ chỉ thoát khi upgrade được, vẫn cho phép macro gọi lại lần nữa nếu cần
+				break
 			end
 		end
-		task.wait(0.1)
+		tries += 1
+		task.wait()
 	end
 end
 
 -- Đổi mục tiêu
-local function ChangeTargetRetry(axisValue)
+local function ChangeTargetRetry(axisValue, targetType)
 	while true do
 		local hash, tower = GetTowerByAxis(axisValue)
 		if hash and tower then
@@ -129,7 +133,7 @@ end
 local config = getgenv().TDX_Config or {}
 local macroName = config["Macro Name"] or "y"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
-local globalPlaceMode = config["PlaceMode"] or "normal"
+globalPlaceMode = config["PlaceMode"] or "normal"
 
 if not isfile(macroPath) then
 	error("Không tìm thấy macro file: " .. macroPath)
@@ -162,8 +166,8 @@ for i, entry in ipairs(macro) do
 
 	elseif entry.ChangeTarget and entry.TargetType then
 		local axisValue = tonumber(entry.ChangeTarget)
-		targetType = entry.TargetType
-		ChangeTargetRetry(axisValue)
+		local targetType = entry.TargetType
+		ChangeTargetRetry(axisValue, targetType)
 
 	elseif entry.SellTower then
 		local axisValue = tonumber(entry.SellTower)
