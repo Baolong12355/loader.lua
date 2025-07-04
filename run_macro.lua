@@ -5,9 +5,6 @@ local player = Players.LocalPlayer
 local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
--- ⏱ Timeout mặc định cho retry
-local RETRY_TIMEOUT = 3
-
 -- Load TowerClass
 local function SafeRequire(path, timeout)
 	timeout = timeout or 5
@@ -33,7 +30,7 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
--- ✅ Lấy vị trí tower bằng CFrame
+-- ✅ Lấy vị trí tower bằng CFrame thay vì mô hình
 local function GetTowerByAxis(axisValue, useY)
 	local bestHash, bestTower, bestDist
 	for hash, tower in pairs(TowerClass.GetTowers()) do
@@ -63,11 +60,9 @@ local function WaitForCash(amount)
 	end
 end
 
--- Đặt tower
-local function PlaceTowerRetry(args, axisValue, towerName, timeout)
-	timeout = timeout or RETRY_TIMEOUT
-	local tStart = tick()
-	while tick() - tStart < timeout do
+-- Đặt tower: luôn dùng X (kể cả unsure)
+local function PlaceTowerRetry(args, axisValue, towerName)
+	while true do
 		Remotes.PlaceTower:InvokeServer(unpack(args))
 		local placed = false
 		local t0 = tick()
@@ -79,79 +74,65 @@ local function PlaceTowerRetry(args, axisValue, towerName, timeout)
 				break
 			end
 		until tick() - t0 > 2
-		if placed then return true end
+		if placed then break end
 		warn("[RETRY] Đặt tower thất bại, thử lại:", towerName, "X =", axisValue)
 		task.wait()
 	end
-	warn("❌ Hết thời gian đặt tower:", towerName)
-	return false
 end
 
 -- Nâng cấp tower
-local function UpgradeTowerRetry(axisValue, upgradePath, timeout)
-	timeout = timeout or RETRY_TIMEOUT
-	local tStart = tick()
-	while tick() - tStart < timeout do
+local function UpgradeTowerRetry(axisValue, upgradePath)
+	while true do
 		local hash, tower = GetTowerByAxis(axisValue, false)
 		if hash and tower then
 			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 			if hp and hp > 0 then
 				Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
 				task.wait(0.1)
-				return true
+				return
 			end
 		end
 		task.wait()
 	end
-	warn("❌ Hết thời gian nâng cấp tower X =", axisValue)
-	return false
 end
 
 -- Đổi target
-local function ChangeTargetRetry(axisValue, targetType, timeout)
-	timeout = timeout or RETRY_TIMEOUT
-	local tStart = tick()
-	while tick() - tStart < timeout do
+local function ChangeTargetRetry(axisValue, targetType)
+	while true do
 		local hash, tower = GetTowerByAxis(axisValue, false)
 		if hash and tower then
 			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 			if hp and hp > 0 then
 				Remotes.ChangeQueryType:FireServer(hash, targetType)
 				task.wait(0.1)
-				return true
+				return
 			end
 		end
 		task.wait()
 	end
-	warn("❌ Hết thời gian đổi target X =", axisValue)
-	return false
 end
 
 -- Bán tower
-local function SellTowerRetry(axisValue, timeout)
-	timeout = timeout or RETRY_TIMEOUT
-	local tStart = tick()
-	while tick() - tStart < timeout do
+local function SellTowerRetry(axisValue)
+	while true do
 		local hash = GetTowerByAxis(axisValue, false)
 		if hash then
 			Remotes.SellTower:FireServer(hash)
 			task.wait(0.1)
 			local stillExist = GetTowerByAxis(axisValue, false)
 			if not stillExist then
-				return true
+				return
 			end
 		end
-		task.wait()
+		task.wait(0.1)
 	end
-	warn("❌ Hết thời gian bán tower X =", axisValue)
-	return false
 end
 
--- Load macro
+-- Load macro file
 local config = getgenv().TDX_Config or {}
 local macroName = config["Macro Name"] or "y"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
-local globalPlaceMode = config["UpgradeMode"] or "normal"
+local globalPlaceMode = config["PlaceMode"] or "normal" -- "unsure" hoặc "normal"
 
 if not isfile(macroPath) then
 	error("Không tìm thấy macro file: " .. macroPath)
@@ -176,20 +157,20 @@ for i, entry in ipairs(macro) do
 			tonumber(entry.Rotation or 0)
 		}
 		WaitForCash(entry.TowerPlaceCost)
-		PlaceTowerRetry(args, pos.X, entry.TowerPlaced, RETRY_TIMEOUT)
+		PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
 
 	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
 		local axisValue = tonumber(entry.TowerUpgraded)
-		UpgradeTowerRetry(axisValue, entry.UpgradePath, RETRY_TIMEOUT)
+		UpgradeTowerRetry(axisValue, entry.UpgradePath)
 
 	elseif entry.ChangeTarget and entry.TargetType then
 		local axisValue = tonumber(entry.ChangeTarget)
 		local targetType = entry.TargetType
-		ChangeTargetRetry(axisValue, targetType, RETRY_TIMEOUT)
+		ChangeTargetRetry(axisValue, targetType)
 
 	elseif entry.SellTower then
 		local axisValue = tonumber(entry.SellTower)
-		SellTowerRetry(axisValue, RETRY_TIMEOUT)
+		SellTowerRetry(axisValue)
 	end
 end
 
