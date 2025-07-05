@@ -48,7 +48,7 @@ end
 local function PlaceTowerRetry(args, axisX, towerName)
 	while true do
 		Remotes.PlaceTower:InvokeServer(unpack(args))
-		task.wait(0.2)
+		task.wait(0.1)
 		local hash, tower = GetTowerByAxis(axisX)
 		if hash and tower then return true end
 		warn("[PLACE RETRY]", towerName, "thất bại, thử lại...")
@@ -89,7 +89,7 @@ local function UpgradeTowerRetry(axisX, path)
 		else
 			return -- không tồn tại
 		end
-		task.wait(0.2)
+		task.wait()
 	end
 end
 
@@ -99,13 +99,13 @@ local function SellTowerRetry(axisX)
 		local hash = GetTowerByAxis(axisX)
 		if hash then
 			Remotes.SellTower:FireServer(hash)
-			task.wait(0.2)
+			task.wait(0.1)
 			local stillExists = GetTowerByAxis(axisX)
 			if not stillExists then return end
 		else
 			return
 		end
-		task.wait(0.2)
+		task.wait()
 	end
 end
 
@@ -117,7 +117,7 @@ local function ChangeTargetRetry(axisX, targetType)
 			Remotes.ChangeQueryType:FireServer(hash, targetType)
 			return
 		end
-		task.wait(0.2)
+		task.wait(0.1)
 	end
 end
 
