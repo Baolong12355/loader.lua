@@ -35,7 +35,9 @@ local function GetTowerByAxis(axisValue)
 	local bestHash, bestTower, bestDist
 	for hash, tower in pairs(TowerClass.GetTowers()) do
 		local success, pos = pcall(function()
-			return tower.CFrame.Position
+			local model = tower.Character:GetCharacterModel()
+			local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+			return root and root.Position
 		end)
 		if success and pos then
 			local dist = math.abs(pos.X - axisValue)
@@ -79,7 +81,7 @@ local function PlaceTowerRetry(args, axisValue, towerName)
 	end
 end
 
--- Nâng cấp tower: kiểm tra tăng cấp độ
+-- ✅ Nâng cấp tower: retry kiểm tra cấp
 local function UpgradeTowerRetry(axisValue, upgradePath)
 	local isUnsure = globalPlaceMode == "unsure"
 	local maxTries = isUnsure and math.huge or 3
@@ -90,27 +92,30 @@ local function UpgradeTowerRetry(axisValue, upgradePath)
 		if hash and tower and tower.LevelHandler then
 			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 			if hp and hp > 0 then
-				local beforeLevel = tower.LevelHandler:GetLevelOnPath(upgradePath)
+				local before = tower.LevelHandler:GetLevelOnPath(upgradePath)
 				Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
 
-				-- Đợi và kiểm tra cấp độ tăng
-				local success = false
+				local upgraded = false
 				local t0 = tick()
 				repeat
 					task.wait(0.1)
-					local _, check = GetTowerByAxis(axisValue)
-					local afterLevel = check and check.LevelHandler and check.LevelHandler:GetLevelOnPath(upgradePath)
-					if afterLevel and (not beforeLevel or afterLevel > beforeLevel) then
-						success = true
-						break
+					local _, t = GetTowerByAxis(axisValue)
+					if t and t.LevelHandler then
+						local after = t.LevelHandler:GetLevelOnPath(upgradePath)
+						if after and before and after > before then
+							upgraded = true
+							break
+						end
 					end
 				until tick() - t0 > 2
 
-				if success then return end
+				if upgraded then
+					return -- ✅ thoát nếu tăng cấp thành công
+				end
 			end
 		end
 		tries += 1
-		task.wait()
+		task.wait(0.2)
 	end
 end
 
@@ -163,7 +168,7 @@ if not success then
 end
 
 -- Chạy macro
-for i, entry in ipairs(macro) do
+for _, entry in ipairs(macro) do
 	if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
 		local vecTab = entry.TowerVector:split(", ")
 		local pos = Vector3.new(unpack(vecTab))
@@ -176,14 +181,13 @@ for i, entry in ipairs(macro) do
 		WaitForCash(entry.TowerPlaceCost)
 		PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
 
-	elseif entry.TowerUpgraded and entry.UpgradePath then
+	elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
 		local axisValue = tonumber(entry.TowerUpgraded)
 		UpgradeTowerRetry(axisValue, entry.UpgradePath)
 
 	elseif entry.ChangeTarget and entry.TargetType then
 		local axisValue = tonumber(entry.ChangeTarget)
-		local targetType = entry.TargetType
-		ChangeTargetRetry(axisValue, targetType)
+		ChangeTargetRetry(axisValue, entry.TargetType)
 
 	elseif entry.SellTower then
 		local axisValue = tonumber(entry.SellTower)
