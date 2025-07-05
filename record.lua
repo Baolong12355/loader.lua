@@ -89,8 +89,8 @@ end)
 
 print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
 
--- Script chuyển đổi record.txt thành macro runner (dùng trục X), với thứ tự trường upgrade là: UpgradeCost, UpgradePath, TowerUpgraded
--- Đặt script này trong môi trường Roblox hoặc môi trường hỗ trợ các API Roblox tương ứng
+-- Script chuyển đổi record.txt thành macro runner (dùng trục X), chỉ ghi nâng cấp nếu cấp độ path có tăng
+-- Phần chưa đổi vẫn giữ nguyên, chỉ chỉnh phần upgradeTower()
 
 local txtFile = "record.txt"
 local outJson = "tdx/macros/x.json"
@@ -100,7 +100,6 @@ local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
--- Safe require tower module
 local function SafeRequire(module)
     local success, result = pcall(require, module)
     return success and result or nil
@@ -160,7 +159,7 @@ local function GetUpgradeCost(tower, path)
     return 0
 end
 
--- Ánh xạ hash -> pos liên tục
+-- ánh xạ hash → vị trí
 local hash2pos = {}
 task.spawn(function()
     while true do
@@ -185,7 +184,6 @@ while true do
         local logs = {}
 
         for line in macro:gmatch("[^\r\n]+") do
-            -- Đặt tower: a1, name, x, y, z, rot
             local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
             if a1 and name and x and y and z and rot then
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
@@ -198,22 +196,28 @@ while true do
                     Rotation = rot,
                     TowerA1 = tostring(a1)
                 })
+
             else
-                -- Nâng cấp tower: chuyển đổi đúng thứ tự UpgradeCost, UpgradePath, TowerUpgraded (X)
                 local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*[^%)]+%)')
                 if hash and path then
-                    local pos = hash2pos[tostring(hash)]
                     local tower = TowerClass and TowerClass.GetTowers()[hash]
-                    local upgradeCost = GetUpgradeCost(tower, tonumber(path))
-                    if pos then
-                        table.insert(logs, {
-                            UpgradeCost = upgradeCost,
-                            UpgradePath = tonumber(path),
-                            TowerUpgraded = pos.x
-                        })
+                    local pos = hash2pos[tostring(hash)]
+                    path = tonumber(path)
+                    if tower and tower.LevelHandler and pos then
+                        local before = tower.LevelHandler:GetLevelOnPath(path)
+                        task.wait(0.05)
+                        local after = tower.LevelHandler:GetLevelOnPath(path)
+                        if after and before and after > before then
+                            local upgradeCost = GetUpgradeCost(tower, path)
+                            table.insert(logs, {
+                                UpgradeCost = upgradeCost,
+                                UpgradePath = path,
+                                TowerUpgraded = pos.x
+                            })
+                        end
                     end
+
                 else
-                    -- Đổi target
                     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
                     if hash and targetType then
                         local pos = hash2pos[tostring(hash)]
@@ -224,7 +228,6 @@ while true do
                             })
                         end
                     else
-                        -- Bán tower
                         local hash = line:match('TDX:sellTower%(([^%)]+)%)')
                         if hash then
                             local pos = hash2pos[tostring(hash)]
