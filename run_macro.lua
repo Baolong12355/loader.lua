@@ -125,7 +125,7 @@ local function UpgradeTowerRetry(axisValue, upgradePath)
 		end
 
 		tries += 1
-		task.wait()
+		task.wait(0.1)
 	end
 end
 
