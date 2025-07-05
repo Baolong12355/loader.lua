@@ -1,4 +1,4 @@
-repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
+
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
