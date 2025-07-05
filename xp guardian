@@ -1,13 +1,13 @@
--- Cấu hình
+-- Cấu hình hệ thống
 local WEBHOOK_URL = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
 local XP_LIMIT = 10000
 local SAVE_FILE = "BattlePassProgress.txt"
 
 -- Mapping giữa tên hiển thị và remote
-local BATTLE_PASS_MAPPING = {
-    ["HALLOWEEN 2024"] = {remote = "HW24"},
-    ["TOWER BATTLES"] = {remote = "TB"},
-    ["CHRISTMAS 2024"] = {remote = "XMAS24"}
+local BATTLE_PASSES = {
+    ["HALLOWEEN 2024"] = {remote = "HW24", display = "HALLOWEEN 2024"},
+    ["TOWER BATTLES"] = {remote = "TB", display = "TOWER BATTLES"},
+    ["CHRISTMAS 2024"] = {remote = "XMAS24", display = "CHRISTMAS 2024"}
 }
 
 -- Khởi tạo dịch vụ
@@ -23,182 +23,222 @@ local initialXP = 0
 local lastXP = 0
 local lastLevel = 0
 
--- Hàm lưu dữ liệu cực kỳ chắc chắn
-local function superSaveProgress()
-    -- Tạo bản sao dự phòng trước khi lưu
-    local backupData = {}
-    if isfile(SAVE_FILE) then
-        backupData = HttpService:JSONDecode(readfile(SAVE_FILE)) or {}
+-- ========== HỆ THỐNG LƯU FILE ========== --
+local function saveProgress()
+    local data = {}
+    for displayName, bpData in pairs(BATTLE_PASSES) do
+        data[bpData.remote] = progress[bpData.remote] or 0
     end
-    
-    -- Lưu dữ liệu mới với cơ chế retry
-    local attempts = 0
-    local maxAttempts = 3
-    local saved = false
-    
-    repeat
-        attempts = attempts + 1
-        local success, err = pcall(function()
-            -- Tạo file tạm trước
-            writefile(SAVE_FILE..".tmp", HttpService:JSONEncode(progress))
-            -- Kiểm tra tính toàn vẹn
-            local check = HttpService:JSONDecode(readfile(SAVE_FILE..".tmp"))
-            if check then
-                -- Nếu ok thì đổi tên thành file chính thức
-                if isfile(SAVE_FILE) then
-                    delfile(SAVE_FILE)
-                end
-                writefile(SAVE_FILE, readfile(SAVE_FILE..".tmp"))
-                delfile(SAVE_FILE..".tmp")
-                saved = true
-            end
-        end)
-        
-        if not success and attempts >= maxAttempts then
-            -- Khôi phục từ backup nếu lỗi
-            pcall(function()
-                writefile(SAVE_FILE, HttpService:JSONEncode(backupData))
-            end)
-            warn("Lưu file thất bại sau", maxAttempts, "lần thử")
-            break
-        end
-        wait(0.5)
-    until saved or attempts >= maxAttempts
+    writefile(SAVE_FILE, HttpService:JSONEncode(data))
 end
 
--- Hàm tải dữ liệu với kiểm tra nghiêm ngặt
-local function superLoadProgress()
-    if not isfile(SAVE_FILE) then
-        -- Khởi tạo mới nếu file không tồn tại
-        for _, mapping in pairs(BATTLE_PASS_MAPPING) do
-            progress[mapping.remote] = 0
-        end
-        superSaveProgress()
-        return
-    end
-    
-    -- Đọc file với cơ chế phục hồi nếu có lỗi
-    local content, success = nil, false
-    local attempts = 0
-    
-    repeat
-        attempts = attempts + 1
-        content, success = pcall(function()
-            return readfile(SAVE_FILE)
+local function loadProgress()
+    if isfile(SAVE_FILE) then
+        local success, data = pcall(function()
+            return HttpService:JSONDecode(readfile(SAVE_FILE))
         end)
-        
-        if not success and attempts >= 3 then
-            -- Tạo file mới nếu không đọc được
-            warn("Không thể đọc file, tạo mới...")
-            for _, mapping in pairs(BATTLE_PASS_MAPPING) do
-                progress[mapping.remote] = 0
+        if success then
+            for displayName, bpData in pairs(BATTLE_PASSES) do
+                progress[bpData.remote] = data[bpData.remote] or 0
             end
-            superSaveProgress()
             return
         end
-        wait(0.5)
-    until success or attempts >= 3
-    
-    -- Kiểm tra dữ liệu hợp lệ
-    local ok, data = pcall(function()
-        return HttpService:JSONDecode(content)
-    end)
-    
-    if ok and type(data) == "table" then
-        progress = data
-        -- Đảm bảo có đủ tất cả BattlePass
-        for _, mapping in pairs(BATTLE_PASS_MAPPING) do
-            if progress[mapping.remote] == nil then
-                progress[mapping.remote] = 0
-            end
-        end
-    else
-        -- Khởi tạo lại nếu dữ liệu không hợp lệ
-        warn("Dữ liệu file không hợp lệ, tạo mới...")
-        for _, mapping in pairs(BATTLE_PASS_MAPPING) do
-            progress[mapping.remote] = 0
-        end
     end
     
-    superSaveProgress() -- Ghi lại để đảm bảo tính toàn vẹn
+    -- Khởi tạo mới nếu không có file
+    for displayName, bpData in pairs(BATTLE_PASSES) do
+        progress[bpData.remote] = 0
+    end
 end
 
--- Hàm lấy tên hiển thị BattlePass hiện tại
-local function getCurrentDisplayName()
+-- ========== HỆ THỐNG DISCORD ========== --
+local function sendToDiscord(message)
+    local data = {
+        ["content"] = message,
+        ["username"] = "BP Tracker",
+        ["avatar_url"] = "https://i.imgur.com/Lyq5mJO.png"
+    }
+    
+    pcall(function()
+        HttpService:PostAsync(WEBHOOK_URL, HttpService:JSONEncode(data))
+    end)
+end
+
+-- ========== HỆ THỐNG THEO DÕI XP ========== --
+local function getCurrentXP()
+    local success, xpText = pcall(function()
+        return LocalPlayer.PlayerGui.GUI.BattlePass.BattlePassDetails.LevelInfo.XP.TextLabel.Text
+    end)
+    local currentXP = (success and tonumber(xpText:match("%d+"))) or 0
+    
+    local success, levelText = pcall(function()
+        return LocalPlayer.PlayerGui.Model.GUI.BattlePass.BattlePassDetails.LevelInfo.Current.TextLabel.Text
+    end)
+    local currentLevel = (success and tonumber(levelText:match("%d+"))) or 0
+    
+    return currentXP, currentLevel
+end
+
+local function getCurrentBattlePass()
     local success, displayName = pcall(function()
         return LocalPlayer.PlayerGui.GUI.BattlePass.BattlePassDetails.PreviewInfo.DisplayName.Text
     end)
     return success and displayName or nil
 end
 
--- Hàm kiểm tra và cập nhật trạng thái
-local function checkAndUpdate()
+-- ========== HỆ THỐNG ĐỔI BATTLEPASS ========== --
+local function activateBattlePass(battlePassName)
+    -- Kiểm tra tên hợp lệ
+    local isValid = false
+    for _, bpData in pairs(BATTLE_PASSES) do
+        if bpData.remote == battlePassName then
+            isValid = true
+            break
+        end
+    end
+    
+    if not isValid then
+        warn("Tên BattlePass không hợp lệ:", battlePassName)
+        return false
+    end
+    
+    -- Gọi remote function
+    local network = ReplicatedStorage:WaitForChild("Network", 5)
+    if not network then
+        warn("Không tìm thấy thư mục Network")
+        return false
+    end
+    
+    local remote = network:WaitForChild("BattlePassRequestActivate", 5)
+    if not remote then
+        warn("Không tìm thấy RemoteFunction")
+        return false
+    end
+    
+    local success, result = pcall(function()
+        return remote:InvokeServer(battlePassName)
+    end)
+    
+    if not success then
+        warn("Lỗi khi kích hoạt BattlePass:", result)
+        return false
+    end
+    
+    return true
+end
+
+-- ========== HỆ THỐNG TỰ ĐỘNG ========== --
+local function getNextBattlePass()
+    for displayName, bpData in pairs(BATTLE_PASSES) do
+        if progress[bpData.remote] < XP_LIMIT then
+            return bpData.remote, displayName
+        end
+    end
+    return nil, nil
+end
+
+local function allMaxed()
+    for _, bpData in pairs(BATTLE_PASSES) do
+        if progress[bpData.remote] < XP_LIMIT then
+            return false
+        end
+    end
+    return true
+end
+
+local function checkProgress()
     local currentXP, currentLevel = getCurrentXP()
-    local displayName = getCurrentDisplayName()
+    local displayName = getCurrentBattlePass()
     
-    if not displayName then
-        warn("Không thể xác định BattlePass hiện tại!")
+    if not displayName or not BATTLE_PASSES[displayName] then
+        warn("Không xác định được BattlePass hiện tại")
         return
     end
     
-    local mapping = BATTLE_PASS_MAPPING[displayName]
-    if not mapping then
-        warn("Không tìm thấy mapping cho:", displayName)
+    local bpData = BATTLE_PASSES[displayName]
+    
+    -- Lần đầu khởi động
+    if initialXP == 0 then
+        initialXP = currentXP
+        lastXP = currentXP
+        lastLevel = currentLevel
         return
     end
     
+    -- Kiểm tra XP thay đổi
     if currentXP ~= lastXP then
         local xpGained = currentXP - lastXP
         if xpGained > 0 then
-            progress[mapping.remote] = math.min(progress[mapping.remote] + xpGained, XP_LIMIT)
-            superSaveProgress() -- Lưu ngay sau mỗi lần cập nhật
+            progress[bpData.remote] = math.min(progress[bpData.remote] + xpGained, XP_LIMIT)
+            saveProgress()
             
             -- Gửi thông báo Discord
-            sendToDiscord(string.format(
+            local message = string.format(
                 "🎯 %s: +%d XP (Tổng: %d/%d)\nLevel: %d",
-                displayName, xpGained, progress[mapping.remote], XP_LIMIT, currentLevel
-            ))
+                displayName, xpGained, progress[bpData.remote], XP_LIMIT, currentLevel
+            )
+            sendToDiscord(message)
             
             -- Kiểm tra nếu đạt giới hạn
-            if progress[mapping.remote] >= XP_LIMIT then
-                local nextRemote, nextDisplay = getNextBattlePass()
-                if nextRemote then
-                    activateBattlePass(nextRemote)
-                    sendToDiscord("🔄 CHUYỂN SANG: "..nextDisplay)
+            if progress[bpData.remote] >= XP_LIMIT then
+                sendToDiscord(string.format("✅ Đã đạt đủ %d XP cho %s!", XP_LIMIT, displayName))
+                
+                -- Chuyển sang BattlePass tiếp theo
+                local nextBP, nextDisplay = getNextBattlePass()
+                if nextBP then
+                    if activateBattlePass(nextBP) then
+                        sendToDiscord("🔄 Đã chuyển sang: "..nextDisplay)
+                        -- Reset giá trị theo dõi
+                        initialXP, lastXP = getCurrentXP()
+                        lastLevel = currentLevel
+                    end
                 else
-                    sendToDiscord("🏁 HOÀN THÀNH TẤT CẢ BATTLEPASS!")
-                    LocalPlayer:Kick("Đã hoàn thành tất cả!")
+                    sendToDiscord("🏆 ĐÃ HOÀN THÀNH TẤT CẢ BATTLEPASS!")
+                    LocalPlayer:Kick("Hoàn thành tất cả BattlePass!")
                 end
             end
         end
+        
         lastXP = currentXP
         lastLevel = currentLevel
     end
 end
 
--- Hàm chính
+-- ========== KHỞI CHẠY CHƯƠNG TRÌNH ========== --
 local function main()
-    superLoadProgress() -- Tải dữ liệu với cơ chế an toàn
+    loadProgress()
     
     -- Kích hoạt BattlePass đầu tiên
-    local nextRemote, nextDisplay = getNextBattlePass()
-    if nextRemote then
-        activateBattlePass(nextRemote)
-        lastXP, lastLevel = getCurrentXP()
-        sendToDiscord("🚀 Bắt đầu theo dõi: "..nextDisplay)
+    local nextBP, nextDisplay = getNextBattlePass()
+    if nextBP then
+        if activateBattlePass(nextBP) then
+            initialXP, lastXP = getCurrentXP()
+            lastLevel = getCurrentXP()
+            
+            -- Gửi thông báo khởi động
+            local startMsg = "🚀 BẮT ĐẦU THEO DÕI BATTLEPASS\n"
+            for displayName, bpData in pairs(BATTLE_PASSES) do
+                startMsg = startMsg .. string.format("%s: %d/%d\n", displayName, progress[bpData.remote], XP_LIMIT)
+            end
+            startMsg = startMsg .. string.format("\n🔛 ĐANG KÍCH HOẠT: %s", nextDisplay)
+            sendToDiscord(startMsg)
+        else
+            warn("Không thể kích hoạt BattlePass ban đầu")
+            return
+        end
     else
-        sendToDiscord("🎖️ Tất cả BattlePass đã hoàn thành!")
+        sendToDiscord("🎖️ TẤT CẢ BATTLEPASS ĐÃ HOÀN THÀNH!")
         return
     end
     
-    -- Vòng lặp kiểm tra
-    while wait(1) do
+    -- Bắt đầu vòng lặp kiểm tra
+    while wait(5) do
         if allMaxed() then break end
-        checkAndUpdate()
+        checkProgress()
     end
 end
 
--- Chạy chương trình
+-- Chạy chương trình với xử lý lỗi
 local success, err = pcall(main)
 if not success then
     warn("Lỗi chính:", err)
