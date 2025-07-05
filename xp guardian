@@ -6,7 +6,7 @@ local SAVE_FILE = "BattlePassProgress.txt"
 -- Danh sách BattlePass
 local BATTLE_PASSES = {
     {remote = "TB", display = "TOWER BATTLES"},
-    {remote = "HW24", display = "HALLOWEEN 2024"},
+    {remote = "HW24", display = "HALLOWEEN 2024"}, 
     {remote = "XMAS24", display = "CHRISTMAS 2024"}
 }
 
@@ -15,6 +15,11 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
+
+-- Kích hoạt HttpService nếu chưa
+if not HttpService:GetHttpEnabled() then
+    HttpService:SetHttpEnabled(true)
+end
 
 -- Biến lưu trữ
 local progress = {}
@@ -59,9 +64,25 @@ local function sendToDiscord(message)
         ["avatar_url"] = "https://i.imgur.com/Lyq5mJO.png"
     }
     
-    pcall(function()
-        HttpService:PostAsync(WEBHOOK_URL, HttpService:JSONEncode(data))
-    end)
+    -- Thêm retry mechanism
+    local attempts = 0
+    local maxAttempts = 3
+    local success = false
+    
+    repeat
+        attempts = attempts + 1
+        success = pcall(function()
+            local jsonData = HttpService:JSONEncode(data)
+            HttpService:PostAsync(WEBHOOK_URL, jsonData)
+        end)
+        
+        if not success then
+            warn("Lỗi gửi Discord (lần "..attempts..")")
+            wait(2)
+        end
+    until success or attempts >= maxAttempts
+    
+    return success
 end
 
 -- ========== HỆ THỐNG THEO DÕI ========== --
@@ -132,9 +153,12 @@ local function checkProgress()
     local currentLevel = getCurrentLevel()
     local bpRemote, bpDisplay = getCurrentBattlePass()
     
-    if not bpRemote then return end
+    if not bpRemote then 
+        warn("Không xác định được BattlePass hiện tại")
+        return 
+    end
     
-    -- Bỏ qua lần kiểm tra đầu tiên (tránh tính XP cơ bản)
+    -- Bỏ qua lần kiểm tra đầu tiên
     if isFirstCheck then
         lastXP = currentXP
         lastLevel = currentLevel
@@ -150,12 +174,16 @@ local function checkProgress()
             progress[bpRemote] = math.min(progress[bpRemote] + xpGained, XP_LIMIT)
             saveProgress()
             
-            -- Gửi thông báo Discord
+            -- Gửi thông báo Discord (có kiểm tra)
             local message = string.format(
                 "🎯 %s: +%d XP (Tổng: %d/%d)\nLevel: %d",
                 bpDisplay, xpGained, progress[bpRemote], XP_LIMIT, currentLevel
             )
-            sendToDiscord(message)
+            local discordSuccess = sendToDiscord(message)
+            
+            if not discordSuccess then
+                warn("Không thể gửi thông báo Discord")
+            end
             
             -- Kiểm tra hoàn thành
             if progress[bpRemote] >= XP_LIMIT then
@@ -166,7 +194,6 @@ local function checkProgress()
                 if nextBP then
                     if activateBattlePass(nextBP) then
                         sendToDiscord("🔄 Đã chuyển sang: "..nextDisplay)
-                        -- Reset bộ đếm
                         isFirstCheck = true
                     end
                 else
@@ -183,13 +210,18 @@ end
 
 -- ========== KHỞI CHẠY ========== --
 local function main()
+    -- Test Discord trước
+    if not sendToDiscord("🟢 Script BattlePass Tracker đã khởi động") then
+        warn("Không thể kết nối với Discord, kiểm tra lại WEBHOOK_URL")
+        return
+    end
+    
     loadProgress()
     
     -- Kích hoạt BattlePass đầu tiên
     local nextBP, nextDisplay = getNextBattlePass()
     if nextBP then
         if activateBattlePass(nextBP) then
-            -- Gửi thông báo khởi động
             local startMsg = "🚀 BẮT ĐẦU THEO DÕI BATTLEPASS\n"
             for _, bp in ipairs(BATTLE_PASSES) do
                 startMsg = startMsg .. string.format("%s: %d/%d\n", bp.display, progress[bp.remote], XP_LIMIT)
@@ -197,10 +229,9 @@ local function main()
             startMsg = startMsg .. string.format("\n🔛 ĐANG KÍCH HOẠT: %s", nextDisplay)
             sendToDiscord(startMsg)
             
-            -- Đặt giá trị ban đầu
             isFirstCheck = true
         else
-            warn("Không thể kích hoạt BattlePass ban đầu")
+            sendToDiscord("❌ Không thể kích hoạt BattlePass ban đầu!")
             return
         end
     else
