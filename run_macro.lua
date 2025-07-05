@@ -81,7 +81,7 @@ local function PlaceTowerRetry(args, axisValue, towerName)
 	end
 end
 
--- ✅ Nâng cấp tower
+-- ✅ Nâng cấp tower (đã sửa cho chế độ unsure hoạt động đúng)
 local function UpgradeTowerRetry(axisValue, upgradePath)
 	local isUnsure = globalPlaceMode == "unsure"
 	local maxTries = isUnsure and math.huge or 3
@@ -91,14 +91,26 @@ local function UpgradeTowerRetry(axisValue, upgradePath)
 		local hash, tower = GetTowerByAxis(axisValue)
 
 		if not hash or not tower then
-			warn("[SKIP] Không tìm thấy tower tại X =", axisValue)
-			return
+			if isUnsure then
+				task.wait()
+				tries += 1
+				continue
+			else
+				warn("[SKIP] Không tìm thấy tower tại X =", axisValue)
+				return
+			end
 		end
 
 		local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 		if not hp or hp <= 0 then
-			warn("[SKIP] Tower đã chết tại X =", axisValue)
-			return
+			if isUnsure then
+				task.wait()
+				tries += 1
+				continue
+			else
+				warn("[SKIP] Tower đã chết tại X =", axisValue)
+				return
+			end
 		end
 
 		if tower.LevelHandler then
@@ -125,7 +137,7 @@ local function UpgradeTowerRetry(axisValue, upgradePath)
 		end
 
 		tries += 1
-		task.wait(0.1)
+		task.wait()
 	end
 end
 
