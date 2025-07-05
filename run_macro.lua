@@ -81,7 +81,7 @@ local function PlaceTowerRetry(args, axisValue, towerName)
 	end
 end
 
--- ✅ Nâng cấp tower: retry kiểm tra cấp
+-- ✅ Nâng cấp tower
 local function UpgradeTowerRetry(axisValue, upgradePath)
 	local isUnsure = globalPlaceMode == "unsure"
 	local maxTries = isUnsure and math.huge or 3
@@ -89,31 +89,41 @@ local function UpgradeTowerRetry(axisValue, upgradePath)
 
 	while tries < maxTries do
 		local hash, tower = GetTowerByAxis(axisValue)
-		if hash and tower and tower.LevelHandler then
-			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
-			if hp and hp > 0 then
-				local before = tower.LevelHandler:GetLevelOnPath(upgradePath)
-				Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
 
-				local upgraded = false
-				local t0 = tick()
-				repeat
-					task.wait(0.1)
-					local _, t = GetTowerByAxis(axisValue)
-					if t and t.LevelHandler then
-						local after = t.LevelHandler:GetLevelOnPath(upgradePath)
-						if after and before and after > before then
-							upgraded = true
-							break
-						end
+		if not hash or not tower then
+			warn("[SKIP] Không tìm thấy tower tại X =", axisValue)
+			return
+		end
+
+		local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+		if not hp or hp <= 0 then
+			warn("[SKIP] Tower đã chết tại X =", axisValue)
+			return
+		end
+
+		if tower.LevelHandler then
+			local before = tower.LevelHandler:GetLevelOnPath(upgradePath)
+			Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
+
+			local upgraded = false
+			local t0 = tick()
+			repeat
+				task.wait(0.1)
+				local _, t = GetTowerByAxis(axisValue)
+				if t and t.LevelHandler then
+					local after = t.LevelHandler:GetLevelOnPath(upgradePath)
+					if after and before and after > before then
+						upgraded = true
+						break
 					end
-				until tick() - t0 > 2
-
-				if upgraded then
-					return -- ✅ thoát nếu tăng cấp thành công
 				end
+			until tick() - t0 > 2
+
+			if upgraded then
+				return
 			end
 		end
+
 		tries += 1
 		task.wait(0.2)
 	end
