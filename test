@@ -1,181 +1,187 @@
--- 📦 Auto-Skill PRO với phân xử tower thường và tower định hướng
+repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
 
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer = Players.LocalPlayer
-local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
+local player = Players.LocalPlayer
+local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
-local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
-local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
-local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
-
--- 🟨 Danh sách các tower không xử lý (kể cả tower định hướng để tránh xử lý sai)
-local skipTowerTypes = {
-    ["Farm"] = true,
-    ["Relic"] = true,
-    ["Scarecrow"] = true,
-    ["Helicopter"] = true,
-    ["Cryo Helicopter"] = true,
-    ["Combat Drone"] = true,
-    ["AA Turret"] = true,
-    ["XWM Turret"] = true,
-    ["Barracks"] = true,
-    ["Cryo Blaster"] = true,
-    ["Grenadier"] = true,
-    ["Juggernaut"] = true,
-    ["Machine Gunner"] = true,
-    ["Zed"] = true,
-    ["Troll Tower"] = true,
-    ["Missile Trooper"] = true,
-    ["Patrol Boat"] = true,
-    ["Railgunner"] = true,
-    ["Mine Layer"] = true,
-    ["Sentry"] = true,
-    ["Commander"] = true, -- Commander chỉ xử lý skill 3 ở phần tower định hướng
-    ["Toxicnator"] = true,
-    ["Ghost"] = true,
-    ["Ice Breaker"] = true,
-    ["Mobster"] = true,
-    ["Golden Mobster"] = true,
-    ["Artillery"] = true,
-    ["EDJ"] = false,
-    ["Accelerator"] = true,
-    ["Engineer"] = true
-}
-
--- 🟥 Danh sách các tower định hướng và yêu cầu vị trí enemy
-local directionalTowerTypes = {
-    ["Commander"] = { onlyAbilityIndex = 3 }, -- chỉ dùng skill 3 là định hướng
-    ["Toxicnator"] = true,
-    ["Ghost"] = true,
-    ["Ice Breaker"] = true,
-    ["Mobster"] = true,
-    ["Golden Mobster"] = true,
-    ["Artillery"] = true
-}
-
--- 📌 Vị trí kẻ địch đầu tiên
-local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
-
-local function GetFirstEnemyPosition()
-    for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-        if enemy.Name ~= "Arrow" and enemy:IsA("BasePart") then
-            return enemy.Position
-        end
-    end
-    return nil
+-- Safe require
+local function SafeRequire(module)
+	local success, result = pcall(require, module)
+	return success and result or nil
 end
 
--- 🧠 Điều kiện có thể dùng skill
-local function CanUseAbility(ability)
-    return ability and
-        not ability.Passive and
-        not ability.CustomTriggered and
-        ability.CooldownRemaining <= 0 and
-        not ability.Stunned and
-        not ability.Disabled and
-        not ability.Converted and
-        ability:CanUse(true)
+local function LoadTowerClass()
+	local ps = player:WaitForChild("PlayerScripts")
+	local client = ps:WaitForChild("Client")
+	local gameClass = client:WaitForChild("GameClass")
+	local towerModule = gameClass:WaitForChild("TowerClass")
+	return SafeRequire(towerModule)
 end
 
--- ✅ Kiểm tra tower thường có thể xử lý không
-local function ShouldProcessTower(tower)
-    return tower and
-        not tower.Destroyed and
-        tower.HealthHandler and
-        tower.HealthHandler:GetHealth() > 0 and
-        not skipTowerTypes[tower.Type] and
-        tower.AbilityHandler
+local TowerClass = LoadTowerClass()
+if not TowerClass then error("Không thể tải TowerClass") end
+
+-- Get tower theo X
+local function GetTowerByAxis(axisX)
+	for hash, tower in pairs(TowerClass.GetTowers()) do
+		local model = tower.Character and tower.Character:GetCharacterModel()
+		local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+		if root and math.abs(root.Position.X - axisX) <= 1 then
+			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+			if hp and hp > 0 then
+				return hash, tower
+			end
+		end
+	end
+	return nil, nil
 end
 
--- ✅ Kiểm tra tower định hướng nhưng không phải skill định hướng
-local function ShouldProcessNonDirectionalSkill(tower, abilityIndex)
-    if tower.Type == "Commander" and abilityIndex ~= 3 then
-        -- Commander skill 1, 2 xử lý như tower thường
-        return tower and
-            not tower.Destroyed and
-            tower.HealthHandler and
-            tower.HealthHandler:GetHealth() > 0 and
-            tower.AbilityHandler
-    end
-    return false
+-- Chờ đủ tiền
+local function WaitForCash(amount)
+	while cashStat.Value < amount do
+		task.wait()
+	end
 end
 
--- 🔁 Vòng lặp chính
-while task.wait(0.1) do
-    for hash, tower in pairs(TowerClass.GetTowers() or {}) do
-        local towerType = tower.Type
-        local directionalInfo = directionalTowerTypes[towerType]
-
-        if directionalInfo and tower and tower.AbilityHandler then
-            for abilityIndex = 1, 3 do
-                pcall(function()
-                    local ability = tower.AbilityHandler:GetAbilityFromIndex(abilityIndex)
-                    if CanUseAbility(ability) then
-                        -- Nếu là Commander, chỉ skill 3 mới định hướng
-                        if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
-                            if abilityIndex == directionalInfo.onlyAbilityIndex then
-                                local enemyPos = GetFirstEnemyPosition()
-                                if enemyPos then
-                                    local args = {
-                                        hash,
-                                        abilityIndex,
-                                        enemyPos
-                                    }
-                                    if useFireServer then
-                                        TowerUseAbilityRequest:FireServer(unpack(args))
-                                    else
-                                        TowerUseAbilityRequest:InvokeServer(unpack(args))
-                                    end
-                                    task.wait(1)
-                                    return
-                                end
-                            else
-                                -- Skill 1, 2 của Commander xử lý như tower thường
-                                if ShouldProcessNonDirectionalSkill(tower, abilityIndex) then
-                                    if useFireServer then
-                                        TowerUseAbilityRequest:FireServer(hash, abilityIndex)
-                                    else
-                                        TowerUseAbilityRequest:InvokeServer(hash, abilityIndex)
-                                    end
-                                    task.wait(1)
-                                end
-                            end
-                        else
-                            -- Các tower định hướng khác: mọi skill đều cần enemy position
-                            local enemyPos = GetFirstEnemyPosition()
-                            if enemyPos then
-                                local args = {
-                                    hash,
-                                    abilityIndex,
-                                    enemyPos
-                                }
-                                if useFireServer then
-                                    TowerUseAbilityRequest:FireServer(unpack(args))
-                                else
-                                    TowerUseAbilityRequest:InvokeServer(unpack(args))
-                                end
-                                task.wait(1)
-                                return
-                            end
-                        end
-                    end
-                end)
-            end
-        elseif ShouldProcessTower(tower) then
-            for abilityIndex = 1, 3 do
-                pcall(function()
-                    local ability = tower.AbilityHandler:GetAbilityFromIndex(abilityIndex)
-                    if CanUseAbility(ability) then
-                        if useFireServer then
-                            TowerUseAbilityRequest:FireServer(hash, abilityIndex)
-                        else
-                            TowerUseAbilityRequest:InvokeServer(hash, abilityIndex)
-                        end
-                        task.wait(1)
-                    end
-                end)
-            end
-        end
-    end
+-- Đặt tower
+local function PlaceTowerRetry(args, axisX, towerName)
+	print("[Place] Đặt tower:", towerName, "tại X =", axisX)
+	local t0 = tick()
+	while tick() - t0 < 3 do
+		Remotes.PlaceTower:InvokeServer(unpack(args))
+		task.wait(0.2)
+		local hash, tower = GetTowerByAxis(axisX)
+		if hash and tower then
+			print("[Place] Thành công:", towerName)
+			return true
+		end
+	end
+	warn("[Place] Thất bại:", towerName)
+	return false
 end
+
+-- Nâng cấp
+local function UpgradeTowerRetry(axisX, upgradePath)
+	print("[Upgrade] Bắt đầu nâng X =", axisX, "Path =", upgradePath)
+	local maxTries = 3
+	for try = 1, maxTries do
+		local hash, tower = GetTowerByAxis(axisX)
+		if not hash then
+			warn("[Upgrade] Tower không tồn tại tại X =", axisX)
+			break
+		end
+
+		if tower.LevelHandler then
+			local lvlBefore = tower.LevelHandler:GetLevelOnPath(upgradePath)
+			local maxLvl = tower.LevelHandler:GetMaxLevel()
+			if lvlBefore >= maxLvl then
+				print("[Upgrade] Đã đạt cấp tối đa")
+				return
+			end
+
+			local success, cost = pcall(function()
+				return tower.LevelHandler:GetLevelUpgradeCost(upgradePath, lvlBefore + 1)
+			end)
+			if not (success and cost) then
+				warn("[Upgrade] Không lấy được giá nâng cấp")
+				return
+			end
+
+			print("[Upgrade] Chờ tiền:", cost)
+			WaitForCash(cost)
+			Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
+
+			local t0 = tick()
+			while tick() - t0 < 2 do
+				task.wait(0.1)
+				local _, newTower = GetTowerByAxis(axisX)
+				if newTower and newTower.LevelHandler then
+					local lvlAfter = newTower.LevelHandler:GetLevelOnPath(upgradePath)
+					if lvlAfter > lvlBefore then
+						print("[Upgrade] Thành công:", lvlBefore, "→", lvlAfter)
+						return
+					end
+				end
+			end
+			warn("[Upgrade] Lần thử", try, "thất bại, thử lại...")
+		end
+		task.wait(0.2)
+	end
+end
+
+-- Bán tower
+local function SellTowerRetry(axisX)
+	local t0 = tick()
+	while tick() - t0 < 2 do
+		local hash = GetTowerByAxis(axisX)
+		if hash then
+			Remotes.SellTower:FireServer(hash)
+			task.wait(0.2)
+			if not GetTowerByAxis(axisX) then
+				print("[Sell] Bán thành công X =", axisX)
+				return
+			end
+		else
+			return
+		end
+		task.wait(0.1)
+	end
+end
+
+-- Đổi target
+local function ChangeTargetRetry(axisX, targetType)
+	local t0 = tick()
+	while tick() - t0 < 2 do
+		local hash = GetTowerByAxis(axisX)
+		if hash then
+			Remotes.ChangeQueryType:FireServer(hash, targetType)
+			print("[Target] Đổi target tại X =", axisX)
+			return
+		end
+		task.wait(0.1)
+	end
+end
+
+-- Load macro
+local config = getgenv().TDX_Config or {}
+local macroPath = config["Macro Path"] or "tdx/macros/x.json"
+if not isfile(macroPath) then error("Không tìm thấy macro: " .. macroPath) end
+
+local success, macro = pcall(function()
+	return HttpService:JSONDecode(readfile(macroPath))
+end)
+if not success then error("Lỗi khi đọc macro") end
+
+-- Chạy macro
+for index, entry in ipairs(macro) do
+	print("▶️ Entry", index)
+	if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
+		local vecTab = entry.TowerVector:split(", ")
+		local pos = Vector3.new(unpack(vecTab))
+		local args = {
+			tonumber(entry.TowerA1),
+			entry.TowerPlaced,
+			pos,
+			tonumber(entry.Rotation or 0)
+		}
+		WaitForCash(entry.TowerPlaceCost)
+		PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
+
+	elseif entry.TowerUpgraded and entry.UpgradePath then
+		local axisValue = tonumber(entry.TowerUpgraded)
+		UpgradeTowerRetry(axisValue, tonumber(entry.UpgradePath))
+
+	elseif entry.ChangeTarget and entry.TargetType then
+		local axisValue = tonumber(entry.ChangeTarget)
+		ChangeTargetRetry(axisValue, tonumber(entry.TargetType))
+
+	elseif entry.SellTower then
+		local axisValue = tonumber(entry.SellTower)
+		SellTowerRetry(axisValue)
+	end
+end
+
+print("✅ [rewrite_unsure] hoàn tất.")
