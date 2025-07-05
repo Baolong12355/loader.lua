@@ -1,4 +1,4 @@
-
+repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
@@ -7,7 +7,7 @@ local player = Players.LocalPlayer
 local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
--- Safe require
+-- Safe require TowerClass
 local function SafeRequire(module)
 	local success, result = pcall(require, module)
 	return success and result or nil
@@ -24,7 +24,7 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
--- Get tower theo X
+-- Tìm tower theo X
 local function GetTowerByAxis(axisX)
 	for hash, tower in pairs(TowerClass.GetTowers()) do
 		local model = tower.Character and tower.Character:GetCharacterModel()
@@ -41,107 +41,88 @@ end
 
 -- Chờ đủ tiền
 local function WaitForCash(amount)
-	while cashStat.Value < amount do
-		task.wait()
-	end
+	while cashStat.Value < amount do task.wait() end
+end
+
+-- Lấy giá nâng cấp hiện tại
+local function GetCurrentUpgradeCost(tower, path)
+	if not tower or not tower.LevelHandler then return nil end
+	local success, cost = pcall(function()
+		return tower.LevelHandler:GetLevelUpgradeCost(path, 1)
+	end)
+	if success and cost then return cost end
+	return nil
 end
 
 -- Đặt tower
 local function PlaceTowerRetry(args, axisX, towerName)
-	print("[Place] Đặt tower:", towerName, "tại X =", axisX)
-	local t0 = tick()
-	while tick() - t0 < 3 do
+	for _ = 1, 3 do
 		Remotes.PlaceTower:InvokeServer(unpack(args))
 		task.wait(0.2)
 		local hash, tower = GetTowerByAxis(axisX)
-		if hash and tower then
-			print("[Place] Thành công:", towerName)
-			return true
-		end
+		if hash and tower then return true end
 	end
-	warn("[Place] Thất bại:", towerName)
+	warn("[PlaceTowerRetry] thất bại:", towerName, axisX)
 	return false
 end
 
--- Nâng cấp
-local function UpgradeTowerRetry(axisX, upgradePath)
-	print("[Upgrade] Bắt đầu nâng X =", axisX, "Path =", upgradePath)
-	local maxTries = 3
-	for try = 1, maxTries do
+-- Nâng cấp tower: spam cho đến khi max
+local function UpgradeUntilMax(axisX, upgradePath)
+	for _ = 1, 10 do
 		local hash, tower = GetTowerByAxis(axisX)
-		if not hash then
-			warn("[Upgrade] Tower không tồn tại tại X =", axisX)
-			break
-		end
+		if not (hash and tower and tower.LevelHandler) then return end
+		local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+		if not (hp and hp > 0) then return end
 
-		if tower.LevelHandler then
-			local lvlBefore = tower.LevelHandler:GetLevelOnPath(upgradePath)
-			local maxLvl = tower.LevelHandler:GetMaxLevel()
-			if lvlBefore >= maxLvl then
-				print("[Upgrade] Đã đạt cấp tối đa")
-				return
-			end
+		local lvl = tower.LevelHandler:GetLevelOnPath(upgradePath)
+		local maxLvl = tower.LevelHandler:GetMaxLevel()
+		if lvl >= maxLvl then return end
 
-			local success, cost = pcall(function()
-				return tower.LevelHandler:GetLevelUpgradeCost(upgradePath, lvlBefore + 1)
-			end)
-			if not (success and cost) then
-				warn("[Upgrade] Không lấy được giá nâng cấp")
-				return
-			end
+		local cost = GetCurrentUpgradeCost(tower, upgradePath)
+		if not cost then return end
 
-			print("[Upgrade] Chờ tiền:", cost)
-			WaitForCash(cost)
-			Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
+		WaitForCash(cost)
+		Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
 
-			local t0 = tick()
-			while tick() - t0 < 2 do
-				task.wait(0.1)
-				local _, newTower = GetTowerByAxis(axisX)
-				if newTower and newTower.LevelHandler then
-					local lvlAfter = newTower.LevelHandler:GetLevelOnPath(upgradePath)
-					if lvlAfter > lvlBefore then
-						print("[Upgrade] Thành công:", lvlBefore, "→", lvlAfter)
-						return
-					end
+		local t0 = tick()
+		while tick() - t0 < 1.5 do
+			task.wait(0.1)
+			local _, newTower = GetTowerByAxis(axisX)
+			if newTower and newTower.LevelHandler then
+				local newLvl = newTower.LevelHandler:GetLevelOnPath(upgradePath)
+				if newLvl > lvl then
+					break -- nâng thành công, tiếp tục vòng lặp
 				end
 			end
-			warn("[Upgrade] Lần thử", try, "thất bại, thử lại...")
 		end
-		task.wait(0.2)
 	end
 end
 
 -- Bán tower
 local function SellTowerRetry(axisX)
-	local t0 = tick()
-	while tick() - t0 < 2 do
+	for _ = 1, 3 do
 		local hash = GetTowerByAxis(axisX)
 		if hash then
 			Remotes.SellTower:FireServer(hash)
 			task.wait(0.2)
-			if not GetTowerByAxis(axisX) then
-				print("[Sell] Bán thành công X =", axisX)
-				return
-			end
+			local stillExist = GetTowerByAxis(axisX)
+			if not stillExist then return end
 		else
 			return
 		end
-		task.wait(0.1)
+		task.wait(0.2)
 	end
 end
 
 -- Đổi target
 local function ChangeTargetRetry(axisX, targetType)
-	local t0 = tick()
-	while tick() - t0 < 2 do
+	for _ = 1, 3 do
 		local hash = GetTowerByAxis(axisX)
 		if hash then
 			Remotes.ChangeQueryType:FireServer(hash, targetType)
-			print("[Target] Đổi target tại X =", axisX)
 			return
 		end
-		task.wait(0.1)
+		task.wait(0.2)
 	end
 end
 
@@ -156,8 +137,7 @@ end)
 if not success then error("Lỗi khi đọc macro") end
 
 -- Chạy macro
-for index, entry in ipairs(macro) do
-	print("▶️ Entry", index)
+for _, entry in ipairs(macro) do
 	if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
 		local vecTab = entry.TowerVector:split(", ")
 		local pos = Vector3.new(unpack(vecTab))
@@ -172,7 +152,8 @@ for index, entry in ipairs(macro) do
 
 	elseif entry.TowerUpgraded and entry.UpgradePath then
 		local axisValue = tonumber(entry.TowerUpgraded)
-		UpgradeTowerRetry(axisValue, tonumber(entry.UpgradePath))
+		local path = tonumber(entry.UpgradePath)
+		UpgradeUntilMax(axisValue, path)
 
 	elseif entry.ChangeTarget and entry.TargetType then
 		local axisValue = tonumber(entry.ChangeTarget)
@@ -184,4 +165,4 @@ for index, entry in ipairs(macro) do
 	end
 end
 
-print("✅ [rewrite_unsure] hoàn tất.")
+print("✅ rewrite_unsure hoàn tất.")
