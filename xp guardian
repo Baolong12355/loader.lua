@@ -3,20 +3,18 @@ local WEBHOOK_URL = "https://discord.com/api/webhooks/972059328276201492/DPHtxfs
 local XP_LIMIT = 10000
 local SAVE_FILE = "BattlePassProgress.txt"
 
--- Danh sách BattlePass
 local BATTLE_PASSES = {
     {remote = "TB", display = "TOWER BATTLES"},
-    {remote = "HW24", display = "HALLOWEEN 2024"}, 
-    {remote = "XMAS24", display = "CHRISTMAS 2024"}
+    {remote = "HW24", display = "HALLOWEEN 2024"},
+    {remote = "XMAS24", display = "CHRISTMAS 2024"},
 }
 
--- Dịch vụ Roblox
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 
--- Hàm gửi Discord (qua executor)
+-- Gửi Discord bằng request (executor hỗ trợ đầy đủ)
 local function sendToDiscord(message)
     local data = {
         content = message,
@@ -25,12 +23,11 @@ local function sendToDiscord(message)
     }
 
     local encoded = HttpService:JSONEncode(data)
+    local request = (syn and syn.request) or (http and http.request) or (request) or http_request
 
-    local req = syn and syn.request or http and http.request or request or http_request
-
-    if req then
-        local success, res = pcall(function()
-            return req({
+    if request then
+        local ok, res = pcall(function()
+            return request({
                 Url = WEBHOOK_URL,
                 Method = "POST",
                 Headers = {
@@ -39,24 +36,24 @@ local function sendToDiscord(message)
                 Body = encoded
             })
         end)
-
-        if not success or (res and res.StatusCode >= 400) then
+        if ok and res and res.StatusCode < 300 then
+            return true
+        else
             warn("❌ Lỗi gửi Discord:", res and res.StatusCode)
-            return false
         end
-
-        return true
     else
-        warn("❌ Executor không hỗ trợ HTTP request")
-        return false
+        warn("❌ Executor không hỗ trợ request HTTP")
     end
+    return false
 end
 
--- ========== Lưu và tải tiến trình ========== --
+-- Biến trạng thái
 local progress = {}
+local lastXP = 0
+local lastLevel = 0
 local isFirstCheck = true
-local lastXP, lastLevel = 0, 0
 
+-- Lưu/đọc tiến trình
 local function saveProgress()
     local data = {}
     for _, bp in ipairs(BATTLE_PASSES) do
@@ -82,28 +79,36 @@ local function loadProgress()
     end
 end
 
--- ========== BattlePass logic ========== --
+-- Hàm đọc GUI
 local function getCurrentXP()
     local ok, xpText = pcall(function()
         return LocalPlayer.PlayerGui.GUI.BattlePass.BattlePassDetails.LevelInfo.XP.TextLabel.Text
     end)
-    return (ok and tonumber(xpText:match("%d+"))) or 0
+    if ok and xpText then
+        local num = tonumber(xpText:match("%d+"))
+        return num or 0
+    end
+    return 0
 end
 
 local function getCurrentLevel()
     local ok, lvlText = pcall(function()
         return LocalPlayer.PlayerGui.Model.GUI.BattlePass.BattlePassDetails.LevelInfo.Current.TextLabel.Text
     end)
-    return (ok and tonumber(lvlText:match("%d+"))) or 0
+    if ok and lvlText then
+        local num = tonumber(lvlText:match("%d+"))
+        return num or 0
+    end
+    return 0
 end
 
 local function getCurrentBattlePass()
     local ok, name = pcall(function()
         return LocalPlayer.PlayerGui.GUI.BattlePass.BattlePassDetails.PreviewInfo.DisplayName.Text
     end)
-    if ok then
+    if ok and name then
         for _, bp in ipairs(BATTLE_PASSES) do
-            if bp.display == name then
+            if bp.display:lower() == name:lower() then
                 return bp.remote, bp.display
             end
         end
@@ -112,17 +117,19 @@ local function getCurrentBattlePass()
 end
 
 local function activateBattlePass(bpName)
-    local remote = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("BattlePassRequestActivate")
+    local remote = ReplicatedStorage:FindFirstChild("Network")
     if not remote then return false end
+    local r = remote:FindFirstChild("BattlePassRequestActivate")
+    if not r then return false end
     local ok, result = pcall(function()
-        return remote:InvokeServer(bpName)
+        return r:InvokeServer(bpName)
     end)
     return ok and result or false
 end
 
 local function getNextBattlePass()
     for _, bp in ipairs(BATTLE_PASSES) do
-        if progress[bp.remote] < XP_LIMIT then
+        if (progress[bp.remote] or 0) < XP_LIMIT then
             return bp.remote, bp.display
         end
     end
@@ -131,70 +138,74 @@ end
 
 local function allMaxed()
     for _, bp in ipairs(BATTLE_PASSES) do
-        if progress[bp.remote] < XP_LIMIT then
+        if (progress[bp.remote] or 0) < XP_LIMIT then
             return false
         end
     end
     return true
 end
 
--- ========== Kiểm tra và theo dõi tiến trình ========== --
+-- Theo dõi tiến trình
 local function checkProgress()
-    local curXP = getCurrentXP()
-    local curLevel = getCurrentLevel()
+    local currentXP = getCurrentXP()
+    local currentLevel = getCurrentLevel()
     local bpRemote, bpDisplay = getCurrentBattlePass()
 
-    if not bpRemote then return end
+    if not bpRemote then
+        warn("❌ Không xác định được BattlePass hiện tại.")
+        return
+    end
+
+    progress[bpRemote] = progress[bpRemote] or 0
 
     if isFirstCheck then
-        lastXP = curXP
-        lastLevel = curLevel
+        lastXP = currentXP
+        lastLevel = currentLevel
         isFirstCheck = false
         return
     end
 
-    if curXP ~= lastXP then
-        local gain = curXP - lastXP
-        if gain > 0 then
-            progress[bpRemote] = math.min(progress[bpRemote] + gain, XP_LIMIT)
-            saveProgress()
+    local xpGained = currentXP - lastXP
+    if xpGained > 0 then
+        progress[bpRemote] = math.min(progress[bpRemote] + xpGained, XP_LIMIT)
+        saveProgress()
 
-            sendToDiscord(string.format(
-                "🎯 %s: +%d XP (Tổng: %d/%d)\nLevel: %d",
-                bpDisplay, gain, progress[bpRemote], XP_LIMIT, curLevel
-            ))
+        sendToDiscord(string.format(
+            "🎯 %s: +%d XP (Tổng: %d/%d)\nLevel: %d",
+            bpDisplay, xpGained, progress[bpRemote], XP_LIMIT, currentLevel
+        ))
 
-            if progress[bpRemote] >= XP_LIMIT then
-                sendToDiscord(string.format("✅ Đã hoàn thành %s!", bpDisplay))
-                local next, nextDisplay = getNextBattlePass()
-                if next then
-                    if activateBattlePass(next) then
-                        sendToDiscord("🔄 Chuyển sang: " .. nextDisplay)
-                        isFirstCheck = true
-                    end
-                else
-                    sendToDiscord("🏁 ĐÃ HOÀN THÀNH TẤT CẢ BATTLEPASS!")
-                    LocalPlayer:Kick("Hoàn thành tất cả BattlePass!")
+        if progress[bpRemote] >= XP_LIMIT then
+            sendToDiscord(string.format("✅ Đã hoàn thành %s!", bpDisplay))
+            local next, nextName = getNextBattlePass()
+            if next then
+                if activateBattlePass(next) then
+                    sendToDiscord("🔄 Chuyển sang BattlePass: " .. nextName)
+                    isFirstCheck = true
                 end
+            else
+                sendToDiscord("🏁 ĐÃ HOÀN THÀNH TẤT CẢ BATTLEPASS!")
+                LocalPlayer:Kick("Đã hoàn thành toàn bộ BattlePass.")
             end
         end
-        lastXP = curXP
-        lastLevel = curLevel
     end
+
+    lastXP = currentXP
+    lastLevel = currentLevel
 end
 
--- ========== Main ========== --
+-- Main
 local function main()
-    sendToDiscord("🟢 Bắt đầu theo dõi BattlePass")
+    sendToDiscord("🟢 Script BattlePass Tracker đã khởi động!")
     loadProgress()
 
-    local bp, display = getNextBattlePass()
-    if bp and activateBattlePass(bp) then
-        local msg = "🚀 BẮT ĐẦU:\n"
-        for _, b in ipairs(BATTLE_PASSES) do
-            msg = msg .. string.format("%s: %d/%d\n", b.display, progress[b.remote], XP_LIMIT)
+    local next, name = getNextBattlePass()
+    if next and activateBattlePass(next) then
+        local msg = "🚀 BẮT ĐẦU THEO DÕI:\n"
+        for _, bp in ipairs(BATTLE_PASSES) do
+            msg = msg .. string.format("%s: %d/%d\n", bp.display, progress[bp.remote] or 0, XP_LIMIT)
         end
-        msg = msg .. "🔛 ĐANG KÍCH HOẠT: " .. display
+        msg = msg .. "🔛 ĐANG KÍCH HOẠT: " .. name
         sendToDiscord(msg)
         isFirstCheck = true
     else
@@ -208,9 +219,9 @@ local function main()
     end
 end
 
--- Bắt đầu
+-- Bắt đầu script
 local ok, err = pcall(main)
 if not ok then
-    warn("❌ Lỗi:", err)
+    warn("❌ Lỗi nghiêm trọng:", err)
     sendToDiscord("💥 Lỗi nghiêm trọng: " .. tostring(err))
 end
