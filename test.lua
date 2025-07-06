@@ -8,7 +8,7 @@ local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
 
 local skipTowerTypes = { ["Farm"] = true, ["Relic"] = true, ["Scarecrow"] = true, ["Helicopter"] = true, ["Cryo Helicopter"] = true, ["Combat Drone"] = true, ["AA Turret"] = true, ["XWM Turret"] = true, ["Barracks"] = true, ["Cryo Blaster"] = true, ["Grenadier"] = true, ["Juggernaut"] = true, ["Machine Gunner"] = true, ["Zed"] = true, ["Troll Tower"] = true, ["Missile Trooper"] = true, ["Patrol Boat"] = true, ["Railgunner"] = true, ["Mine Layer"] = true, ["Sentry"] = true, ["Commander"] = true, ["Toxicnator"] = true, ["Ghost"] = true, ["Ice Breaker"] = true, ["Mobster"] = true, ["Golden Mobster"] = true, ["Artillery"] = true, ["EDJ"] = false, ["Accelerator"] = true, ["Engineer"] = true }
 
-local directionalTowerTypes = { ["Commander"] = { onlyAbilityIndex = 3 }, ["Toxicnator"] = true, ["Ghost"] = true, ["Ice Breaker"] = { skipRangeCheckIndexes = {1} }, ["Mobster"] = true, ["Artillery"] = true, ["Golden Mine Layer"] = true, ["Golden Mobster"] = true, ["Slammer"] = true }
+local directionalTowerTypes = { ["Commander"] = { onlyAbilityIndex = 3 }, ["Toxicnator"] = true, ["Ghost"] = true, ["Ice Breaker"] = { skipRangeCheckIndexes = {1} }, ["Mobster"] = true, ["Artillery"] = true, ["Golden Mine Layer"] = true, ["Golden Mobster"] = true }
 
 local function GetCurrentUpgradeCosts(tower) if not tower or not tower.LevelHandler then return { path1 = {cost = "N/A", currentLevel = "N/A", maxLevel = "N/A", exists = true}, path2 = {cost = "N/A", currentLevel = "N/A", maxLevel = "N/A", exists = false} } end local result = { path1 = {cost = "MAX", currentLevel = 0, maxLevel = 0, exists = true}, path2 = {cost = "MAX", currentLevel = 0, maxLevel = 0, exists = false} } local maxLevel = tower.LevelHandler:GetMaxLevel() local currentLvl1 = tower.LevelHandler:GetLevelOnPath(1) result.path1.currentLevel = currentLvl1 result.path1.maxLevel = maxLevel if currentLvl1 < maxLevel then local success, cost = pcall(function() return tower.LevelHandler:GetLevelUpgradeCost(1, 1) end) if success then result.path1.cost = math.floor(cost) else result.path1.cost = "LỖI" end end local hasPath2 = pcall(function() return tower.LevelHandler:GetLevelOnPath(2) ~= nil end) if hasPath2 then result.path2.exists = true local currentLvl2 = tower.LevelHandler:GetLevelOnPath(2) result.path2.currentLevel = currentLvl2 result.path2.maxLevel = maxLevel if currentLvl2 < maxLevel then local success, cost = pcall(function() return tower.LevelHandler:GetLevelUpgradeCost(2, 1) end) if success then result.path2.cost = math.floor(cost) else result.path2.cost = "LỖI" end end end return result end
 
@@ -60,7 +60,7 @@ if towerType == "Golden Mobster" and p2 >= 3 then
                             shouldUse = false
                         end
                     elseif directionalInfo then
-                        shouldUse = true -- các tower định hướng được xử lý ở dưới
+                        shouldUse = true
                     end
 
                     if shouldUse then
