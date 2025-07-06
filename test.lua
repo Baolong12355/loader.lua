@@ -7,7 +7,7 @@ local player = Players.LocalPlayer
 local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
--- Safe require tower module
+-- Safe require TowerClass
 local function SafeRequire(module)
 	local success, result = pcall(require, module)
 	return success and result or nil
@@ -24,7 +24,7 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
--- Hàm lấy tower gần trục X (±1)
+-- Lấy tower theo trục X
 local function GetTowerByAxis(axisX)
 	for hash, tower in pairs(TowerClass.GetTowers()) do
 		local success, pos = pcall(function()
@@ -47,7 +47,7 @@ local function WaitForCash(amount)
 	while cashStat.Value < amount do task.wait() end
 end
 
--- Đặt tower (retry tối đa 10 lần)
+-- Đặt tower
 local function PlaceTowerRetry(args, axisX, towerName)
 	for i = 1, 10 do
 		Remotes.PlaceTower:InvokeServer(unpack(args))
@@ -65,39 +65,35 @@ local function PlaceTowerRetry(args, axisX, towerName)
 	return false
 end
 
--- Nâng cấp tower (retry và đợi đúng)
+-- Nâng cấp tower đúng 1 lần (retry nếu thất bại)
 local function UpgradeTowerRetry(axisX, upgradePath)
-	for _ = 1, 3 do
+	for _ = 1, 5 do
 		local hash, tower = GetTowerByAxis(axisX)
 		if hash and tower and tower.LevelHandler then
 			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
-			if hp and hp > 0 then
-				local lvlBefore = tower.LevelHandler:GetLevelOnPath(upgradePath)
-				local maxLvl = tower.LevelHandler:GetMaxLevel()
-				if lvlBefore >= maxLvl then return end
+			if not hp or hp <= 0 then return end
 
-				local success, cost = pcall(function()
-					return tower.LevelHandler:GetLevelUpgradeCost(upgradePath, lvlBefore)
-				end)
-				if not (success and cost) then return end
+			local lvlBefore = tower.LevelHandler:GetLevelOnPath(upgradePath)
+			local maxLvl = tower.LevelHandler:GetMaxLevel()
+			if lvlBefore >= maxLvl then return end
 
-				WaitForCash(cost)
-				Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
+			local success, cost = pcall(function()
+				return tower.LevelHandler:GetLevelUpgradeCost(upgradePath, lvlBefore)
+			end)
+			if not (success and cost) then return end
 
-				local t0 = tick()
-				while tick() - t0 < 1.5 do
-					task.wait(0.1)
-					local _, t = GetTowerByAxis(axisX)
-					if t and t.LevelHandler then
-						local lvlAfter = t.LevelHandler:GetLevelOnPath(upgradePath)
-						if lvlAfter > lvlBefore then
-							return
-						end
-					end
+			WaitForCash(cost)
+			Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
+
+			local t0 = tick()
+			while tick() - t0 < 1.5 do
+				task.wait(0.1)
+				local _, t = GetTowerByAxis(axisX)
+				if t and t.LevelHandler then
+					local lvlAfter = t.LevelHandler:GetLevelOnPath(upgradePath)
+					if lvlAfter > lvlBefore then return end
 				end
 			end
-		else
-			break
 		end
 		task.wait(0.2)
 	end
@@ -110,8 +106,7 @@ local function SellTowerRetry(axisX)
 		if hash then
 			Remotes.SellTower:FireServer(hash)
 			task.wait(0.2)
-			local stillExists = GetTowerByAxis(axisX)
-			if not stillExists then return end
+			if not GetTowerByAxis(axisX) then return end
 		else
 			return
 		end
@@ -131,7 +126,7 @@ local function ChangeTargetRetry(axisX, targetType)
 	end
 end
 
--- Tải macro
+-- Load macro
 local config = getgenv().TDX_Config or {}
 local macroPath = config["Macro Path"] or "tdx/macros/x.json"
 
