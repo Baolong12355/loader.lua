@@ -8,7 +8,7 @@ local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
 
 local skipTowerTypes = { ["Farm"] = true, ["Relic"] = true, ["Scarecrow"] = true, ["Helicopter"] = true, ["Cryo Helicopter"] = true, ["Combat Drone"] = true, ["AA Turret"] = true, ["XWM Turret"] = true, ["Barracks"] = true, ["Cryo Blaster"] = true, ["Grenadier"] = true, ["Juggernaut"] = true, ["Machine Gunner"] = true, ["Zed"] = true, ["Troll Tower"] = true, ["Missile Trooper"] = true, ["Patrol Boat"] = true, ["Railgunner"] = true, ["Mine Layer"] = true, ["Sentry"] = true, ["Commander"] = true, ["Toxicnator"] = true, ["Ghost"] = true, ["Ice Breaker"] = true, ["Mobster"] = true, ["Golden Mobster"] = true, ["Artillery"] = true, ["EDJ"] = false, ["Accelerator"] = true, ["Engineer"] = true }
 
-local directionalTowerTypes = { ["Commander"] = { onlyAbilityIndex = 3 }, ["Toxicnator"] = true, ["Ghost"] = true, ["Ice Breaker"] = true, ["Mobster"] = true, ["Golden Mobster"] = true, ["Artillery"] = true, ["Golden Mine Layer"] = true }
+local directionalTowerTypes = { ["Commander"] = { onlyAbilityIndex = 3 }, ["Toxicnator"] = true, ["Ghost"] = true, ["Ice Breaker"] = { skipRangeCheckIndexes = {1} }, ["Mobster"] = true, ["Golden Mobster"] = true, ["Artillery"] = true, ["Golden Mine Layer"] = true }
 
 local function GetFirstEnemyPosition() for _, enemy in ipairs(EnemiesFolder:GetChildren()) do if enemy.Name ~= "Arrow" and enemy:IsA("BasePart") then return enemy.Position end end return nil end
 
@@ -35,23 +35,28 @@ if ShouldProcessTower(tower) or ShouldProcessNonDirectionalSkill(tower, 1) then
                     local dist = GetDistanceToNearestEnemy(pos)
                     local shouldUse = true -- mặc định true cho các tower thường
 
-                    -- Các tower đặc biệt bị giới hạn điều kiện
-                    if towerType == "Ice Breaker" then
+                    if towerType == "Ice Breaker" and (not directionalInfo.skipRangeCheckIndexes or not table.find(directionalInfo.skipRangeCheckIndexes, abilityIndex)) then
                         shouldUse = dist <= 8
                     elseif towerType == "Slammer" then
                         shouldUse = dist <= (TowerClass.GetCurrentRange and TowerClass:GetCurrentRange(tower) or 20)
                     elseif towerType == "John" then
-                        local lvl = GetPathLevel(tower, 1)
-                        if lvl >= 5 then
+                        local path1 = GetPathLevel(tower, 1)
+                        local path2 = GetPathLevel(tower, 2)
+                        if path1 >= 5 then
                             local range = TowerClass.GetCurrentRange and TowerClass:GetCurrentRange(tower) or 5
                             shouldUse = dist <= range
+                        elseif path2 >= 5 then
+                            shouldUse = dist <= 4.5
                         else
                             shouldUse = dist <= 4.5
                         end
                     elseif towerType == "Mobster" or towerType == "Golden Mobster" then
                         local path1 = GetPathLevel(tower, 1)
-                        if path1 >= 4 then
+                        local path2 = GetPathLevel(tower, 2)
+                        if path1 >= 4 and path1 <= 5 then
                             shouldUse = dist <= (TowerClass.GetCurrentRange and TowerClass:GetCurrentRange(tower) or 20)
+                        elseif path2 >= 3 and path2 <= 5 then
+                            shouldUse = true -- path 2 cấp 3-5 là định hướng, không giới hạn khoảng cách
                         else
                             shouldUse = false
                         end
