@@ -24,22 +24,28 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
--- Lấy tower theo trục X
+-- Tìm tower gần đúng theo X để lấy hash chính xác
 local function GetTowerByAxis(axisX)
+	local bestHash, bestTower, bestDist
 	for hash, tower in pairs(TowerClass.GetTowers()) do
 		local success, pos = pcall(function()
 			local model = tower.Character:GetCharacterModel()
 			local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
 			return root and root.Position
 		end)
-		if success and pos and math.abs(pos.X - axisX) <= 1 then
-			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
-			if hp and hp > 0 then
-				return hash, tower
+		if success and pos then
+			local dist = math.abs(pos.X - axisX)
+			if dist <= 1 then
+				local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+				if hp and hp > 0 then
+					if not bestDist or dist < bestDist then
+						bestHash, bestTower, bestDist = hash, tower, dist
+					end
+				end
 			end
 		end
 	end
-	return nil, nil
+	return bestHash, bestTower
 end
 
 -- Chờ đủ tiền
@@ -67,7 +73,7 @@ local function PlaceTowerRetry(args, axisX, towerName)
 	return false
 end
 
--- Nâng cấp tower đúng 1 lần (debug)
+-- Nâng cấp tower đúng 1 lần (dùng ánh xạ vị trí lấy hash)
 local function UpgradeTowerRetry(axisX, upgradePath)
 	for attempt = 1, 5 do
 		local hash, tower = GetTowerByAxis(axisX)
@@ -90,7 +96,7 @@ local function UpgradeTowerRetry(axisX, upgradePath)
 			end)
 			cost = success and cost or 0
 
-			print(string.format("🔧 [Upgrade] X=%.2f | Path=%d | Level=%d | Cost=%.0f | Attempt=%d", axisX, upgradePath, lvlBefore, cost, attempt))
+			print(string.format("🔧 [Upgrade] Hash=%s | X=%.2f | Path=%d | Level=%d | Cost=%.0f | Attempt=%d", tostring(hash):sub(1, 8), axisX, upgradePath, lvlBefore, cost, attempt))
 			
 			WaitForCash(cost)
 			Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
