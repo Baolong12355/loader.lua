@@ -134,7 +134,7 @@ local function ChangeTargetRetry(axisValue, targetType)
 			Remotes.ChangeQueryType:FireServer(hash, targetType)
 			return
 		end
-		task.wait()
+		task.wait(0.1)
 	end
 end
 
