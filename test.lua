@@ -32,9 +32,10 @@ if ShouldProcessTower(tower) or ShouldProcessNonDirectionalSkill(tower, 1) then
                     local pos = tower.GetPosition and tower:GetPosition()
                     if not pos then return end
 
-                    local shouldUse = true
                     local dist = GetDistanceToNearestEnemy(pos)
+                    local shouldUse = true -- mặc định true cho các tower thường
 
+                    -- Các tower đặc biệt bị giới hạn điều kiện
                     if towerType == "Ice Breaker" then
                         shouldUse = dist <= 8
                     elseif towerType == "Slammer" then
@@ -60,11 +61,19 @@ if ShouldProcessTower(tower) or ShouldProcessNonDirectionalSkill(tower, 1) then
                         if directionalInfo then
                             local enemyPos = GetFirstEnemyPosition()
                             if enemyPos then
-                                TowerUseAbilityRequest:FireServer(hash, abilityIndex, enemyPos)
+                                if useFireServer then
+                                    TowerUseAbilityRequest:FireServer(hash, abilityIndex, enemyPos)
+                                else
+                                    TowerUseAbilityRequest:InvokeServer(hash, abilityIndex, enemyPos)
+                                end
                                 task.wait(0.25)
                             end
                         else
-                            TowerUseAbilityRequest:FireServer(hash, abilityIndex)
+                            if useFireServer then
+                                TowerUseAbilityRequest:FireServer(hash, abilityIndex)
+                            else
+                                TowerUseAbilityRequest:InvokeServer(hash, abilityIndex)
+                            end
                             task.wait(0.25)
                         end
                     end
