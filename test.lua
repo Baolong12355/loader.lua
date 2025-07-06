@@ -1,4 +1,3 @@
--- 📦 Auto-Skill PRO với điều kiện phạm vi riêng cho từng tower đặc biệt
 
 local Players = game:GetService("Players") local ReplicatedStorage = game:GetService("ReplicatedStorage") local RunService = game:GetService("RunService") local LocalPlayer = Players.LocalPlayer local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
 
