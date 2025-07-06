@@ -24,7 +24,7 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
--- Tìm tower gần đúng theo X để lấy hash chính xác
+-- Tìm tower gần đúng theo X
 local function GetTowerByAxis(axisX)
 	local bestHash, bestTower, bestDist
 	for hash, tower in pairs(TowerClass.GetTowers()) do
@@ -48,15 +48,87 @@ local function GetTowerByAxis(axisX)
 	return bestHash, bestTower
 end
 
+-- Lấy giá đặt tower theo tên
+local function GetTowerPlaceCostByName(name)
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if not playerGui then return 0 end
+	local interface = playerGui:FindFirstChild("Interface")
+	if not interface then return 0 end
+	local bottomBar = interface:FindFirstChild("BottomBar")
+	if not bottomBar then return 0 end
+	local towersBar = bottomBar:FindFirstChild("TowersBar")
+	if not towersBar then return 0 end
+
+	for _, tower in ipairs(towersBar:GetChildren()) do
+		if tower.Name == name then
+			local costFrame = tower:FindFirstChild("CostFrame")
+			local costText = costFrame and costFrame:FindFirstChild("CostText")
+			if costText then
+				local raw = tostring(costText.Text):gsub("%D", "")
+				return tonumber(raw) or 0
+			end
+		end
+	end
+	return 0
+end
+
+-- Lấy giá nâng cấp
+local function GetCurrentUpgradeCosts(tower)
+	if not tower or not tower.LevelHandler then
+		return {
+			path1 = {cost = "N/A", currentLevel = "N/A", maxLevel = "N/A", exists = true},
+			path2 = {cost = "N/A", currentLevel = "N/A", maxLevel = "N/A", exists = false}
+		}
+	end
+
+	local result = {
+		path1 = {cost = "MAX", currentLevel = 0, maxLevel = 0, exists = true},
+		path2 = {cost = "MAX", currentLevel = 0, maxLevel = 0, exists = false}
+	}
+
+	local maxLevel = tower.LevelHandler:GetMaxLevel()
+	local lvl1 = tower.LevelHandler:GetLevelOnPath(1)
+	result.path1.currentLevel = lvl1
+	result.path1.maxLevel = maxLevel
+
+	if lvl1 < maxLevel then
+		local ok, cost = pcall(function()
+			return tower.LevelHandler:GetLevelUpgradeCost(1, 1)
+		end)
+		result.path1.cost = ok and math.floor(cost) or "LỖI"
+	end
+
+	local hasPath2 = pcall(function()
+		return tower.LevelHandler:GetLevelOnPath(2) ~= nil
+	end)
+
+	if hasPath2 then
+		result.path2.exists = true
+		local lvl2 = tower.LevelHandler:GetLevelOnPath(2)
+		result.path2.currentLevel = lvl2
+		result.path2.maxLevel = maxLevel
+
+		if lvl2 < maxLevel then
+			local ok2, cost2 = pcall(function()
+				return tower.LevelHandler:GetLevelUpgradeCost(2, 1)
+			end)
+			result.path2.cost = ok2 and math.floor(cost2) or "LỖI"
+		end
+	end
+
+	return result
+end
+
 -- Chờ đủ tiền
 local function WaitForCash(amount)
 	while cashStat.Value < amount do task.wait() end
 end
 
--- Đặt tower (debug và retry)
-local function PlaceTowerRetry(args, axisX, towerName)
+-- Đặt tower
+local function PlaceTowerRetry(args, axisX, towerName, cost)
 	for i = 1, 10 do
 		print(string.format("🧱 [Place Attempt %d] %s tại X=%.2f", i, towerName, axisX))
+		WaitForCash(cost)
 		Remotes.PlaceTower:InvokeServer(unpack(args))
 		local t0 = tick()
 		repeat
@@ -73,52 +145,54 @@ local function PlaceTowerRetry(args, axisX, towerName)
 	return false
 end
 
--- Nâng cấp tower đúng 1 lần (dùng ánh xạ vị trí lấy hash)
+-- Nâng cấp tower
 local function UpgradeTowerRetry(axisX, upgradePath)
 	for attempt = 1, 5 do
 		local hash, tower = GetTowerByAxis(axisX)
-		if hash and tower and tower.LevelHandler then
-			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
-			if not hp or hp <= 0 then
-				print(string.format("❌ [Upgrade] Tower tại X=%.2f đã bị tiêu diệt", axisX))
-				return
-			end
+		if not hash or not tower then
+			print(string.format("❌ [Upgrade] Không tìm thấy tower tại X=%.2f", axisX))
+			return
+		end
 
-			local lvlBefore = tower.LevelHandler:GetLevelOnPath(upgradePath)
-			local maxLvl = tower.LevelHandler:GetMaxLevel()
-			if lvlBefore >= maxLvl then
-				print(string.format("⚠️ [Upgrade] Tower tại X=%.2f đã max cấp (Path %d)", axisX, upgradePath))
-				return
-			end
+		local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+		if not hp or hp <= 0 then
+			print(string.format("❌ [Upgrade] Tower tại X=%.2f đã bị tiêu diệt", axisX))
+			return
+		end
 
-			local success, cost = pcall(function()
-				return tower.LevelHandler:GetLevelUpgradeCost(upgradePath, lvlBefore)
-			end)
-			cost = success and cost or 0
+		local costInfo = GetCurrentUpgradeCosts(tower)
+		local info = upgradePath == 1 and costInfo.path1 or costInfo.path2
 
-			print(string.format("🔧 [Upgrade] Hash=%s | X=%.2f | Path=%d | Level=%d | Cost=%.0f | Attempt=%d", tostring(hash):sub(1, 8), axisX, upgradePath, lvlBefore, cost, attempt))
-			
-			WaitForCash(cost)
-			Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
+		if info.cost == "MAX" then
+			print(string.format("⚠️ [Upgrade] Tower X=%.2f đã max cấp (Path %d)", axisX, upgradePath))
+			return
+		end
+		if info.cost == "LỖI" or type(info.cost) ~= "number" then
+			print(string.format("❗ [Upgrade] Không thể lấy giá nâng cấp X=%.2f | Path=%d", axisX, upgradePath))
+			return
+		end
 
-			local t0 = tick()
-			while tick() - t0 < 1.5 do
-				task.wait(0.1)
-				local _, t = GetTowerByAxis(axisX)
-				if t and t.LevelHandler then
-					local lvlAfter = t.LevelHandler:GetLevelOnPath(upgradePath)
-					if lvlAfter > lvlBefore then
-						print(string.format("✅ [Upgrade Success] X=%.2f | Path=%d | New Level=%d", axisX, upgradePath, lvlAfter))
-						return
-					end
+		print(string.format("🔧 [Upgrade] X=%.2f | Path=%d | Level=%d | Cost=%d | Attempt=%d", axisX, upgradePath, info.currentLevel, info.cost, attempt))
+
+		WaitForCash(info.cost)
+		Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
+
+		local t0 = tick()
+		while tick() - t0 < 1.5 do
+			task.wait(0.1)
+			local _, t = GetTowerByAxis(axisX)
+			if t and t.LevelHandler then
+				local newLevel = t.LevelHandler:GetLevelOnPath(upgradePath)
+				if newLevel > info.currentLevel then
+					print(string.format("✅ [Upgrade Success] X=%.2f | Path=%d | New Level=%d", axisX, upgradePath, newLevel))
+					return
 				end
 			end
-
-			print(string.format("❗ [Upgrade Failed] X=%.2f | Path=%d không thành công, thử lại", axisX, upgradePath))
 		end
+
+		print(string.format("❌ [Upgrade Failed] X=%.2f | Path=%d | Không nâng được", axisX, upgradePath))
 		task.wait(0.2)
 	end
-	print(string.format("❌ [Upgrade Giveup] X=%.2f | Path=%d nâng thất bại hoàn toàn", axisX, upgradePath))
 end
 
 -- Bán tower
@@ -161,9 +235,9 @@ local success, macro = pcall(function()
 end)
 if not success then error("Lỗi khi đọc macro") end
 
--- Chạy từng dòng macro
+-- Chạy macro
 for _, entry in ipairs(macro) do
-	if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
+	if entry.TowerPlaced and entry.TowerVector then
 		local vecTab = entry.TowerVector:split(", ")
 		local pos = Vector3.new(unpack(vecTab))
 		local args = {
@@ -172,8 +246,11 @@ for _, entry in ipairs(macro) do
 			pos,
 			tonumber(entry.Rotation or 0)
 		}
-		WaitForCash(entry.TowerPlaceCost)
-		PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
+		local cost = tonumber(entry.TowerPlaceCost) or 0
+		if cost == 0 then
+			cost = GetTowerPlaceCostByName(entry.TowerPlaced)
+		end
+		PlaceTowerRetry(args, pos.X, entry.TowerPlaced, cost)
 
 	elseif entry.TowerUpgraded and entry.UpgradePath then
 		local axisValue = tonumber(entry.TowerUpgraded)
