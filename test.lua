@@ -10,6 +10,7 @@ local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 
 local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
 
+-- Danh sách tower định hướng
 local directionalTowerTypes = {
 	["Commander"] = { onlyAbilityIndex = 3 },
 	["Toxicnator"] = true,
@@ -21,27 +22,22 @@ local directionalTowerTypes = {
 	["Golden Mine Layer"] = true
 }
 
+-- Skip 2 tower đặc biệt
 local skipTowerTypes = {
 	["Helicopter"] = true,
-	["Cryo Helicopter"] = true
+	["Cryo Helicopter"] = true,
 }
 
+-- Gửi skill
 local function SendSkill(hash, index, pos)
 	if useFireServer then
-		if pos then
-			TowerUseAbilityRequest:FireServer(hash, index, pos)
-		else
-			TowerUseAbilityRequest:FireServer(hash, index)
-		end
+		TowerUseAbilityRequest:FireServer(hash, index, pos)
 	else
-		if pos then
-			TowerUseAbilityRequest:InvokeServer(hash, index, pos)
-		else
-			TowerUseAbilityRequest:InvokeServer(hash, index)
-		end
+		TowerUseAbilityRequest:InvokeServer(hash, index, pos)
 	end
 end
 
+-- Lấy enemy đầu tiên
 local function GetFirstEnemyPosition()
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
 		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
@@ -51,10 +47,11 @@ local function GetFirstEnemyPosition()
 	return nil
 end
 
+-- Lấy vị trí tower
 local function getTowerPos(tower)
 	if tower.GetPosition then
-		local ok, result = pcall(function() return tower:GetPosition() end)
-		if ok then return result end
+		local ok, pos = pcall(function() return tower:GetPosition() end)
+		if ok then return pos end
 	end
 	if tower.Model and tower.Model:FindFirstChild("Root") then
 		return tower.Model.Root.Position
@@ -62,28 +59,34 @@ local function getTowerPos(tower)
 	return nil
 end
 
+-- Lấy range
 local function getRange(tower)
-	local ok, result = pcall(function() return TowerClass.GetCurrentRange(tower) end)
-	if ok and typeof(result) == "number" then
-		return result
+	local ok, r = pcall(function() return TowerClass.GetCurrentRange(tower) end)
+	if ok and typeof(r) == "number" then
+		return r
 	elseif tower.Stats and tower.Stats.Radius then
 		return tower.Stats.Radius * 4
 	end
 	return 0
 end
 
+-- Kiểm tra enemy trong range
 local function hasEnemyInRange(tower)
 	local towerPos = getTowerPos(tower)
 	local range = getRange(tower)
 	if not towerPos or range <= 0 then return false end
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-		if enemy:IsA("BasePart") and (enemy.Position - towerPos).Magnitude <= range then
-			return true
+		if enemy:IsA("BasePart") then
+			local dist = (enemy.Position - towerPos).Magnitude
+			if dist <= range then
+				return true
+			end
 		end
 	end
 	return false
 end
 
+-- Lấy cấp nâng path 1,2
 local function GetCurrentUpgradeLevels(tower)
 	if not tower or not tower.LevelHandler then return 0, 0 end
 	local p1, p2 = 0, 0
@@ -92,22 +95,22 @@ local function GetCurrentUpgradeLevels(tower)
 	return p1, p2
 end
 
+-- Kiểm tra có thể dùng
 local function CanUseAbility(ability)
 	if not ability then return false end
-	if ability.Passive then return false end
-	if ability.CustomTriggered then return false end
+	if ability.Passive or ability.CustomTriggered then return false end
 	if ability.CooldownRemaining > 0 then return false end
-	if ability.Stunned then return false end
-	if ability.Disabled then return false end
-	if ability.Converted then return false end
+	if ability.Stunned or ability.Disabled or ability.Converted then return false end
 	local ok, can = pcall(function() return ability:CanUse(true) end)
 	return ok and can
 end
 
+-- Commander skill 1/2
 local function ShouldProcessNonDirectionalSkill(tower, index)
 	return tower.Type == "Commander" and index ~= 3
 end
 
+-- MAIN
 RunService.Heartbeat:Connect(function()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
 		if not tower or not tower.AbilityHandler then continue end
@@ -117,60 +120,55 @@ RunService.Heartbeat:Connect(function()
 		local directionalInfo = directionalTowerTypes[towerType]
 		local p1, p2 = GetCurrentUpgradeLevels(tower)
 
+		local range = getRange(tower)
+		local hasEnemy = hasEnemyInRange(tower)
+		local enemyPos = GetFirstEnemyPosition()
+
 		for index = 1, 3 do
 			pcall(function()
 				local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
 				if not CanUseAbility(ability) then return end
 
-				local allowUse = true
+				local allow = true
 
 				if towerType == "Ice Breaker" and index == 1 then
-					-- Free skill
+					-- Skill 1 tự do
+				elseif towerType == "Ice Breaker" and index ~= 1 then
+					if not hasEnemy then allow = false end
 				elseif towerType == "Slammer" then
-					if not hasEnemyInRange(tower) then
-						allowUse = false
-						warn("[Slammer] Không có enemy trong range")
-					end
+					if not hasEnemy then allow = false end
 				elseif towerType == "John" then
-					local range = getRange(tower)
 					if p1 >= 5 then
-						allowUse = hasEnemyInRange(tower)
+						allow = hasEnemy
 					elseif p2 >= 5 then
-						allowUse = hasEnemyInRange(tower) and range >= 4.5
+						allow = (range >= 4.5 and hasEnemy)
 					else
-						allowUse = hasEnemyInRange(tower) and range >= 4.5
+						allow = (range >= 4.5 and hasEnemy)
 					end
 				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
 					if p1 >= 4 and p1 <= 5 then
-						allowUse = hasEnemyInRange(tower)
+						allow = hasEnemy
 					elseif p2 >= 3 and p2 <= 5 then
-						allowUse = true
+						allow = true
 					else
-						allowUse = false
+						allow = false
 					end
 				end
 
-				if allowUse then
-					local enemyPos = GetFirstEnemyPosition()
-					local sendWithPos = false
-
+				if allow then
+					local sendPos = nil
 					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
 						if index == directionalInfo.onlyAbilityIndex then
-							sendWithPos = true
+							sendPos = enemyPos
 						elseif ShouldProcessNonDirectionalSkill(tower, index) then
-							sendWithPos = false
+							sendPos = nil
 						else
 							return
 						end
 					elseif directionalInfo then
-						sendWithPos = true
+						sendPos = enemyPos
 					end
-
-					if sendWithPos and enemyPos then
-						SendSkill(hash, index, enemyPos)
-					else
-						SendSkill(hash, index)
-					end
+					SendSkill(hash, index, sendPos)
 					task.wait(0.25)
 				end
 			end)
