@@ -10,7 +10,7 @@ local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 
 local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
 
--- ✅ Tower định hướng
+-- 🟥 Tower định hướng
 local directionalTowerTypes = {
 	["Commander"] = { onlyAbilityIndex = 3 },
 	["Toxicnator"] = true,
@@ -22,7 +22,13 @@ local directionalTowerTypes = {
 	["Golden Mine Layer"] = true
 }
 
--- ✅ Gửi skill
+-- ❌ Tower cần bỏ qua (không có kỹ năng hoặc phụ thuộc người chơi)
+local skipTowerTypes = {
+	["Helicopter"] = true,
+	["Cryo Helicopter"] = true
+}
+
+-- 📤 Gửi kỹ năng
 local function SendSkill(hash, index, pos)
 	if useFireServer then
 		TowerUseAbilityRequest:FireServer(hash, index, pos)
@@ -31,7 +37,7 @@ local function SendSkill(hash, index, pos)
 	end
 end
 
--- ✅ Lấy enemy gần nhất
+-- 🔍 Enemy gần nhất
 local function GetFirstEnemyPosition()
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
 		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
@@ -41,7 +47,7 @@ local function GetFirstEnemyPosition()
 	return nil
 end
 
--- ✅ Lấy vị trí tower
+-- 📌 Vị trí tower
 local function getTowerPos(tower)
 	if tower.GetPosition then
 		local ok, result = pcall(function() return tower:GetPosition() end)
@@ -53,7 +59,7 @@ local function getTowerPos(tower)
 	return nil
 end
 
--- ✅ Lấy range
+-- 📏 Lấy phạm vi tower
 local function getRange(tower)
 	local ok, result = pcall(function() return TowerClass.GetCurrentRange(tower) end)
 	if ok and typeof(result) == "number" then
@@ -64,7 +70,7 @@ local function getRange(tower)
 	return 0
 end
 
--- ✅ Kiểm tra enemy trong range
+-- 👁️‍🗨️ Có enemy trong phạm vi?
 local function hasEnemyInRange(tower)
 	local towerPos = getTowerPos(tower)
 	local range = getRange(tower)
@@ -77,7 +83,7 @@ local function hasEnemyInRange(tower)
 	return false
 end
 
--- ✅ Lấy cấp độ nâng cấp
+-- 📶 Lấy cấp độ path
 local function GetCurrentUpgradeLevels(tower)
 	if not tower or not tower.LevelHandler then return 0, 0 end
 	local p1, p2 = 0, 0
@@ -86,7 +92,7 @@ local function GetCurrentUpgradeLevels(tower)
 	return p1, p2
 end
 
--- ✅ Kiểm tra khả năng dùng skill
+-- ✅ Dùng được kỹ năng?
 local function CanUseAbility(ability)
 	if not ability then return false end
 	if ability.Passive or ability.CustomTriggered then return false end
@@ -95,15 +101,16 @@ local function CanUseAbility(ability)
 	return ok and can
 end
 
--- ✅ Commander skill 1,2 là thường
+-- Commander skill thường
 local function ShouldProcessNonDirectionalSkill(tower, index)
 	return tower.Type == "Commander" and index ~= 3
 end
 
--- 🔁 Main loop
+-- 🔁 Vòng lặp chính
 RunService.Heartbeat:Connect(function()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
 		if not tower or not tower.AbilityHandler then continue end
+		if skipTowerTypes[tower.Type] then continue end
 
 		local towerType = tower.Type
 		local directionalInfo = directionalTowerTypes[towerType]
@@ -115,54 +122,48 @@ RunService.Heartbeat:Connect(function()
 				if not CanUseAbility(ability) then return end
 
 				local allowUse = true
-				local enemyInRange = hasEnemyInRange(tower)
-				local range = getRange(tower)
 
-				-- 🎯 Logic đặc biệt
-				if towerType == "Ice Breaker" then
-					if index == 1 then
-						-- skill 1 tự do
-					else
-						if not enemyInRange then
-							allowUse = false
-							warn("[Ice Breaker] Skill " .. index .. " không có enemy trong range")
-						end
-					end
+				-- ⚙️ Điều kiện đặc biệt
+				if towerType == "Ice Breaker" and index == 1 then
+					-- skill 1 luôn dùng được
 				elseif towerType == "Slammer" then
-					if not enemyInRange then
-						allowUse = false
-						warn("[Slammer] Không có enemy trong range")
-					end
+					allowUse = hasEnemyInRange(tower)
 				elseif towerType == "John" then
+					local range = getRange(tower)
 					if p1 >= 5 then
-						allowUse = enemyInRange
+						allowUse = hasEnemyInRange(tower)
 					elseif p2 >= 5 then
-						allowUse = range >= 4.5 and enemyInRange
+						allowUse = range >= 4.5 and hasEnemyInRange(tower)
 					else
-						allowUse = range >= 4.5 and enemyInRange
+						allowUse = range >= 4.5 and hasEnemyInRange(tower)
 					end
 				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
 					if p1 >= 4 and p1 <= 5 then
-						allowUse = enemyInRange
+						allowUse = hasEnemyInRange(tower)
 					elseif p2 >= 3 and p2 <= 5 then
 						allowUse = true
 					else
 						allowUse = false
 					end
-				else
-					-- Các tower định hướng khác (trừ commander skill 1,2) cần enemy
-					if directionalInfo and not ShouldProcessNonDirectionalSkill(tower, index) and not enemyInRange then
-						allowUse = false
-					end
 				end
 
-				-- 📤 Kích hoạt skill nếu hợp lệ
 				if allowUse then
 					local pos = GetFirstEnemyPosition()
-					if not pos then return end
+					local sendWithPos = false
 
-					print("[Kích hoạt]", towerType, "→ Skill", index)
-					SendSkill(hash, index, pos)
+					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
+						if index == directionalInfo.onlyAbilityIndex then
+							sendWithPos = true
+						elseif ShouldProcessNonDirectionalSkill(tower, index) then
+							sendWithPos = false
+						else
+							return
+						end
+					elseif directionalInfo then
+						sendWithPos = true
+					end
+
+					SendSkill(hash, index, sendWithPos and pos or nil)
 					task.wait(0.25)
 				end
 			end)
