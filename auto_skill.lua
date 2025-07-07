@@ -33,6 +33,7 @@ local function SendSkill(hash, index, pos)
 	end
 end
 
+-- Lấy vị trí enemy đầu tiên hợp lệ (không phải Arrow)
 local function GetFirstEnemyPosition()
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
 		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
@@ -40,6 +41,19 @@ local function GetFirstEnemyPosition()
 		end
 	end
 	return nil
+end
+
+-- Kiểm tra có enemy hợp lệ trong range (không phải Arrow)
+local function hasEnemyInRange(tower, studsLimit)
+	local towerPos = getTowerPos(tower)
+	local range = studsLimit or getRange(tower)
+	if not towerPos or range <= 0 then return false end
+	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
+		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" and (enemy.Position - towerPos).Magnitude <= range then
+			return true
+		end
+	end
+	return false
 end
 
 local function getTowerPos(tower)
@@ -65,18 +79,6 @@ local function getRange(tower)
 		return tower.Stats.Radius * 4
 	end
 	return 0
-end
-
-local function hasEnemyInRange(tower, studsLimit)
-	local towerPos = getTowerPos(tower)
-	local range = studsLimit or getRange(tower)
-	if not towerPos or range <= 0 then return false end
-	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-		if enemy:IsA("BasePart") and (enemy.Position - towerPos).Magnitude <= range then
-			return true
-		end
-	end
-	return false
 end
 
 local function GetCurrentUpgradeLevels(tower)
@@ -118,6 +120,7 @@ RunService.Heartbeat:Connect(function()
 
 				local allowUse = true
 
+				-- Xử lý logic đặc biệt
 				if towerType == "Ice Breaker" then
 					if index == 1 then
 						allowUse = true
