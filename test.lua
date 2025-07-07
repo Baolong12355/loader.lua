@@ -1,184 +1,151 @@
--- PlayerScripts/GameClass/EnemyClass.lua
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Common = ReplicatedStorage:WaitForChild("TDX_Shared"):WaitForChild("Common")
-local ResourceManager = require(Common:WaitForChild("ResourceManager"))
-local EnemyUtilities = require(Common:WaitForChild("EnemyUtilities"))
+-- Phiên bản đã sửa lỗi 'attempt to call a string value'
+local PlayerService = game:GetService("Players")
+local LocalPlayer = PlayerService.LocalPlayer
+local RunService = game:GetService("RunService")
 
-local EnemyClass = {}
-EnemyClass.__index = EnemyClass
-
---[[
-Cấu trúc initData:
-[1] = hash,
-[2] = randomHash,
-[3] = enemyType,
-[4] = stealthFlag,
-[5] = stoppedFlag,
-[...]
-[24] = uniqueId
---]]
-
-function EnemyClass.new(initData)
-    local self = setmetatable({}, EnemyClass)
-    
-    -- Core Identification
-    self._id = initData[24] or game:GetService("HttpService"):GenerateGUID(false)
-    self._hash = assert(initData[1], "Missing enemy hash")
-    self._type = assert(initData[3], "Missing enemy type")
-    
-    -- Configuration
-    self._config = ResourceManager.GetEnemyConfig(self._type)
-    assert(self._config, "Config not found for "..self._type)
-    
-    -- Combat Systems
-    self.Health = self:InitializeHealthSystem(initData)
-    self.Bounty = self:InitializeBountySystem(initData)
-    self.Movement = self:InitializeMovementSystem(initData)
-    self.Attacks = self:InitializeAttackSystem()
-    
-    -- State Management
-    self._states = {
-        Alive = true,
-        Stunned = initData[13] or false,
-        Stealthed = initData[4] or false,
-        Invulnerable = initData[25] or false,
-        AirUnit = self._config.AirUnit
-    }
-    
-    -- Visual Representation
-    self._character = self:InitializeVisuals(initData)
-    
-    return self
+local function SafeRequire(moduleScript)
+    local success, module = pcall(require, moduleScript)
+    return success and module or nil
 end
 
-function EnemyClass:InitializeHealthSystem(initData)
-    return {
-        Current = initData[9] or self._config.BaseHealth,
-        Max = initData[10] or self._config.BaseHealth,
-        Armor = initData[14] or self._config.BaseArmor,
-        Shield = initData[15] or 0,
-        
-        GetPercent = function()
-            return math.floor((self.Health.Current / self.Health.Max) * 100)
-        end,
-        
-        TakeDamage = function(dmg, damageType)
-            if not self._states.Alive or self._states.Invulnerable then return end
-            
-            local reduction = self._config.DamageReductionTable[damageType] or 1.0
-            local finalDamage = dmg * reduction
-            
-            self.Health.Current = math.max(0, self.Health.Current - finalDamage)
-            
-            if self.Health.Current <= 0 then
-                self:Die()
+local function GetEnemyModule()
+    -- Kiểm tra nhiều vị trí có thể
+    local locations = {
+        LocalPlayer.PlayerScripts:FindFirstChild("GameClass") and LocalPlayer.PlayerScripts.GameClass.EnemyClass,
+        LocalPlayer.PlayerScripts:FindFirstChild("Game") and LocalPlayer.PlayerScripts.Game.EnemyClass,
+        ReplicatedStorage:FindFirstChild("TDX_Shared") and ReplicatedStorage.TDX_Shared.Common.EnemyClass
+    }
+    
+    for _, location in ipairs(locations) do
+        if location then
+            local module = SafeRequire(location)
+            if module then return module end
+        end
+    end
+    return nil
+end
+
+local EnemyClass = GetEnemyModule()
+if not EnemyClass then
+    warn("Không thể tìm thấy EnemyClass!")
+    return
+end
+
+-- Hàm giả lập để lấy enemies (thay thế bằng phương thức thực tế của game)
+local function GetLiveEnemies()
+    local enemies = {}
+    
+    -- Cách 1: Duyệt qua workspace (nếu game lưu enemy trong workspace)
+    if workspace:FindFirstChild("Enemies") then
+        for _, enemyModel in ipairs(workspace.Enemies:GetChildren()) do
+            if enemyModel:FindFirstChild("HumanoidRootPart") then
+                table.insert(enemies, {
+                    Model = enemyModel,
+                    Position = enemyModel.HumanoidRootPart.Position
+                })
             end
         end
-    }
+    end
+    
+    -- Cách 2: Dùng metatable hook (nâng cao)
+    -- ... (code hook sẽ phụ thuộc vào executor)
+    
+    return enemies
 end
 
-function EnemyClass:InitializeBountySystem(initData)
-    local base = self._config.BaseBounty or 0
-    local multiplier = initData[23] or 1
+local function CreateEnemyInfoDisplay(enemy)
+    -- Kiểm tra enemy hợp lệ
+    if not enemy or typeof(enemy) ~= "table" then return end
     
-    return {
-        Value = base * multiplier,
-        Display = function()
-            -- Hiển thị bounty khi enemy chết
-        end
+    -- Lấy thông tin cơ bản
+    local info = {
+        Type = enemy._type or "Unknown",
+        Health = "N/A",
+        MaxHealth = "N/A",
+        Position = Vector3.new(0,0,0),
+        Bounty = 0,
+        States = {}
     }
-end
-
-function EnemyClass:InitializeMovementSystem(initData)
-    return {
-        Speed = self._config.MoveSpeed * (initData[16] or 1),
-        Path = initData[8],
-        Position = initData[8] and initData[8][1] or Vector3.new(),
-        
-        Update = function(dt)
-            -- Logic di chuyển
-        end
-    }
-end
-
-function EnemyClass:InitializeAttackSystem()
-    if not self._config.HasAttack then return nil end
     
-    local attacks = {}
+    -- Lấy thông tin máu (nếu có)
+    if enemy.Health and typeof(enemy.Health.GetPercent) == "function" then
+        info.Health = enemy.Health.Current or "N/A"
+        info.MaxHealth = enemy.Health.Max or "N/A"
+        info.HealthPercent = enemy.Health:GetPercent() or 0
+    end
     
-    for i, config in ipairs(self._config.AttackData) do
-        attacks[i] = {
-            Type = config.IsProjectile and "PROJECTILE" or "MELEE",
-            Range = config.Range,
-            Damage = config.Damage,
-            Cooldown = config.ReloadTime,
-            LastUsed = 0
+    -- Lấy vị trí
+    if enemy.Movement and enemy.Movement.Position then
+        info.Position = enemy.Movement.Position
+    elseif enemy.Model and enemy.Model:FindFirstChild("HumanoidRootPart") then
+        info.Position = enemy.Model.HumanoidRootPart.Position
+    end
+    
+    -- Lấy trạng thái
+    if enemy._states then
+        info.States = {
+            Stunned = enemy._states.Stunned or false,
+            Stealthed = enemy._states.Stealthed or false,
+            Invulnerable = enemy._states.Invulnerable or false
         }
     end
     
-    return attacks
+    -- Lấy bounty (nếu có)
+    if enemy.Bounty and enemy.Bounty.Value then
+        info.Bounty = enemy.Bounty.Value
+    end
+    
+    return info
 end
 
-function EnemyClass:InitializeVisuals(initData)
-    -- Tạo model enemy trong workspace
-    local model = Instance.new("Model")
-    model.Name = self._type
-    model.Parent = workspace.Enemies
+local function UpdateEnemyTracker()
+    local enemies = GetLiveEnemies()
+    if not enemies then return end
     
-    -- Thêm các thành phần vật lý
-    local root = Instance.new("Part")
-    root.Name = "HumanoidRootPart"
-    root.Anchored = false
-    root.CanCollide = true
-    root.Parent = model
+    -- Xóa console cũ (nếu executor hỗ trợ)
+    if _G.clear then _G.clear() end
     
-    -- ... (Thêm các part khác)
+    print("=== ENEMY TRACKER ===")
+    print("Thời gian:", os.date("%X"))
+    print("Tổng số enemy:", #enemies)
+    print("-----------------------")
     
-    return {
-        Model = model,
-        Destroy = function()
-            model:Destroy()
-        end
-    }
-end
-
--- Core Methods
-function EnemyClass:Die()
-    if not self._states.Alive then return end
-    
-    self._states.Alive = false
-    self.Bounty.Display()
-    self._character.Destroy()
-    
-    -- Gửi sự kiện đến server
-    game:GetService("ReplicatedStorage").Remotes.EnemyDied:FireServer(self._hash)
-end
-
-function EnemyClass:Update(dt)
-    if not self._states.Alive then return end
-    
-    self.Movement.Update(dt)
-    
-    -- Cập nhật thời gian hồi chiêu
-    if self.Attacks then
-        for _, attack in pairs(self.Attacks) do
-            attack.LastUsed = attack.LastUsed + dt
+    for i, enemy in ipairs(enemies) do
+        local info = CreateEnemyInfoDisplay(enemy)
+        if info then
+            local statusFlags = ""
+            if info.States.Stunned then statusFlags = statusFlags.."STUN " end
+            if info.States.Stealthed then statusFlags = statusFlags.."STEALTH " end
+            if info.States.Invulnerable then statusFlags = statusFlags.."INVUL " end
+            
+            print(string.format("[%d] %s", i, info.Type))
+            print(string.format("HP: %s/%s (%d%%)", 
+                tostring(info.Health), 
+                tostring(info.MaxHealth), 
+                info.HealthPercent))
+            print("Bounty:", info.Bounty)
+            print("Position:", info.Position)
+            print("Status:", statusFlags)
+            print("-----------------------")
         end
     end
 end
 
--- API Methods
-function EnemyClass:GetInfo()
-    return {
-        ID = self._id,
-        Type = self._type,
-        Health = self.Health.Current,
-        MaxHealth = self.Health.Max,
-        HealthPercent = self.Health.GetPercent(),
-        Bounty = self.Bounty.Value,
-        Position = self.Movement.Position,
-        States = table.clone(self._states)
-    }
+-- Tạo UI đồ họa (tùy chọn)
+local function CreateVisualTracker()
+    -- Code tạo ESP box, health bar...
+    -- Phụ thuộc vào executor cụ thể
 end
 
-return EnemyClass
+-- Main loop
+CreateVisualTracker()
+local trackerLoop = RunService.Heartbeat:Connect(function()
+    UpdateEnemyTracker()
+    wait(3) -- Làm mới mỗi 3 giây
+end)
+
+-- Tắt tracker khi không cần
+_G.StopEnemyTracker = function()
+    trackerLoop:Disconnect()
+    print("Đã tắt Enemy Tracker")
+end
