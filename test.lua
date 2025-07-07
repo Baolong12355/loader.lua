@@ -25,6 +25,14 @@ local skipTowerTypes = {
 	["Cryo Helicopter"] = true
 }
 
+local specialDelayTowers = {
+	["Ice Breaker"] = true,
+	["Slammer"] = true,
+	["John"] = true,
+	["Mobster"] = true,
+	["Golden Mobster"] = true
+}
+
 local function SendSkill(hash, index, pos)
 	if useFireServer then
 		TowerUseAbilityRequest:FireServer(hash, index, pos)
@@ -97,7 +105,7 @@ end
 
 RunService.Heartbeat:Connect(function()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
-		task.spawn(function() -- tách mỗi tower xử lý riêng, tránh nghẽn toàn bộ
+		task.spawn(function()
 			if not tower or not tower.AbilityHandler then return end
 
 			local towerType = tower.Type
@@ -113,6 +121,7 @@ RunService.Heartbeat:Connect(function()
 
 					local allowUse = true
 
+					-- xử lý riêng
 					if towerType == "Ice Breaker" then
 						if index == 1 then
 							allowUse = true
@@ -163,7 +172,12 @@ RunService.Heartbeat:Connect(function()
 							SendSkill(hash, index)
 						end
 
-						task.wait(0.05) -- delay riêng cho mỗi tower
+						-- delay theo từng loại
+						if specialDelayTowers[towerType] then
+							task.wait(0.1)
+						else
+							task.wait(0.05)
+						end
 					end
 				end)
 			end
