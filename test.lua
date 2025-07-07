@@ -44,9 +44,7 @@ end
 
 local function getTowerPos(tower)
 	if tower.GetPosition then
-		local ok, result = pcall(function()
-			return tower:GetPosition()
-		end)
+		local ok, result = pcall(function() return tower:GetPosition() end)
 		if ok then return result end
 	end
 	if tower.Model and tower.Model:FindFirstChild("Root") then
@@ -56,9 +54,7 @@ local function getTowerPos(tower)
 end
 
 local function getRange(tower)
-	local ok, result = pcall(function()
-		return TowerClass.GetCurrentRange(tower)
-	end)
+	local ok, result = pcall(function() return TowerClass.GetCurrentRange(tower) end)
 	if ok and typeof(result) == "number" then
 		return result
 	elseif tower.Stats and tower.Stats.Radius then
@@ -91,9 +87,7 @@ local function CanUseAbility(ability)
 	if not ability then return false end
 	if ability.Passive or ability.CustomTriggered or ability.Stunned or ability.Disabled or ability.Converted then return false end
 	if ability.CooldownRemaining > 0 then return false end
-	local ok, usable = pcall(function()
-		return ability:CanUse(true)
-	end)
+	local ok, usable = pcall(function() return ability:CanUse(true) end)
 	return ok and usable
 end
 
@@ -103,74 +97,76 @@ end
 
 RunService.Heartbeat:Connect(function()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
-		if not tower or not tower.AbilityHandler then continue end
+		task.spawn(function() -- tách mỗi tower xử lý riêng, tránh nghẽn toàn bộ
+			if not tower or not tower.AbilityHandler then return end
 
-		local towerType = tower.Type
-		if skipTowerTypes[towerType] then continue end
+			local towerType = tower.Type
+			if skipTowerTypes[towerType] then return end
 
-		local directionalInfo = directionalTowerTypes[towerType]
-		local p1, p2 = GetCurrentUpgradeLevels(tower)
+			local directionalInfo = directionalTowerTypes[towerType]
+			local p1, p2 = GetCurrentUpgradeLevels(tower)
 
-		for index = 1, 3 do
-			pcall(function()
-				local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-				if not CanUseAbility(ability) then return end
+			for index = 1, 3 do
+				pcall(function()
+					local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
+					if not CanUseAbility(ability) then return end
 
-				local allowUse = true
+					local allowUse = true
 
-				if towerType == "Ice Breaker" then
-					if index == 1 then
-						allowUse = true
-					elseif index == 2 then
-						allowUse = hasEnemyInRange(tower, 8)
-					else
-						allowUse = false
-					end
-				elseif towerType == "Slammer" then
-					allowUse = hasEnemyInRange(tower)
-				elseif towerType == "John" then
-					if p1 >= 5 then
-						allowUse = hasEnemyInRange(tower)
-					elseif p2 >= 5 then
-						allowUse = hasEnemyInRange(tower, 4.5)
-					else
-						allowUse = hasEnemyInRange(tower, 4.5)
-					end
-				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
-					if p1 >= 4 and p1 <= 5 then
-						allowUse = hasEnemyInRange(tower)
-					elseif p2 >= 3 and p2 <= 5 then
-						allowUse = true
-					else
-						allowUse = false
-					end
-				end
-
-				if allowUse then
-					local pos = GetFirstEnemyPosition()
-					local sendWithPos = false
-
-					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
-						if index == directionalInfo.onlyAbilityIndex then
-							sendWithPos = true
-						elseif ShouldProcessNonDirectionalSkill(tower, index) then
-							sendWithPos = false
+					if towerType == "Ice Breaker" then
+						if index == 1 then
+							allowUse = true
+						elseif index == 2 then
+							allowUse = hasEnemyInRange(tower, 8)
 						else
-							return
+							allowUse = false
 						end
-					elseif directionalInfo then
-						sendWithPos = true
+					elseif towerType == "Slammer" then
+						allowUse = hasEnemyInRange(tower)
+					elseif towerType == "John" then
+						if p1 >= 5 then
+							allowUse = hasEnemyInRange(tower)
+						elseif p2 >= 5 then
+							allowUse = hasEnemyInRange(tower, 4.5)
+						else
+							allowUse = hasEnemyInRange(tower, 4.5)
+						end
+					elseif towerType == "Mobster" or towerType == "Golden Mobster" then
+						if p1 >= 4 and p1 <= 5 then
+							allowUse = hasEnemyInRange(tower)
+						elseif p2 >= 3 and p2 <= 5 then
+							allowUse = true
+						else
+							allowUse = false
+						end
 					end
 
-					if sendWithPos and pos then
-						SendSkill(hash, index, pos)
-					elseif not sendWithPos then
-						SendSkill(hash, index)
-					end
+					if allowUse then
+						local pos = GetFirstEnemyPosition()
+						local sendWithPos = false
 
-					task.wait(0.25)
-				end
-			end)
-		end
+						if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
+							if index == directionalInfo.onlyAbilityIndex then
+								sendWithPos = true
+							elseif ShouldProcessNonDirectionalSkill(tower, index) then
+								sendWithPos = false
+							else
+								return
+							end
+						elseif directionalInfo then
+							sendWithPos = true
+						end
+
+						if sendWithPos and pos then
+							SendSkill(hash, index, pos)
+						elseif not sendWithPos then
+							SendSkill(hash, index)
+						end
+
+						task.wait(0.1) -- delay riêng cho mỗi tower
+					end
+				end)
+			end
+		end)
 	end
 end)
