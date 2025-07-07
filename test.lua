@@ -3,9 +3,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
+
 local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
 local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
 local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
+
 local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
 
 local directionalTowerTypes = {
@@ -19,11 +21,24 @@ local directionalTowerTypes = {
 	["Golden Mine Layer"] = true
 }
 
+local skipTowerTypes = {
+	["Helicopter"] = true,
+	["Cryo Helicopter"] = true
+}
+
 local function SendSkill(hash, index, pos)
 	if useFireServer then
-		TowerUseAbilityRequest:FireServer(hash, index, pos)
+		if pos then
+			TowerUseAbilityRequest:FireServer(hash, index, pos)
+		else
+			TowerUseAbilityRequest:FireServer(hash, index)
+		end
 	else
-		TowerUseAbilityRequest:InvokeServer(hash, index, pos)
+		if pos then
+			TowerUseAbilityRequest:InvokeServer(hash, index, pos)
+		else
+			TowerUseAbilityRequest:InvokeServer(hash, index)
+		end
 	end
 end
 
@@ -82,33 +97,21 @@ local function CanUseAbility(ability)
 	if ability.Passive then return false end
 	if ability.CustomTriggered then return false end
 	if ability.CooldownRemaining > 0 then return false end
-	if ability.Stunned or ability.Disabled or ability.Converted then return false end
-	local ok, usable = pcall(function() return ability:CanUse(true) end)
-	return ok and usable
+	if ability.Stunned then return false end
+	if ability.Disabled then return false end
+	if ability.Converted then return false end
+	local ok, can = pcall(function() return ability:CanUse(true) end)
+	return ok and can
 end
 
 local function ShouldProcessNonDirectionalSkill(tower, index)
 	return tower.Type == "Commander" and index ~= 3
 end
 
-local function TowerHasSkill(tower)
-	if not tower or not tower.AbilityHandler then return false end
-	for i = 1, 3 do
-		local ok, ability = pcall(function()
-			return tower.AbilityHandler:GetAbilityFromIndex(i)
-		end)
-		if ok and CanUseAbility(ability) then
-			return true
-		end
-	end
-	return false
-end
-
 RunService.Heartbeat:Connect(function()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
 		if not tower or not tower.AbilityHandler then continue end
-		if tower.Type == "Helicopter" or tower.Type == "Cryo Helicopter" then continue end
-		if not TowerHasSkill(tower) then continue end
+		if skipTowerTypes[tower.Type] then continue end
 
 		local towerType = tower.Type
 		local directionalInfo = directionalTowerTypes[towerType]
@@ -121,22 +124,21 @@ RunService.Heartbeat:Connect(function()
 
 				local allowUse = true
 
-				if towerType == "Ice Breaker" then
-					if index == 1 then
-						allowUse = true
-					else
-						allowUse = hasEnemyInRange(tower)
-					end
+				if towerType == "Ice Breaker" and index == 1 then
+					-- Free skill
 				elseif towerType == "Slammer" then
-					allowUse = hasEnemyInRange(tower)
+					if not hasEnemyInRange(tower) then
+						allowUse = false
+						warn("[Slammer] Không có enemy trong range")
+					end
 				elseif towerType == "John" then
 					local range = getRange(tower)
 					if p1 >= 5 then
 						allowUse = hasEnemyInRange(tower)
 					elseif p2 >= 5 then
-						allowUse = range >= 4.5 and hasEnemyInRange(tower)
+						allowUse = hasEnemyInRange(tower) and range >= 4.5
 					else
-						allowUse = range >= 4.5 and hasEnemyInRange(tower)
+						allowUse = hasEnemyInRange(tower) and range >= 4.5
 					end
 				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
 					if p1 >= 4 and p1 <= 5 then
@@ -149,7 +151,7 @@ RunService.Heartbeat:Connect(function()
 				end
 
 				if allowUse then
-					local pos = GetFirstEnemyPosition()
+					local enemyPos = GetFirstEnemyPosition()
 					local sendWithPos = false
 
 					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
@@ -164,10 +166,8 @@ RunService.Heartbeat:Connect(function()
 						sendWithPos = true
 					end
 
-					if sendWithPos then
-						if pos then
-							SendSkill(hash, index, pos)
-						end
+					if sendWithPos and enemyPos then
+						SendSkill(hash, index, enemyPos)
 					else
 						SendSkill(hash, index)
 					end
