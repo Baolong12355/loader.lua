@@ -112,19 +112,20 @@ RunService.Heartbeat:Connect(function()
 
 				local allowUse = true
 
-				-- ✅ xử lý riêng Ice Breaker
+				-- xử lý riêng
 				if towerType == "Ice Breaker" then
 					if index == 1 then
-						allowUse = true -- luôn dùng skill 1
+						allowUse = true
 					elseif index == 2 then
-						allowUse = hasEnemyInRange(tower, 8) -- skill 2: trong 8 studs
+						allowUse = hasEnemyInRange(tower, 8)
+						if not allowUse then
+							warn("[Ice Breaker] Không có enemy trong 8 studs - skill 2 bị chặn")
+						end
 					else
-						allowUse = false -- các skill khác không xử lý
+						allowUse = false
 					end
-
 				elseif towerType == "Slammer" then
 					allowUse = hasEnemyInRange(tower)
-
 				elseif towerType == "John" then
 					if p1 >= 5 then
 						allowUse = hasEnemyInRange(tower)
@@ -133,7 +134,6 @@ RunService.Heartbeat:Connect(function()
 					else
 						allowUse = hasEnemyInRange(tower, 4.5)
 					end
-
 				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
 					if p1 >= 4 and p1 <= 5 then
 						allowUse = hasEnemyInRange(tower)
@@ -160,11 +160,9 @@ RunService.Heartbeat:Connect(function()
 						sendWithPos = true
 					end
 
-					if sendWithPos then
-						if pos then
-							SendSkill(hash, index, pos)
-						end
-					else
+					if sendWithPos and pos then
+						SendSkill(hash, index, pos)
+					elseif not sendWithPos then
 						SendSkill(hash, index)
 					end
 
