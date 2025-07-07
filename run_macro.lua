@@ -112,11 +112,12 @@ RunService.Heartbeat:Connect(function()
 
 				local allowUse = true
 
-				-- xử lý riêng
 				if towerType == "Ice Breaker" then
 					if index == 1 then
+						-- skill 1: tự do
 						allowUse = true
 					else
+						-- skill 2 & 3: cần enemy trong 8 studs
 						allowUse = hasEnemyInRange(tower, 8)
 					end
 				elseif towerType == "Slammer" then
@@ -155,13 +156,7 @@ RunService.Heartbeat:Connect(function()
 						sendWithPos = true
 					end
 
-					if sendWithPos then
-						if pos then
-							SendSkill(hash, index, pos)
-						end
-					else
-						SendSkill(hash, index)
-					end
+					SendSkill(hash, index, sendWithPos and pos or nil)
 					task.wait(0.25)
 				end
 			end)
