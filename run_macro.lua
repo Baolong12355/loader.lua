@@ -9,6 +9,7 @@ local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitFor
 local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
 
+-- Tower định hướng
 local directionalTowerTypes = {
 	["Commander"] = { onlyAbilityIndex = 3 },
 	["Toxicnator"] = true,
@@ -20,11 +21,13 @@ local directionalTowerTypes = {
 	["Golden Mine Layer"] = true
 }
 
+-- Tower bỏ qua do không có skill
 local skipTowerTypes = {
 	["Helicopter"] = true,
 	["Cryo Helicopter"] = true
 }
 
+-- Gửi skill
 local function SendSkill(hash, index, pos)
 	if useFireServer then
 		TowerUseAbilityRequest:FireServer(hash, index, pos)
@@ -33,6 +36,7 @@ local function SendSkill(hash, index, pos)
 	end
 end
 
+-- Enemy gần nhất
 local function GetFirstEnemyPosition()
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
 		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
@@ -85,20 +89,17 @@ end
 
 local function CanUseAbility(ability)
 	if not ability then return false end
-	if ability.Passive then return false end
-	if ability.CustomTriggered then return false end
+	if ability.Passive or ability.CustomTriggered or ability.Stunned or ability.Disabled or ability.Converted then return false end
 	if ability.CooldownRemaining > 0 then return false end
-	if ability.Stunned then return false end
-	if ability.Disabled then return false end
-	if ability.Converted then return false end
-	local ok, can = pcall(function() return ability:CanUse(true) end)
-	return ok and can
+	local ok, usable = pcall(function() return ability:CanUse(true) end)
+	return ok and usable
 end
 
 local function ShouldProcessNonDirectionalSkill(tower, index)
 	return tower.Type == "Commander" and index ~= 3
 end
 
+-- 🔁 Loop chính
 RunService.Heartbeat:Connect(function()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
 		if not tower or not tower.AbilityHandler then continue end
@@ -116,14 +117,37 @@ RunService.Heartbeat:Connect(function()
 
 				local allowUse = true
 
+				-- Logic đặc biệt
 				if towerType == "Ice Breaker" then
 					if index == 1 then
 						allowUse = true
 					else
 						allowUse = hasEnemyInRange(tower, 8)
-						if not allowUse then
-							print("[🧊 Ice Breaker] Không có enemy trong 8 studs → Không dùng skill", index)
-						end
+						if not allowUse then warn("[Ice Breaker] Không có enemy trong 8 studs (skill " .. index .. ")") end
+					end
+				elseif towerType == "Slammer" then
+					allowUse = hasEnemyInRange(tower)
+					if not allowUse then warn("[Slammer] Không có enemy trong range") end
+				elseif towerType == "John" then
+					local studsCheck = false
+					if p1 >= 5 then
+						allowUse = hasEnemyInRange(tower)
+					elseif p2 >= 5 then
+						studsCheck = true
+					else
+						studsCheck = true
+					end
+					if studsCheck then
+						allowUse = hasEnemyInRange(tower, 4.5)
+						if not allowUse then warn("[John] Không có enemy trong 4.5 studs") end
+					end
+				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
+					if p1 >= 4 and p1 <= 5 then
+						allowUse = hasEnemyInRange(tower)
+					elseif p2 >= 3 and p2 <= 5 then
+						allowUse = true
+					else
+						allowUse = false
 					end
 				end
 
@@ -145,11 +169,11 @@ RunService.Heartbeat:Connect(function()
 
 					if sendWithPos then
 						if enemyPos then
-							print("[🎯 Dùng skill định hướng]", towerType, "→", index)
+							print("[🎯 Skill định hướng]", towerType, "→", index)
 							SendSkill(hash, index, enemyPos)
 						end
 					else
-						print("[⚡ Dùng skill thường]", towerType, "→", index)
+						print("[⚡ Skill thường]", towerType, "→", index)
 						SendSkill(hash, index)
 					end
 					task.wait(0.25)
