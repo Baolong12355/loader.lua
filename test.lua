@@ -3,11 +3,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
-
 local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
 local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
 local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
-
 local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
 
 local directionalTowerTypes = {
@@ -109,6 +107,7 @@ end
 RunService.Heartbeat:Connect(function()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
 		if not tower or not tower.AbilityHandler then continue end
+		if tower.Type == "Helicopter" or tower.Type == "Cryo Helicopter" then continue end
 		if not TowerHasSkill(tower) then continue end
 
 		local towerType = tower.Type
@@ -124,7 +123,7 @@ RunService.Heartbeat:Connect(function()
 
 				if towerType == "Ice Breaker" then
 					if index == 1 then
-						allowUse = true -- skill 1 luôn dùng được
+						allowUse = true
 					else
 						allowUse = hasEnemyInRange(tower)
 					end
@@ -150,7 +149,7 @@ RunService.Heartbeat:Connect(function()
 				end
 
 				if allowUse then
-					local enemyPos = GetFirstEnemyPosition()
+					local pos = GetFirstEnemyPosition()
 					local sendWithPos = false
 
 					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
@@ -166,8 +165,8 @@ RunService.Heartbeat:Connect(function()
 					end
 
 					if sendWithPos then
-						if enemyPos then
-							SendSkill(hash, index, enemyPos)
+						if pos then
+							SendSkill(hash, index, pos)
 						end
 					else
 						SendSkill(hash, index)
