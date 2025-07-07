@@ -1,3 +1,5 @@
+-- 📦 Auto Skill Debug - Ice Breaker (debug riêng Ice Breaker)
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -8,22 +10,6 @@ local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerCla
 local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
 local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
-
-local directionalTowerTypes = {
-	["Commander"] = { onlyAbilityIndex = 3 },
-	["Toxicnator"] = true,
-	["Ghost"] = true,
-	["Ice Breaker"] = true,
-	["Mobster"] = true,
-	["Golden Mobster"] = true,
-	["Artillery"] = true,
-	["Golden Mine Layer"] = true
-}
-
-local skipTowerTypes = {
-	["Helicopter"] = true,
-	["Cryo Helicopter"] = true
-}
 
 local function SendSkill(hash, index, pos)
 	if useFireServer then
@@ -53,34 +39,19 @@ local function getTowerPos(tower)
 	return nil
 end
 
-local function getRange(tower)
-	local ok, result = pcall(function() return TowerClass.GetCurrentRange(tower) end)
-	if ok and typeof(result) == "number" then
-		return result
-	elseif tower.Stats and tower.Stats.Radius then
-		return tower.Stats.Radius * 4
-	end
-	return 0
-end
-
-local function hasEnemyInRange(tower, studsLimit)
-	local towerPos = getTowerPos(tower)
-	local range = studsLimit or getRange(tower)
-	if not towerPos or range <= 0 then return false end
+local function hasEnemyInStuds(tower, studsLimit)
+	local pos = getTowerPos(tower)
+	if not pos then return false end
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-		if enemy:IsA("BasePart") and (enemy.Position - towerPos).Magnitude <= range then
-			return true
+		if enemy:IsA("BasePart") then
+			local dist = (enemy.Position - pos).Magnitude
+			if dist <= studsLimit then
+				print(string.format("[🎯 Ice Breaker] Enemy phát hiện ở %.2f studs (<= %.2f)", dist, studsLimit))
+				return true
+			end
 		end
 	end
 	return false
-end
-
-local function GetCurrentUpgradeLevels(tower)
-	if not tower or not tower.LevelHandler then return 0, 0 end
-	local p1, p2 = 0, 0
-	pcall(function() p1 = tower.LevelHandler:GetLevelOnPath(1) or 0 end)
-	pcall(function() p2 = tower.LevelHandler:GetLevelOnPath(2) or 0 end)
-	return p1, p2
 end
 
 local function CanUseAbility(ability)
@@ -91,81 +62,35 @@ local function CanUseAbility(ability)
 	return ok and usable
 end
 
-local function ShouldProcessNonDirectionalSkill(tower, index)
-	return tower.Type == "Commander" and index ~= 3
-end
-
+-- 🔁 Main chỉ xử lý Ice Breaker
 RunService.Heartbeat:Connect(function()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
 		if not tower or not tower.AbilityHandler then continue end
-
-		local towerType = tower.Type
-		if skipTowerTypes[towerType] then continue end
-
-		local directionalInfo = directionalTowerTypes[towerType]
-		local p1, p2 = GetCurrentUpgradeLevels(tower)
+		if tower.Type ~= "Ice Breaker" then continue end
 
 		for index = 1, 3 do
 			pcall(function()
 				local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
 				if not CanUseAbility(ability) then return end
 
-				local allowUse = true
-
-				-- xử lý riêng
-				if towerType == "Ice Breaker" then
-					if index == 1 then
-						allowUse = true
-					elseif index == 2 then
-						allowUse = hasEnemyInRange(tower, 8)
-						if not allowUse then
-							warn("[Ice Breaker] Không có enemy trong 8 studs - skill 2 bị chặn")
-						end
+				local allowUse = false
+				if index == 1 then
+					allowUse = true
+					print("[⚡ Ice Breaker] Skill 1 luôn dùng được")
+				elseif index == 2 then
+					allowUse = hasEnemyInStuds(tower, 8)
+					if not allowUse then
+						warn("[⛔ Ice Breaker] Không có enemy trong 8 studs → KHÔNG dùng Skill 2")
 					else
-						allowUse = false
+						print("[⚡ Ice Breaker] Skill 2 được dùng vì enemy trong 8 studs")
 					end
-				elseif towerType == "Slammer" then
-					allowUse = hasEnemyInRange(tower)
-				elseif towerType == "John" then
-					if p1 >= 5 then
-						allowUse = hasEnemyInRange(tower)
-					elseif p2 >= 5 then
-						allowUse = hasEnemyInRange(tower, 4.5)
-					else
-						allowUse = hasEnemyInRange(tower, 4.5)
-					end
-				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
-					if p1 >= 4 and p1 <= 5 then
-						allowUse = hasEnemyInRange(tower)
-					elseif p2 >= 3 and p2 <= 5 then
-						allowUse = true
-					else
-						allowUse = false
-					end
+				else
+					warn("[⛔ Ice Breaker] Skill", index, "không được hỗ trợ hoặc bị tắt")
 				end
 
 				if allowUse then
 					local pos = GetFirstEnemyPosition()
-					local sendWithPos = false
-
-					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
-						if index == directionalInfo.onlyAbilityIndex then
-							sendWithPos = true
-						elseif ShouldProcessNonDirectionalSkill(tower, index) then
-							sendWithPos = false
-						else
-							return
-						end
-					elseif directionalInfo then
-						sendWithPos = true
-					end
-
-					if sendWithPos and pos then
-						SendSkill(hash, index, pos)
-					elseif not sendWithPos then
-						SendSkill(hash, index)
-					end
-
+					SendSkill(hash, index, pos)
 					task.wait(0.25)
 				end
 			end)
