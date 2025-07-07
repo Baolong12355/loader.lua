@@ -44,7 +44,9 @@ end
 
 local function getTowerPos(tower)
 	if tower.GetPosition then
-		local ok, result = pcall(function() return tower:GetPosition() end)
+		local ok, result = pcall(function()
+			return tower:GetPosition()
+		end)
 		if ok then return result end
 	end
 	if tower.Model and tower.Model:FindFirstChild("Root") then
@@ -54,7 +56,9 @@ local function getTowerPos(tower)
 end
 
 local function getRange(tower)
-	local ok, result = pcall(function() return TowerClass.GetCurrentRange(tower) end)
+	local ok, result = pcall(function()
+		return TowerClass.GetCurrentRange(tower)
+	end)
 	if ok and typeof(result) == "number" then
 		return result
 	elseif tower.Stats and tower.Stats.Radius then
@@ -87,7 +91,9 @@ local function CanUseAbility(ability)
 	if not ability then return false end
 	if ability.Passive or ability.CustomTriggered or ability.Stunned or ability.Disabled or ability.Converted then return false end
 	if ability.CooldownRemaining > 0 then return false end
-	local ok, usable = pcall(function() return ability:CanUse(true) end)
+	local ok, usable = pcall(function()
+		return ability:CanUse(true)
+	end)
 	return ok and usable
 end
 
@@ -112,15 +118,11 @@ RunService.Heartbeat:Connect(function()
 
 				local allowUse = true
 
-				-- xử lý riêng
 				if towerType == "Ice Breaker" then
 					if index == 1 then
 						allowUse = true
 					elseif index == 2 then
 						allowUse = hasEnemyInRange(tower, 8)
-						if not allowUse then
-							warn("[Ice Breaker] Không có enemy trong 8 studs - skill 2 bị chặn")
-						end
 					else
 						allowUse = false
 					end
