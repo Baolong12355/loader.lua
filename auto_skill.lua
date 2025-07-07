@@ -33,7 +33,7 @@ local function SendSkill(hash, index, pos)
 	end
 end
 
--- Lấy vị trí enemy đầu tiên hợp lệ (không phải Arrow)
+-- lấy vị trí enemy đầu tiên hợp lệ
 local function GetFirstEnemyPosition()
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
 		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
@@ -43,7 +43,7 @@ local function GetFirstEnemyPosition()
 	return nil
 end
 
--- Kiểm tra có enemy hợp lệ trong range (không phải Arrow)
+-- kiểm tra có enemy hợp lệ trong range
 local function hasEnemyInRange(tower, studsLimit)
 	local towerPos = getTowerPos(tower)
 	local range = studsLimit or getRange(tower)
@@ -58,9 +58,7 @@ end
 
 local function getTowerPos(tower)
 	if tower.GetPosition then
-		local ok, result = pcall(function()
-			return tower:GetPosition()
-		end)
+		local ok, result = pcall(function() return tower:GetPosition() end)
 		if ok then return result end
 	end
 	if tower.Model and tower.Model:FindFirstChild("Root") then
@@ -93,9 +91,7 @@ local function CanUseAbility(ability)
 	if not ability then return false end
 	if ability.Passive or ability.CustomTriggered or ability.Stunned or ability.Disabled or ability.Converted then return false end
 	if ability.CooldownRemaining > 0 then return false end
-	local ok, usable = pcall(function()
-		return ability:CanUse(true)
-	end)
+	local ok, usable = pcall(function() return ability:CanUse(true) end)
 	return ok and usable
 end
 
@@ -120,7 +116,7 @@ RunService.Heartbeat:Connect(function()
 
 				local allowUse = true
 
-				-- Xử lý logic đặc biệt
+				-- logic đặc biệt
 				if towerType == "Ice Breaker" then
 					if index == 1 then
 						allowUse = true
@@ -165,9 +161,10 @@ RunService.Heartbeat:Connect(function()
 						sendWithPos = true
 					end
 
-					if sendWithPos and pos then
+					-- luôn gửi skill, nếu cần vị trí thì có, không thì game sẽ bỏ qua
+					if sendWithPos then
 						SendSkill(hash, index, pos)
-					elseif not sendWithPos then
+					else
 						SendSkill(hash, index)
 					end
 
