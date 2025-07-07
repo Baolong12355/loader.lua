@@ -7,7 +7,6 @@ local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
 local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
 local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
 local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
-
 local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
 
 local directionalTowerTypes = {
@@ -64,9 +63,9 @@ local function getRange(tower)
 	return 0
 end
 
-local function hasEnemyInRange(tower)
+local function hasEnemyInRange(tower, studsLimit)
 	local towerPos = getTowerPos(tower)
-	local range = getRange(tower)
+	local range = studsLimit or getRange(tower)
 	if not towerPos or range <= 0 then return false end
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
 		if enemy:IsA("BasePart") and (enemy.Position - towerPos).Magnitude <= range then
@@ -86,14 +85,10 @@ end
 
 local function CanUseAbility(ability)
 	if not ability then return false end
-	if ability.Passive then return false end
-	if ability.CustomTriggered then return false end
+	if ability.Passive or ability.CustomTriggered or ability.Stunned or ability.Disabled or ability.Converted then return false end
 	if ability.CooldownRemaining > 0 then return false end
-	if ability.Stunned then return false end
-	if ability.Disabled then return false end
-	if ability.Converted then return false end
-	local ok, can = pcall(function() return ability:CanUse(true) end)
-	return ok and can
+	local ok, usable = pcall(function() return ability:CanUse(true) end)
+	return ok and usable
 end
 
 local function ShouldProcessNonDirectionalSkill(tower, index)
@@ -103,9 +98,10 @@ end
 RunService.Heartbeat:Connect(function()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
 		if not tower or not tower.AbilityHandler then continue end
-		if skipTowerTypes[tower.Type] then continue end
 
 		local towerType = tower.Type
+		if skipTowerTypes[towerType] then continue end
+
 		local directionalInfo = directionalTowerTypes[towerType]
 		local p1, p2 = GetCurrentUpgradeLevels(tower)
 
@@ -116,31 +112,27 @@ RunService.Heartbeat:Connect(function()
 
 				local allowUse = true
 
-				if towerType == "Ice Breaker" and index == 1 then
-					-- free
+				-- xử lý riêng
+				if towerType == "Ice Breaker" then
+					if index == 1 then
+						allowUse = true
+					elseif index == 2 then
+						allowUse = hasEnemyInRange(tower, 8)
+						if not allowUse then
+							warn("[Ice Breaker] Không có enemy trong 8 studs - skill 2 bị chặn")
+						end
+					else
+						allowUse = false
+					end
 				elseif towerType == "Slammer" then
 					allowUse = hasEnemyInRange(tower)
 				elseif towerType == "John" then
-					local towerPos = getTowerPos(tower)
-					if not towerPos then return end
-
-					local enemyIn45 = false
-					for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-						if enemy:IsA("BasePart") then
-							local dist = (enemy.Position - towerPos).Magnitude
-							if dist <= 4.5 then
-								enemyIn45 = true
-								break
-							end
-						end
-					end
-
 					if p1 >= 5 then
 						allowUse = hasEnemyInRange(tower)
 					elseif p2 >= 5 then
-						allowUse = enemyIn45
+						allowUse = hasEnemyInRange(tower, 4.5)
 					else
-						allowUse = enemyIn45
+						allowUse = hasEnemyInRange(tower, 4.5)
 					end
 				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
 					if p1 >= 4 and p1 <= 5 then
@@ -170,9 +162,10 @@ RunService.Heartbeat:Connect(function()
 
 					if sendWithPos and pos then
 						SendSkill(hash, index, pos)
-					else
+					elseif not sendWithPos then
 						SendSkill(hash, index)
 					end
+
 					task.wait(0.25)
 				end
 			end)
