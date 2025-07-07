@@ -25,13 +25,16 @@ local skipTowerTypes = {
 	["Cryo Helicopter"] = true
 }
 
-local specialDelayTowers = {
+-- Các tower đặc biệt cần xử lý nhanh hơn
+local fastTowers = {
 	["Ice Breaker"] = true,
-	["Slammer"] = true,
 	["John"] = true,
+	["Slammer"] = true,
 	["Mobster"] = true,
 	["Golden Mobster"] = true
 }
+
+local lastUsedTime = {}
 
 local function SendSkill(hash, index, pos)
 	if useFireServer then
@@ -104,83 +107,80 @@ local function ShouldProcessNonDirectionalSkill(tower, index)
 end
 
 RunService.Heartbeat:Connect(function()
+	local now = tick()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
-		task.spawn(function()
-			if not tower or not tower.AbilityHandler then return end
+		if not tower or not tower.AbilityHandler then continue end
 
-			local towerType = tower.Type
-			if skipTowerTypes[towerType] then return end
+		local towerType = tower.Type
+		if skipTowerTypes[towerType] then continue end
 
-			local directionalInfo = directionalTowerTypes[towerType]
-			local p1, p2 = GetCurrentUpgradeLevels(tower)
+		local delay = fastTowers[towerType] and 0.1 or 0.2
+		if lastUsedTime[hash] and now - lastUsedTime[hash] < delay then
+			continue
+		end
+		lastUsedTime[hash] = now
 
-			for index = 1, 3 do
-				pcall(function()
-					local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-					if not CanUseAbility(ability) then return end
+		local directionalInfo = directionalTowerTypes[towerType]
+		local p1, p2 = GetCurrentUpgradeLevels(tower)
 
-					local allowUse = true
+		for index = 1, 3 do
+			pcall(function()
+				local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
+				if not CanUseAbility(ability) then return end
 
-					-- xử lý riêng
-					if towerType == "Ice Breaker" then
-						if index == 1 then
-							allowUse = true
-						elseif index == 2 then
-							allowUse = hasEnemyInRange(tower, 8)
-						else
-							allowUse = false
-						end
-					elseif towerType == "Slammer" then
+				local allowUse = true
+
+				if towerType == "Ice Breaker" then
+					if index == 1 then
+						allowUse = true
+					elseif index == 2 then
+						allowUse = hasEnemyInRange(tower, 8)
+					else
+						allowUse = false
+					end
+				elseif towerType == "Slammer" then
+					allowUse = hasEnemyInRange(tower)
+				elseif towerType == "John" then
+					if p1 >= 5 then
 						allowUse = hasEnemyInRange(tower)
-					elseif towerType == "John" then
-						if p1 >= 5 then
-							allowUse = hasEnemyInRange(tower)
-						elseif p2 >= 5 then
-							allowUse = hasEnemyInRange(tower, 4.5)
-						else
-							allowUse = hasEnemyInRange(tower, 4.5)
-						end
-					elseif towerType == "Mobster" or towerType == "Golden Mobster" then
-						if p1 >= 4 and p1 <= 5 then
-							allowUse = hasEnemyInRange(tower)
-						elseif p2 >= 3 and p2 <= 5 then
-							allowUse = true
-						else
-							allowUse = false
-						end
+					elseif p2 >= 5 then
+						allowUse = hasEnemyInRange(tower, 4.5)
+					else
+						allowUse = hasEnemyInRange(tower, 4.5)
 					end
+				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
+					if p1 >= 4 and p1 <= 5 then
+						allowUse = hasEnemyInRange(tower)
+					elseif p2 >= 3 and p2 <= 5 then
+						allowUse = true
+					else
+						allowUse = false
+					end
+				end
 
-					if allowUse then
-						local pos = GetFirstEnemyPosition()
-						local sendWithPos = false
+				if allowUse then
+					local pos = GetFirstEnemyPosition()
+					local sendWithPos = false
 
-						if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
-							if index == directionalInfo.onlyAbilityIndex then
-								sendWithPos = true
-							elseif ShouldProcessNonDirectionalSkill(tower, index) then
-								sendWithPos = false
-							else
-								return
-							end
-						elseif directionalInfo then
+					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
+						if index == directionalInfo.onlyAbilityIndex then
 							sendWithPos = true
-						end
-
-						if sendWithPos and pos then
-							SendSkill(hash, index, pos)
-						elseif not sendWithPos then
-							SendSkill(hash, index)
-						end
-
-						-- delay theo từng loại
-						if specialDelayTowers[towerType] then
-							task.wait(0.05)
+						elseif ShouldProcessNonDirectionalSkill(tower, index) then
+							sendWithPos = false
 						else
-							task.wait(0.05)
+							return
 						end
+					elseif directionalInfo then
+						sendWithPos = true
 					end
-				end)
-			end
-		end)
+
+					if sendWithPos and pos then
+						SendSkill(hash, index, pos)
+					elseif not sendWithPos then
+						SendSkill(hash, index)
+					end
+				end
+			end)
+		end
 	end
 end)
