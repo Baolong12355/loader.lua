@@ -1,191 +1,184 @@
--- Script này yêu cầu executor hỗ trợ các hàm cơ bản
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local RunService = game:GetService("RunService")
+-- PlayerScripts/GameClass/EnemyClass.lua
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Common = ReplicatedStorage:WaitForChild("TDX_Shared"):WaitForChild("Common")
+local ResourceManager = require(Common:WaitForChild("ResourceManager"))
+local EnemyUtilities = require(Common:WaitForChild("EnemyUtilities"))
 
--- =============================================
--- PHẦN KHAI BÁO VÀ TIỆN ÍCH
--- =============================================
+local EnemyClass = {}
+EnemyClass.__index = EnemyClass
 
--- Hàm tìm module enemy trong game
-local function findEnemyModule()
-    -- Thử các vị trí thường chứa module enemy
-    local locations = {
-        game:GetService("ReplicatedStorage"):FindFirstChild("TDX_Shared") and game:GetService("ReplicatedStorage").TDX_Shared.Common.EnemyClass,
-        game:GetService("ReplicatedStorage"):FindFirstChild("Common") and game:GetService("ReplicatedStorage").Common.EnemyClass,
-        LocalPlayer.PlayerScripts:FindFirstChild("Game") and LocalPlayer.PlayerScripts.Game.EnemyClass
+--[[
+Cấu trúc initData:
+[1] = hash,
+[2] = randomHash,
+[3] = enemyType,
+[4] = stealthFlag,
+[5] = stoppedFlag,
+[...]
+[24] = uniqueId
+--]]
+
+function EnemyClass.new(initData)
+    local self = setmetatable({}, EnemyClass)
+    
+    -- Core Identification
+    self._id = initData[24] or game:GetService("HttpService"):GenerateGUID(false)
+    self._hash = assert(initData[1], "Missing enemy hash")
+    self._type = assert(initData[3], "Missing enemy type")
+    
+    -- Configuration
+    self._config = ResourceManager.GetEnemyConfig(self._type)
+    assert(self._config, "Config not found for "..self._type)
+    
+    -- Combat Systems
+    self.Health = self:InitializeHealthSystem(initData)
+    self.Bounty = self:InitializeBountySystem(initData)
+    self.Movement = self:InitializeMovementSystem(initData)
+    self.Attacks = self:InitializeAttackSystem()
+    
+    -- State Management
+    self._states = {
+        Alive = true,
+        Stunned = initData[13] or false,
+        Stealthed = initData[4] or false,
+        Invulnerable = initData[25] or false,
+        AirUnit = self._config.AirUnit
     }
     
-    for _, location in ipairs(locations) do
-        if location then
-            local success, module = pcall(require, location)
-            if success then
-                return module
-            end
-        end
-    end
+    -- Visual Representation
+    self._character = self:InitializeVisuals(initData)
     
-    warn("Không tìm thấy module EnemyClass!")
-    return nil
+    return self
 end
 
--- Hàm tạo bảng thông tin enemy
-local function createEnemyInfoTable(enemy)
-    if not enemy or not enemy.IsAlive then return nil end
-    
-    local info = {
-        -- Thông tin cơ bản
-        Type = enemy.Type or "Unknown",
-        DisplayName = enemy.DisplayName or enemy.Type or "Unknown",
-        UniqueId = enemy.UniqueId or "N/A",
-        Class = enemy.IsBoss and "BOSS" or enemy.IsMiniBoss and "MINIBOSS" or "NORMAL",
+function EnemyClass:InitializeHealthSystem(initData)
+    return {
+        Current = initData[9] or self._config.BaseHealth,
+        Max = initData[10] or self._config.BaseHealth,
+        Armor = initData[14] or self._config.BaseArmor,
+        Shield = initData[15] or 0,
         
-        -- Thông tin HP
-        Health = "N/A",
-        MaxHealth = "N/A",
-        HealthPercent = 0,
-        Armor = "N/A",
-        Shield = "N/A",
+        GetPercent = function()
+            return math.floor((self.Health.Current / self.Health.Max) * 100)
+        end,
         
-        -- Thông tin vị trí
-        Position = Vector3.new(0, 0, 0),
-        Distance = 0,
-        
-        -- Thông tin combat
-        Bounty = "N/A",
-        DamageMultiplier = enemy.DamageMultiplier or 1,
-        SpeedMultiplier = enemy.SpeedMultiplier or 1,
-        
-        -- Trạng thái
-        IsStunned = enemy.Stunned or false,
-        IsStealthed = enemy.Stealth or false,
-        IsInvulnerable = enemy.Invulnerable or false,
-        IsAirUnit = enemy.IsAirUnit or false,
-        
-        -- Thông tin tấn công
-        AttackRange = "N/A",
-        AttackDamage = "N/A",
-        AttackSpeed = "N/A"
-    }
-    
-    -- Lấy thông tin HP
-    if enemy.HealthHandler then
-        info.Health = enemy.HealthHandler:GetCurrentHealth() or "N/A"
-        info.MaxHealth = enemy.HealthHandler:GetMaxHealth() or "N/A"
-        info.HealthPercent = math.floor((info.Health / info.MaxHealth) * 100)
-        info.Armor = enemy.HealthHandler:GetArmor() or 0
-        info.Shield = enemy.HealthHandler:GetShield() or 0
-    end
-    
-    -- Lấy thông tin vị trí
-    if enemy.GetPosition and typeof(enemy.GetPosition) == "function" then
-        info.Position = enemy:GetPosition()
-        local char = LocalPlayer.Character
-        if char and char:FindFirstChild("HumanoidRootPart") then
-            info.Distance = (char.HumanoidRootPart.Position - info.Position).Magnitude
-        end
-    end
-    
-    -- Lấy thông tin bounty
-    if enemy.BountyDisplayHandler and enemy.BountyDisplayHandler.GetBounty then
-        info.Bounty = enemy.BountyDisplayHandler:GetBounty() or 0
-    end
-    
-    -- Lấy thông tin tấn công
-    if enemy.AttackClientDataTable then
-        for _, attackData in pairs(enemy.AttackClientDataTable) do
-            info.AttackRange = attackData.Range or "N/A"
-            info.AttackDamage = attackData.Damage or "N/A"
-            info.AttackSpeed = attackData.ReloadTime and (1 / attackData.ReloadTime) or "N/A"
-            break -- Chỉ lấy thông tin từ attack đầu tiên
-        end
-    end
-    
-    return info
-end
-
--- =============================================
--- PHẦN HIỂN THỊ THÔNG TIN
--- =============================================
-
-local EnemyModule = findEnemyModule()
-if not EnemyModule then
-    warn("Không thể khởi chạy script do không tìm thấy module enemy!")
-    return
-end
-
--- Tạo UI để hiển thị thông tin
-local function createTrackerUI()
-    -- Code tạo UI sẽ phụ thuộc vào executor bạn sử dụng
-    -- Đây là phần giả lập UI cơ bản
-    print("===== ENEMY TRACKER INITIALIZED =====")
-end
-
--- Hàm cập nhật thông tin enemy
-local function updateEnemyInfo()
-    local enemies = EnemyModule.GetEnemies()
-    local enemyCount = 0
-    local bossCount = 0
-    
-    -- Làm mới console
-    if _G.clear then _G.clear() end
-    
-    print("=== REAL-TIME ENEMY TRACKER ===")
-    print(string.format("Thời gian: %s", os.date("%X")))
-    print("--------------------------------")
-    
-    for hash, enemy in pairs(enemies) do
-        local info = createEnemyInfoTable(enemy)
-        if info then
-            enemyCount = enemyCount + 1
-            if info.Class ~= "NORMAL" then
-                bossCount = bossCount + 1
-            end
+        TakeDamage = function(dmg, damageType)
+            if not self._states.Alive or self._states.Invulnerable then return end
             
-            -- Hiển thị thông tin
-            print(string.format("[%s] %s (ID: %s)", info.Class, info.DisplayName, info.UniqueId))
-            print(string.format("  HP: %d/%d (%d%%) | Armor: %d | Shield: %d", 
-                info.Health, info.MaxHealth, info.HealthPercent, info.Armor, info.Shield))
-            print(string.format("  Vị trí: (%.1f, %.1f, %.1f) | Khoảng cách: %.1f studs", 
-                info.Position.X, info.Position.Y, info.Position.Z, info.Distance))
-            print(string.format("  Bounty: %d | Nhân sát thương: %.1fx | Tốc độ: %.1fx", 
-                info.Bounty, info.DamageMultiplier, info.SpeedMultiplier))
-            print(string.format("  Trạng thái: %s%s%s%s", 
-                info.IsStunned and "STUN " or "",
-                info.IsStealthed and "STEALTH " or "",
-                info.IsInvulnerable and "INVUL " or "",
-                info.IsAirUnit and "AIR" or "GROUND"))
-            print(string.format("  Tấn công: DMG %s | Tầm %s | Tốc độ %.1f/s", 
-                info.AttackDamage, info.AttackRange, info.AttackSpeed))
-            print("--------------------------------")
+            local reduction = self._config.DamageReductionTable[damageType] or 1.0
+            local finalDamage = dmg * reduction
+            
+            self.Health.Current = math.max(0, self.Health.Current - finalDamage)
+            
+            if self.Health.Current <= 0 then
+                self:Die()
+            end
         end
-    end
-    
-    print(string.format("TỔNG: %d enemy (%d boss/miniboss)", enemyCount, bossCount))
-    print("===== NHẤN F5 ĐỂ LÀM MỚI =====")
+    }
 end
 
--- =============================================
--- PHẦN CHẠY CHÍNH
--- =============================================
+function EnemyClass:InitializeBountySystem(initData)
+    local base = self._config.BaseBounty or 0
+    local multiplier = initData[23] or 1
+    
+    return {
+        Value = base * multiplier,
+        Display = function()
+            -- Hiển thị bounty khi enemy chết
+        end
+    }
+end
 
-createTrackerUI()
+function EnemyClass:InitializeMovementSystem(initData)
+    return {
+        Speed = self._config.MoveSpeed * (initData[16] or 1),
+        Path = initData[8],
+        Position = initData[8] and initData[8][1] or Vector3.new(),
+        
+        Update = function(dt)
+            -- Logic di chuyển
+        end
+    }
+end
 
--- Tùy chọn 1: Làm mới thủ công bằng phím F5
-local UIS = game:GetService("UserInputService")
-UIS.InputBegan:Connect(function(input, gameProcessed)
-    if input.KeyCode == Enum.KeyCode.F5 then
-        updateEnemyInfo()
+function EnemyClass:InitializeAttackSystem()
+    if not self._config.HasAttack then return nil end
+    
+    local attacks = {}
+    
+    for i, config in ipairs(self._config.AttackData) do
+        attacks[i] = {
+            Type = config.IsProjectile and "PROJECTILE" or "MELEE",
+            Range = config.Range,
+            Damage = config.Damage,
+            Cooldown = config.ReloadTime,
+            LastUsed = 0
+        }
     end
-end)
+    
+    return attacks
+end
 
--- Tùy chọn 2: Làm mới tự động mỗi 3 giây
-_G.autoRefresh = true
-spawn(function()
-    while _G.autoRefresh and wait(3) do
-        updateEnemyInfo()
+function EnemyClass:InitializeVisuals(initData)
+    -- Tạo model enemy trong workspace
+    local model = Instance.new("Model")
+    model.Name = self._type
+    model.Parent = workspace.Enemies
+    
+    -- Thêm các thành phần vật lý
+    local root = Instance.new("Part")
+    root.Name = "HumanoidRootPart"
+    root.Anchored = false
+    root.CanCollide = true
+    root.Parent = model
+    
+    -- ... (Thêm các part khác)
+    
+    return {
+        Model = model,
+        Destroy = function()
+            model:Destroy()
+        end
+    }
+end
+
+-- Core Methods
+function EnemyClass:Die()
+    if not self._states.Alive then return end
+    
+    self._states.Alive = false
+    self.Bounty.Display()
+    self._character.Destroy()
+    
+    -- Gửi sự kiện đến server
+    game:GetService("ReplicatedStorage").Remotes.EnemyDied:FireServer(self._hash)
+end
+
+function EnemyClass:Update(dt)
+    if not self._states.Alive then return end
+    
+    self.Movement.Update(dt)
+    
+    -- Cập nhật thời gian hồi chiêu
+    if self.Attacks then
+        for _, attack in pairs(self.Attacks) do
+            attack.LastUsed = attack.LastUsed + dt
+        end
     end
-end)
+end
 
--- Chạy lần đầu
-updateEnemyInfo()
+-- API Methods
+function EnemyClass:GetInfo()
+    return {
+        ID = self._id,
+        Type = self._type,
+        Health = self.Health.Current,
+        MaxHealth = self.Health.Max,
+        HealthPercent = self.Health.GetPercent(),
+        Bounty = self.Bounty.Value,
+        Position = self.Movement.Position,
+        States = table.clone(self._states)
+    }
+end
+
+return EnemyClass
