@@ -10,7 +10,6 @@ local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 
 local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
 
--- 🟥 Tower định hướng
 local directionalTowerTypes = {
 	["Commander"] = { onlyAbilityIndex = 3 },
 	["Toxicnator"] = true,
@@ -22,13 +21,6 @@ local directionalTowerTypes = {
 	["Golden Mine Layer"] = true
 }
 
--- ❌ Tower cần bỏ qua (không có kỹ năng hoặc phụ thuộc người chơi)
-local skipTowerTypes = {
-	["Helicopter"] = true,
-	["Cryo Helicopter"] = true
-}
-
--- 📤 Gửi kỹ năng
 local function SendSkill(hash, index, pos)
 	if useFireServer then
 		TowerUseAbilityRequest:FireServer(hash, index, pos)
@@ -37,7 +29,6 @@ local function SendSkill(hash, index, pos)
 	end
 end
 
--- 🔍 Enemy gần nhất
 local function GetFirstEnemyPosition()
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
 		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
@@ -47,7 +38,6 @@ local function GetFirstEnemyPosition()
 	return nil
 end
 
--- 📌 Vị trí tower
 local function getTowerPos(tower)
 	if tower.GetPosition then
 		local ok, result = pcall(function() return tower:GetPosition() end)
@@ -59,7 +49,6 @@ local function getTowerPos(tower)
 	return nil
 end
 
--- 📏 Lấy phạm vi tower
 local function getRange(tower)
 	local ok, result = pcall(function() return TowerClass.GetCurrentRange(tower) end)
 	if ok and typeof(result) == "number" then
@@ -70,7 +59,6 @@ local function getRange(tower)
 	return 0
 end
 
--- 👁️‍🗨️ Có enemy trong phạm vi?
 local function hasEnemyInRange(tower)
 	local towerPos = getTowerPos(tower)
 	local range = getRange(tower)
@@ -83,7 +71,6 @@ local function hasEnemyInRange(tower)
 	return false
 end
 
--- 📶 Lấy cấp độ path
 local function GetCurrentUpgradeLevels(tower)
 	if not tower or not tower.LevelHandler then return 0, 0 end
 	local p1, p2 = 0, 0
@@ -92,25 +79,37 @@ local function GetCurrentUpgradeLevels(tower)
 	return p1, p2
 end
 
--- ✅ Dùng được kỹ năng?
 local function CanUseAbility(ability)
 	if not ability then return false end
-	if ability.Passive or ability.CustomTriggered then return false end
-	if ability.CooldownRemaining > 0 or ability.Stunned or ability.Disabled or ability.Converted then return false end
-	local ok, can = pcall(function() return ability:CanUse(true) end)
-	return ok and can
+	if ability.Passive then return false end
+	if ability.CustomTriggered then return false end
+	if ability.CooldownRemaining > 0 then return false end
+	if ability.Stunned or ability.Disabled or ability.Converted then return false end
+	local ok, usable = pcall(function() return ability:CanUse(true) end)
+	return ok and usable
 end
 
--- Commander skill thường
 local function ShouldProcessNonDirectionalSkill(tower, index)
 	return tower.Type == "Commander" and index ~= 3
 end
 
--- 🔁 Vòng lặp chính
+local function TowerHasSkill(tower)
+	if not tower or not tower.AbilityHandler then return false end
+	for i = 1, 3 do
+		local ok, ability = pcall(function()
+			return tower.AbilityHandler:GetAbilityFromIndex(i)
+		end)
+		if ok and CanUseAbility(ability) then
+			return true
+		end
+	end
+	return false
+end
+
 RunService.Heartbeat:Connect(function()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
 		if not tower or not tower.AbilityHandler then continue end
-		if skipTowerTypes[tower.Type] then continue end
+		if not TowerHasSkill(tower) then continue end
 
 		local towerType = tower.Type
 		local directionalInfo = directionalTowerTypes[towerType]
@@ -123,9 +122,12 @@ RunService.Heartbeat:Connect(function()
 
 				local allowUse = true
 
-				-- ⚙️ Điều kiện đặc biệt
-				if towerType == "Ice Breaker" and index == 1 then
-					-- skill 1 luôn dùng được
+				if towerType == "Ice Breaker" then
+					if index == 1 then
+						allowUse = true -- skill 1 luôn dùng được
+					else
+						allowUse = hasEnemyInRange(tower)
+					end
 				elseif towerType == "Slammer" then
 					allowUse = hasEnemyInRange(tower)
 				elseif towerType == "John" then
@@ -148,7 +150,7 @@ RunService.Heartbeat:Connect(function()
 				end
 
 				if allowUse then
-					local pos = GetFirstEnemyPosition()
+					local enemyPos = GetFirstEnemyPosition()
 					local sendWithPos = false
 
 					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
@@ -163,7 +165,13 @@ RunService.Heartbeat:Connect(function()
 						sendWithPos = true
 					end
 
-					SendSkill(hash, index, sendWithPos and pos or nil)
+					if sendWithPos then
+						if enemyPos then
+							SendSkill(hash, index, enemyPos)
+						end
+					else
+						SendSkill(hash, index)
+					end
 					task.wait(0.25)
 				end
 			end)
