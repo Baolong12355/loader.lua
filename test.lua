@@ -163,7 +163,7 @@ RunService.Heartbeat:Connect(function()
 							SendSkill(hash, index)
 						end
 
-						task.wait(0.1) -- delay riêng cho mỗi tower
+						task.wait(0.05) -- delay riêng cho mỗi tower
 					end
 				end)
 			end
