@@ -10,17 +10,30 @@ local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 
 local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
 
-local directionalTowerTypes = {
-    ["Commander"] = { onlyAbilityIndex = 3 },
-    ["Toxicnator"] = true,
-    ["Ghost"] = true,
-    ["Ice Breaker"] = true,
-    ["Mobster"] = true,
-    ["Golden Mobster"] = true,
-    ["Artillery"] = true,
-    ["Golden Mine Layer"] = true
+-- 🟨 Các tower bị bỏ qua
+local skipTowerTypes = {
+    ["Farm"] = true, ["Relic"] = true, ["Scarecrow"] = true,
+    ["Helicopter"] = true, ["Cryo Helicopter"] = true,
+    ["Combat Drone"] = true, ["AA Turret"] = true, ["XWM Turret"] = true,
+    ["Barracks"] = true, ["Cryo Blaster"] = true, ["Grenadier"] = true,
+    ["Juggernaut"] = true, ["Machine Gunner"] = true, ["Zed"] = true,
+    ["Troll Tower"] = true, ["Missile Trooper"] = true, ["Patrol Boat"] = true,
+    ["Railgunner"] = true, ["Mine Layer"] = true, ["Sentry"] = true,
+    ["Commander"] = true, -- xử lý riêng
+    ["Toxicnator"] = true, ["Ghost"] = true, ["Ice Breaker"] = true,
+    ["Mobster"] = true, ["Golden Mobster"] = true, ["Artillery"] = true,
+    ["EDJ"] = false, ["Accelerator"] = true, ["Engineer"] = true
 }
 
+-- 🟥 Tower định hướng
+local directionalTowerTypes = {
+    ["Commander"] = { onlyAbilityIndex = 3 },
+    ["Toxicnator"] = true, ["Ghost"] = true, ["Ice Breaker"] = true,
+    ["Mobster"] = true, ["Golden Mobster"] = true,
+    ["Artillery"] = true, ["Golden Mine Layer"] = true
+}
+
+-- ✅ Hàm phụ trợ
 local function GetFirstEnemyPosition()
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
 		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
@@ -42,9 +55,7 @@ local function getTowerPos(tower)
 end
 
 local function getRange(tower)
-	local ok, result = pcall(function()
-		return TowerClass.GetCurrentRange(tower)
-	end)
+	local ok, result = pcall(function() return TowerClass.GetCurrentRange(tower) end)
 	if ok and typeof(result) == "number" then
 		return result
 	elseif tower.Stats and tower.Stats.Radius then
@@ -67,34 +78,35 @@ end
 
 local function GetCurrentUpgradeLevels(tower)
 	if not tower or not tower.LevelHandler then return 0, 0 end
-	local p1 = 0
-	local p2 = 0
-	pcall(function()
-		p1 = tower.LevelHandler:GetLevelOnPath(1) or 0
-	end)
-	pcall(function()
-		p2 = tower.LevelHandler:GetLevelOnPath(2) or 0
-	end)
+	local p1, p2 = 0, 0
+	pcall(function() p1 = tower.LevelHandler:GetLevelOnPath(1) or 0 end)
+	pcall(function() p2 = tower.LevelHandler:GetLevelOnPath(2) or 0 end)
 	return p1, p2
 end
 
 local function CanUseAbility(ability)
-	return ability and
-		not ability.Passive and
-		not ability.CustomTriggered and
-		ability.CooldownRemaining <= 0 and
-		not ability.Stunned and
-		not ability.Disabled and
-		not ability.Converted and
-		ability:CanUse(true)
+	return ability and not ability.Passive and not ability.CustomTriggered
+		and ability.CooldownRemaining <= 0 and not ability.Stunned
+		and not ability.Disabled and not ability.Converted and ability:CanUse(true)
 end
 
--- 🔁 Main loop
+-- ✅ Skill thường cho commander
+local function ShouldProcessNonDirectionalSkill(tower, abilityIndex)
+	return tower.Type == "Commander" and abilityIndex ~= 3
+		and tower.HealthHandler and tower.HealthHandler:GetHealth() > 0
+		and tower.AbilityHandler
+end
+
+-- 🔁 Loop chính
 RunService.Heartbeat:Connect(function()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
 		local towerType = tower.Type
 		local directionalInfo = directionalTowerTypes[towerType]
 		local p1, p2 = GetCurrentUpgradeLevels(tower)
+
+		if skipTowerTypes[towerType] and towerType ~= "Commander" then
+			continue
+		end
 
 		for abilityIndex = 1, 3 do
 			pcall(function()
@@ -106,48 +118,58 @@ RunService.Heartbeat:Connect(function()
 				if towerType == "Ice Breaker" and abilityIndex == 1 then
 					print("[✔️ Ice Breaker] skill 1 dùng tự do")
 				elseif towerType == "Slammer" then
-					if not hasEnemyInRange(tower) then
-						print("[⛔ Slammer] Không có enemy trong range")
-						allowUse = false
-					end
+					allowUse = hasEnemyInRange(tower)
+					if not allowUse then print("[⛔ Slammer] Không có enemy trong range") end
 				elseif towerType == "John" then
 					if p1 >= 5 then
 						allowUse = hasEnemyInRange(tower)
-						print("[🔍 John] Path1:", p1, " | In range:", allowUse)
 					elseif p2 >= 5 then
 						local r = getRange(tower)
 						allowUse = (r >= 4.5 and hasEnemyInRange(tower))
-						print("[🔍 John] Path2:", p2, " | Range:", r, " | Use:", allowUse)
 					else
 						local r = getRange(tower)
 						allowUse = (r >= 4.5 and hasEnemyInRange(tower))
-						print("[🔍 John] Thấp hơn cấp | Range:", r, " | Use:", allowUse)
 					end
+					print("[John] P1:", p1, "| P2:", p2, "| Use:", allowUse)
 				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
 					if p1 >= 4 and p1 <= 5 then
 						allowUse = hasEnemyInRange(tower)
-						print("[🔫 " .. towerType .. "] Path1:", p1, " | In range:", allowUse)
+						print("[🔫 "..towerType.."] P1:", p1, "InRange:", allowUse)
 					elseif p2 >= 3 and p2 <= 5 then
-						print("[🎯 " .. towerType .. "] Path2:", p2, " | Xử lý skill định hướng")
 						allowUse = true
+						print("[🎯 "..towerType.."] P2:", p2, "Skill định hướng")
 					else
-						print("[❌ " .. towerType .. "] Không đạt điều kiện path")
 						allowUse = false
+						print("[❌ "..towerType.."] Không đủ điều kiện path")
 					end
 				end
 
 				if allowUse then
-					if directionalInfo then
-						local pos = GetFirstEnemyPosition()
-						if pos then
-							print("[🔥 Dùng skill định hướng] Tower:", towerType, " | Skill:", abilityIndex)
-							TowerUseAbilityRequest:FireServer(hash, abilityIndex, pos)
+					local enemyPos = GetFirstEnemyPosition()
+
+					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
+						if abilityIndex == directionalInfo.onlyAbilityIndex then
+							if enemyPos then
+								print("[🎯 Commander] dùng skill 3 định hướng")
+								TowerUseAbilityRequest:FireServer(hash, abilityIndex, enemyPos)
+								task.wait(0.25)
+							end
+						elseif ShouldProcessNonDirectionalSkill(tower, abilityIndex) then
+							print("[🧱 Commander] skill thường được xử lý")
+							TowerUseAbilityRequest:FireServer(hash, abilityIndex)
+							task.wait(0.25)
+						end
+					elseif directionalInfo then
+						if enemyPos then
+							print("[🔥 "..towerType.."] skill định hướng:", abilityIndex)
+							TowerUseAbilityRequest:FireServer(hash, abilityIndex, enemyPos)
+							task.wait(0.25)
 						end
 					else
-						print("[⚡ Dùng skill thường] Tower:", towerType, " | Skill:", abilityIndex)
+						print("[⚡ "..towerType.."] skill thường:", abilityIndex)
 						TowerUseAbilityRequest:FireServer(hash, abilityIndex)
+						task.wait(0.25)
 					end
-					task.wait(0.25)
 				end
 			end)
 		end
