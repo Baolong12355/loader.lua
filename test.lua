@@ -164,6 +164,9 @@ if makefolder then
     pcall(function() makefolder("tdx/macros") end)
 end
 
+-- đánh dấu đã in console
+local printedOnce = false
+
 while true do
     if isfile(txtFile) then
         local macro = readfile(txtFile)
@@ -203,9 +206,6 @@ while true do
                                 UpgradePath = pathNum,
                                 TowerUpgraded = pos.x
                             })
-                            print(string.format("✅ Ghi nâng: X=%.2f | Path=%d | %d ➜ %d", pos.x, pathNum, before, after))
-                        else
-                            print(string.format("❌ Bỏ nâng (không tăng cấp): X=%.2f | Path=%d", pos and pos.x or 0, pathNum))
                         end
                     end
 
@@ -238,7 +238,10 @@ while true do
         end
 
         writefile(outJson, HttpService:JSONEncode(logs))
-        print("✅ Ghi file xong vào:", outJson)
+        if not printedOnce then
+            print("✅ Ghi file xong vào:", outJson)
+            printedOnce = true
+        end
     end
     wait(0.22)
 end
