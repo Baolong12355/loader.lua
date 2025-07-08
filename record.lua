@@ -1,14 +1,14 @@
 local startTime = time()
 local offset = 0
-local fileName = "record.txt"  -- <--- ĐẶT TÊN FILE CỐ ĐỊNH Ở ĐÂY
+local fileName = "record.txt"
 
--- Nếu file đã tồn tại thì xóa để tạo mới
+-- Xóa file cũ nếu có
 if isfile(fileName) then
     delfile(fileName)
 end
 writefile(fileName, "")
 
--- Hàm serialize giá trị
+-- Serialize giá trị
 local function serialize(value)
     if type(value) == "table" then
         local result = "{"
@@ -24,7 +24,7 @@ local function serialize(value)
     end
 end
 
--- Hàm serialize tất cả argument
+-- Serialize toàn bộ argument
 local function serializeArgs(...)
     local args = {...}
     local output = {}
@@ -34,11 +34,9 @@ local function serializeArgs(...)
     return table.concat(output, ", ")
 end
 
--- Hàm log thao tác vào file
+-- Ghi log vào file
 local function log(method, self, serializedArgs)
     local name = tostring(self.Name)
-    local text = name .. " " .. serializedArgs .. "\n"
-    print(text)
 
     if name == "PlaceTower" then
         appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
@@ -46,6 +44,48 @@ local function log(method, self, serializedArgs)
         startTime = time() - offset
 
     elseif name == "SellTower" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
+
+    elseif name == "TowerUpgradeRequest" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:upgradeTower(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
+
+    elseif name == "ChangeQueryType" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
+    end
+end
+
+-- Hook FireServer
+local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+    local args = serializeArgs(...)
+    log("FireServer", self, args)
+    return oldFireServer(self, ...)
+end)
+
+-- Hook InvokeServer
+local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+    local args = serializeArgs(...)
+    log("InvokeServer", self, args)
+    return oldInvokeServer(self, ...)
+end)
+
+-- Hook __namecall
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    if method == "FireServer" or method == "InvokeServer" then
+        local args = serializeArgs(...)
+        log(method, self, args)
+    end
+    return oldNamecall(self, ...)
+end)
+
+print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")    elseif name == "SellTower" then
         appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
         appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
         startTime = time() - offset
