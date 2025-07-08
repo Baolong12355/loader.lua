@@ -85,48 +85,6 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     return oldNamecall(self, ...)
 end)
 
-print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")    elseif name == "SellTower" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
-
-    elseif name == "TowerUpgradeRequest" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:upgradeTower(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
-
-    elseif name == "ChangeQueryType" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
-    end
-end
-
--- Hook FireServer
-local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-    local args = serializeArgs(...)
-    log("FireServer", self, args)
-    return oldFireServer(self, ...)
-end)
-
--- Hook InvokeServer
-local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-    local args = serializeArgs(...)
-    log("InvokeServer", self, args)
-    return oldInvokeServer(self, ...)
-end)
-
--- Hook __namecall
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    local method = getnamecallmethod()
-    if method == "FireServer" or method == "InvokeServer" then
-        local args = serializeArgs(...)
-        log(method, self, args)
-    end
-    return oldNamecall(self, ...)
-end)
-
 print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
 
 -- Script chuyển đổi record.txt thành macro runner (dùng trục X), với thứ tự trường upgrade là: UpgradeCost, UpgradePath, TowerUpgraded
