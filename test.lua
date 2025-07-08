@@ -1,187 +1,275 @@
+
+repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
+
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
-local LocalPlayer = Players.LocalPlayer
-local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
+local player = Players.LocalPlayer
+local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
-local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
-local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
-local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
-local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
-
-local directionalTowerTypes = {
-	["Commander"] = { onlyAbilityIndex = 3 },
-	["Toxicnator"] = true,
-	["Ghost"] = true,
-	["Ice Breaker"] = true,
-	["Mobster"] = true,
-	["Golden Mobster"] = true,
-	["Artillery"] = true,
-	["Golden Mine Layer"] = true
-}
-
-local skipTowerTypes = {
-	["Helicopter"] = true,
-	["Cryo Helicopter"] = true,
-	["Medic"] = true,
-	["Combat Drone"] = true
-}
-
-local fastTowers = {
-	["Ice Breaker"] = true,
-	["John"] = true,
-	["Slammer"] = true,
-	["Mobster"] = true,
-	["Golden Mobster"] = true
-}
-
-local lastUsedTime = {}
-
-local function SendSkill(hash, index, pos)
-	if useFireServer then
-		TowerUseAbilityRequest:FireServer(hash, index, pos)
-	else
-		TowerUseAbilityRequest:InvokeServer(hash, index, pos)
-	end
+-- Safe require TowerClass
+local function SafeRequire(module)
+local success, result = pcall(require, module)
+return success and result or nil
 end
 
-local function GetFirstEnemyPosition()
-	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
-			return enemy.Position
-		end
-	end
-	return nil
+local function LoadTowerClass()
+local ps = player:WaitForChild("PlayerScripts")
+local client = ps:WaitForChild("Client")
+local gameClass = client:WaitForChild("GameClass")
+local towerModule = gameClass:WaitForChild("TowerClass")
+return SafeRequire(towerModule)
 end
 
-local function getTowerPos(tower)
-	if tower.GetPosition then
-		local ok, result = pcall(function() return tower:GetPosition() end)
-		if ok then return result end
-	end
-	if tower.Model and tower.Model:FindFirstChild("Root") then
-		return tower.Model.Root.Position
-	end
-	return nil
-end
+local TowerClass = LoadTowerClass()
+if not TowerClass then error("Không thể tải TowerClass") end
 
-local function getRange(tower)
-	local ok, result = pcall(function() return TowerClass.GetCurrentRange(tower) end)
-	if ok and typeof(result) == "number" then
-		return result
-	elseif tower.Stats and tower.Stats.Radius then
-		return tower.Stats.Radius * 4
-	end
-	return 0
-end
-
-local function hasEnemyInRange(tower, studsLimit)
-	local towerPos = getTowerPos(tower)
-	local range = studsLimit or getRange(tower)
-	if not towerPos or range <= 0 then return false end
-	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" and (enemy.Position - towerPos).Magnitude <= range then
-			return true
-		end
-	end
-	return false
-end
-
-local function GetCurrentUpgradeLevels(tower)
-	if not tower or not tower.LevelHandler then return 0, 0 end
-	local p1, p2 = 0, 0
-	pcall(function() p1 = tower.LevelHandler:GetLevelOnPath(1) or 0 end)
-	pcall(function() p2 = tower.LevelHandler:GetLevelOnPath(2) or 0 end)
-	return p1, p2
-end
-
-local function CanUseAbility(ability)
-	if not ability then return false end
-	if ability.Passive or ability.CustomTriggered or ability.Stunned or ability.Disabled or ability.Converted then return false end
-	if ability.CooldownRemaining > 0 then return false end
-	local ok, usable = pcall(function() return ability:CanUse(true) end)
-	return ok and usable
-end
-
-local function ShouldProcessNonDirectionalSkill(tower, index)
-	return tower.Type == "Commander" and index ~= 3
-end
-
-RunService.Heartbeat:Connect(function()
-	local now = tick()
-	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
-		if not tower or not tower.AbilityHandler then continue end
-
-		local towerType = tower.Type
-		if skipTowerTypes[towerType] then continue end
-
-		local delay = fastTowers[towerType] and 0.1 or 0.2
-		if lastUsedTime[hash] and now - lastUsedTime[hash] < delay then
-			continue
-		end
-		lastUsedTime[hash] = now
-
-		local directionalInfo = directionalTowerTypes[towerType]
-		local p1, p2 = GetCurrentUpgradeLevels(tower)
-
-		for index = 1, 3 do
-			pcall(function()
-				local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-				if not CanUseAbility(ability) then return end
-
-				local allowUse = true
-
-				if towerType == "Ice Breaker" then
-					if index == 1 then
-						allowUse = true
-					elseif index == 2 then
-						allowUse = hasEnemyInRange(tower, 8)
-					else
-						allowUse = false
-					end
-				elseif towerType == "Slammer" then
-					allowUse = hasEnemyInRange(tower)
-				elseif towerType == "John" then
-					if p1 >= 5 then
-						allowUse = hasEnemyInRange(tower)
-					elseif p2 >= 5 then
-						allowUse = hasEnemyInRange(tower, 4.5)
-					else
-						allowUse = hasEnemyInRange(tower, 4.5)
-					end
-				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
-					if p1 >= 4 and p1 <= 5 then
-						allowUse = hasEnemyInRange(tower)
-					elseif p2 >= 3 and p2 <= 5 then
-						allowUse = true
-					else
-						allowUse = false
-					end
-				end
-
-				if allowUse then
-					local pos = GetFirstEnemyPosition()
-					local sendWithPos = false
-
-					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
-						if index == directionalInfo.onlyAbilityIndex then
-							sendWithPos = true
-						elseif ShouldProcessNonDirectionalSkill(tower, index) then
-							sendWithPos = false
-						else
-							return
-						end
-					elseif directionalInfo then
-						sendWithPos = true
-					end
-
-					if sendWithPos and pos then
-						SendSkill(hash, index, pos)
-					elseif not sendWithPos then
-						SendSkill(hash, index)
-					end
-				end
-			end)
-		end
-	end
+-- Tìm tower gần đúng theo X
+local function GetTowerByAxis(axisX)
+local bestHash, bestTower, bestDist
+for hash, tower in pairs(TowerClass.GetTowers()) do
+local success, pos = pcall(function()
+local model = tower.Character:GetCharacterModel()
+local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+return root and root.Position
 end)
+if success and pos then
+local dist = math.abs(pos.X - axisX)
+if dist <= 1 then
+local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+if hp and hp > 0 then
+if not bestDist or dist < bestDist then
+bestHash, bestTower, bestDist = hash, tower, dist
+end
+end
+end
+end
+end
+return bestHash, bestTower
+end
+
+-- Lấy giá đặt tower theo tên
+local function GetTowerPlaceCostByName(name)
+local playerGui = player:FindFirstChild("PlayerGui")
+if not playerGui then return 0 end
+local interface = playerGui:FindFirstChild("Interface")
+if not interface then return 0 end
+local bottomBar = interface:FindFirstChild("BottomBar")
+if not bottomBar then return 0 end
+local towersBar = bottomBar:FindFirstChild("TowersBar")
+if not towersBar then return 0 end
+
+for _, tower in ipairs(towersBar:GetChildren()) do  
+	if tower.Name == name then  
+		local costFrame = tower:FindFirstChild("CostFrame")  
+		local costText = costFrame and costFrame:FindFirstChild("CostText")  
+		if costText then  
+			local raw = tostring(costText.Text):gsub("%D", "")  
+			return tonumber(raw) or 0  
+		end  
+	end  
+end  
+return 0
+
+end
+
+-- Lấy giá nâng cấp
+local function GetCurrentUpgradeCosts(tower)
+if not tower or not tower.LevelHandler then
+return {
+path1 = {cost = "N/A", currentLevel = "N/A", maxLevel = "N/A", exists = true},
+path2 = {cost = "N/A", currentLevel = "N/A", maxLevel = "N/A", exists = false}
+}
+end
+
+local result = {  
+	path1 = {cost = "MAX", currentLevel = 0, maxLevel = 0, exists = true},  
+	path2 = {cost = "MAX", currentLevel = 0, maxLevel = 0, exists = false}  
+}  
+
+local maxLevel = tower.LevelHandler:GetMaxLevel()  
+local lvl1 = tower.LevelHandler:GetLevelOnPath(1)  
+result.path1.currentLevel = lvl1  
+result.path1.maxLevel = maxLevel  
+
+if lvl1 < maxLevel then  
+	local ok, cost = pcall(function()  
+		return tower.LevelHandler:GetLevelUpgradeCost(1, 1)  
+	end)  
+	result.path1.cost = ok and math.floor(cost) or "LỖI"  
+end  
+
+local hasPath2 = pcall(function()  
+	return tower.LevelHandler:GetLevelOnPath(2) ~= nil  
+end)  
+
+if hasPath2 then  
+	result.path2.exists = true  
+	local lvl2 = tower.LevelHandler:GetLevelOnPath(2)  
+	result.path2.currentLevel = lvl2  
+	result.path2.maxLevel = maxLevel  
+
+	if lvl2 < maxLevel then  
+		local ok2, cost2 = pcall(function()  
+			return tower.LevelHandler:GetLevelUpgradeCost(2, 1)  
+		end)  
+		result.path2.cost = ok2 and math.floor(cost2) or "LỖI"  
+	end  
+end  
+
+return result
+
+end
+
+-- Chờ đủ tiền
+local function WaitForCash(amount)
+while cashStat.Value < amount do task.wait() end
+end
+
+-- Đặt tower
+local function PlaceTowerRetry(args, axisX, towerName, cost)
+for i = 1, 10 do
+print(string.format("🧱 [Place Attempt %d] %s tại X=%.2f", i, towerName, axisX))
+WaitForCash(cost)
+Remotes.PlaceTower:InvokeServer(unpack(args))
+local t0 = tick()
+repeat
+task.wait(0.1)
+local hash, tower = GetTowerByAxis(axisX)
+if hash and tower then
+print(string.format("✅ [Placed] %s tại X=%.2f", towerName, axisX))
+return true
+end
+until tick() - t0 > 2
+print(string.format("❌ [Place Retry] Thất bại (%d/10): %s tại X=%.2f", i, towerName, axisX))
+end
+warn("[Place Retry] ❌ Đặt thất bại hoàn toàn:", towerName)
+return false
+end
+
+-- Nâng cấp tower
+local function UpgradeTowerRetry(axisX, upgradePath)
+for attempt = 1, 5 do
+local hash, tower = GetTowerByAxis(axisX)
+if not hash or not tower then
+print(string.format("❌ [Upgrade] Không tìm thấy tower tại X=%.2f", axisX))
+return
+end
+
+local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()  
+	if not hp or hp <= 0 then  
+		print(string.format("❌ [Upgrade] Tower tại X=%.2f đã bị tiêu diệt", axisX))  
+		return  
+	end  
+
+	local costInfo = GetCurrentUpgradeCosts(tower)  
+	local info = upgradePath == 1 and costInfo.path1 or costInfo.path2  
+
+	if info.cost == "MAX" then  
+		print(string.format("⚠️ [Upgrade] Tower X=%.2f đã max cấp (Path %d)", axisX, upgradePath))  
+		return  
+	end  
+	if info.cost == "LỖI" or type(info.cost) ~= "number" then  
+		print(string.format("❗ [Upgrade] Không thể lấy giá nâng cấp X=%.2f | Path=%d", axisX, upgradePath))  
+		return  
+	end  
+
+	print(string.format("🔧 [Upgrade] X=%.2f | Path=%d | Level=%d | Cost=%d | Attempt=%d", axisX, upgradePath, info.currentLevel, info.cost, attempt))  
+
+	WaitForCash(info.cost)  
+	Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)  
+
+	local t0 = tick()  
+	while tick() - t0 < 1.5 do  
+		task.wait(0.1)  
+		local _, t = GetTowerByAxis(axisX)  
+		if t and t.LevelHandler then  
+			local newLevel = t.LevelHandler:GetLevelOnPath(upgradePath)  
+			if newLevel > info.currentLevel then  
+				print(string.format("✅ [Upgrade Success] X=%.2f | Path=%d | New Level=%d", axisX, upgradePath, newLevel))  
+				return  
+			end  
+		end  
+	end  
+
+	print(string.format("❌ [Upgrade Failed] X=%.2f | Path=%d | Không nâng được", axisX, upgradePath))  
+	task.wait(0.2)  
+end
+
+end
+
+-- Bán tower
+local function SellTowerRetry(axisX)
+for _ = 1, 3 do
+local hash = GetTowerByAxis(axisX)
+if hash then
+Remotes.SellTower:FireServer(hash)
+task.wait(0.2)
+if not GetTowerByAxis(axisX) then return end
+else
+return
+end
+task.wait(0.1)
+end
+end
+
+-- Đổi target
+local function ChangeTargetRetry(axisX, targetType)
+for _ = 1, 3 do
+local hash = GetTowerByAxis(axisX)
+if hash then
+Remotes.ChangeQueryType:FireServer(hash, targetType)
+return
+end
+task.wait(0.1)
+end
+end
+
+-- Load macro
+local config = getgenv().TDX_Config or {}
+local macroPath = config["Macro Path"] or "tdx/macros/x.json"
+
+if not isfile(macroPath) then
+error("Không tìm thấy macro: " .. macroPath)
+end
+
+local success, macro = pcall(function()
+return HttpService:JSONDecode(readfile(macroPath))
+end)
+if not success then error("Lỗi khi đọc macro") end
+
+-- Chạy macro
+for _, entry in ipairs(macro) do
+if entry.TowerPlaced and entry.TowerVector then
+local vecTab = entry.TowerVector:split(", ")
+local pos = Vector3.new(unpack(vecTab))
+local args = {
+tonumber(entry.TowerA1),
+entry.TowerPlaced,
+pos,
+tonumber(entry.Rotation or 0)
+}
+local cost = tonumber(entry.TowerPlaceCost) or 0
+if cost == 0 then
+cost = GetTowerPlaceCostByName(entry.TowerPlaced)
+end
+PlaceTowerRetry(args, pos.X, entry.TowerPlaced, cost)
+
+elseif entry.TowerUpgraded and entry.UpgradePath then  
+	local axisValue = tonumber(entry.TowerUpgraded)  
+	UpgradeTowerRetry(axisValue, tonumber(entry.UpgradePath))  
+
+elseif entry.ChangeTarget and entry.TargetType then  
+	local axisValue = tonumber(entry.ChangeTarget)  
+	ChangeTargetRetry(axisValue, tonumber(entry.TargetType))  
+
+elseif entry.SellTower then  
+	local axisValue = tonumber(entry.SellTower)  
+	SellTowerRetry(axisValue)  
+end
+
+end
+
+print("✅ rewrite_unsure hoàn tất.")
+
