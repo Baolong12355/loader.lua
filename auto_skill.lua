@@ -22,8 +22,20 @@ local directionalTowerTypes = {
 
 local skipTowerTypes = {
 	["Helicopter"] = true,
-	["Cryo Helicopter"] = true
+	["Cryo Helicopter"] = true,
+	["Medic"] = true
 }
+
+-- Các tower đặc biệt cần xử lý nhanh hơn
+local fastTowers = {
+	["Ice Breaker"] = true,
+	["John"] = true,
+	["Slammer"] = true,
+	["Mobster"] = true,
+	["Golden Mobster"] = true
+}
+
+local lastUsedTime = {}
 
 local function SendSkill(hash, index, pos)
 	if useFireServer then
@@ -33,7 +45,6 @@ local function SendSkill(hash, index, pos)
 	end
 end
 
--- lấy vị trí enemy đầu tiên hợp lệ
 local function GetFirstEnemyPosition()
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
 		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
@@ -41,19 +52,6 @@ local function GetFirstEnemyPosition()
 		end
 	end
 	return nil
-end
-
--- kiểm tra có enemy hợp lệ trong range
-local function hasEnemyInRange(tower, studsLimit)
-	local towerPos = getTowerPos(tower)
-	local range = studsLimit or getRange(tower)
-	if not towerPos or range <= 0 then return false end
-	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" and (enemy.Position - towerPos).Magnitude <= range then
-			return true
-		end
-	end
-	return false
 end
 
 local function getTowerPos(tower)
@@ -68,15 +66,25 @@ local function getTowerPos(tower)
 end
 
 local function getRange(tower)
-	local ok, result = pcall(function()
-		return TowerClass.GetCurrentRange(tower)
-	end)
+	local ok, result = pcall(function() return TowerClass.GetCurrentRange(tower) end)
 	if ok and typeof(result) == "number" then
 		return result
 	elseif tower.Stats and tower.Stats.Radius then
 		return tower.Stats.Radius * 4
 	end
 	return 0
+end
+
+local function hasEnemyInRange(tower, studsLimit)
+	local towerPos = getTowerPos(tower)
+	local range = studsLimit or getRange(tower)
+	if not towerPos or range <= 0 then return false end
+	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
+		if enemy:IsA("BasePart") and (enemy.Position - towerPos).Magnitude <= range then
+			return true
+		end
+	end
+	return false
 end
 
 local function GetCurrentUpgradeLevels(tower)
@@ -100,11 +108,18 @@ local function ShouldProcessNonDirectionalSkill(tower, index)
 end
 
 RunService.Heartbeat:Connect(function()
+	local now = tick()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
 		if not tower or not tower.AbilityHandler then continue end
 
 		local towerType = tower.Type
 		if skipTowerTypes[towerType] then continue end
+
+		local delay = fastTowers[towerType] and 0.1 or 0.2
+		if lastUsedTime[hash] and now - lastUsedTime[hash] < delay then
+			continue
+		end
+		lastUsedTime[hash] = now
 
 		local directionalInfo = directionalTowerTypes[towerType]
 		local p1, p2 = GetCurrentUpgradeLevels(tower)
@@ -116,7 +131,6 @@ RunService.Heartbeat:Connect(function()
 
 				local allowUse = true
 
-				-- logic đặc biệt
 				if towerType == "Ice Breaker" then
 					if index == 1 then
 						allowUse = true
@@ -161,14 +175,11 @@ RunService.Heartbeat:Connect(function()
 						sendWithPos = true
 					end
 
-					-- luôn gửi skill, nếu cần vị trí thì có, không thì game sẽ bỏ qua
-					if sendWithPos then
+					if sendWithPos and pos then
 						SendSkill(hash, index, pos)
-					else
+					elseif not sendWithPos then
 						SendSkill(hash, index)
 					end
-
-					task.wait(0.25)
 				end
 			end)
 		end
