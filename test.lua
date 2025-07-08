@@ -101,6 +101,7 @@ local function SafeRequire(module)
     return success and result or nil
 end
 
+-- Load TowerClass
 local TowerClass
 do
     local client = PlayerScripts:WaitForChild("Client")
@@ -109,6 +110,7 @@ do
     TowerClass = SafeRequire(towerModule)
 end
 
+-- Lấy vị trí của tower
 local function GetTowerPosition(tower)
     if not tower or not tower.Character then return nil end
     local model = tower.Character:GetCharacterModel()
@@ -116,6 +118,7 @@ local function GetTowerPosition(tower)
     return root and root.Position or nil
 end
 
+-- Lấy giá đặt tower
 local function GetTowerPlaceCostByName(name)
     local gui = player:FindFirstChild("PlayerGui")
     local interface = gui and gui:FindFirstChild("Interface")
@@ -136,7 +139,7 @@ local function GetTowerPlaceCostByName(name)
     return 0
 end
 
--- ánh xạ hash -> vị trí
+-- Ghi map hash → pos liên tục
 local hash2pos = {}
 task.spawn(function()
     while true do
@@ -150,11 +153,13 @@ task.spawn(function()
     end
 end)
 
+-- Tạo folder nếu chưa có
 if makefolder then
     pcall(function() makefolder("tdx") end)
     pcall(function() makefolder("tdx/macros") end)
 end
 
+-- Vòng ghi macro
 while true do
     if isfile(txtFile) then
         local macro = readfile(txtFile)
@@ -179,13 +184,34 @@ while true do
             else
                 local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*[^%)]+%)')
                 if hash and path then
+                    local tower = TowerClass.GetTowers()[hash]
                     local pos = hash2pos[tostring(hash)]
-                    if pos then
-                        table.insert(logs, {
-                            UpgradeCost = 0,
-                            UpgradePath = tonumber(path),
-                            TowerUpgraded = pos.x
-                        })
+                    local pathNum = tonumber(path)
+
+                    if tower and tower.LevelHandler and pos then
+                        -- Debug cấp trước
+                        local before = tower.LevelHandler:GetLevelOnPath(pathNum)
+                        print(string.format("🔍 Upgrade Check: Hash=%s | Path=%d | LevelBefore=%d | X=%.2f",
+                            tostring(hash):sub(1, 6), pathNum, before, pos.x))
+
+                        task.wait(0.1)
+
+                        -- Debug cấp sau
+                        local after = tower.LevelHandler:GetLevelOnPath(pathNum)
+                        print(string.format("🆙 Upgrade Result: LevelAfter=%d", after))
+
+                        if after > before then
+                            table.insert(logs, {
+                                UpgradeCost = 0,
+                                UpgradePath = pathNum,
+                                TowerUpgraded = pos.x
+                            })
+                            print(string.format("✅ Upgrade Recorded: X=%.2f | Path=%d | %d → %d", pos.x, pathNum, before, after))
+                        else
+                            print(string.format("⚠️ Upgrade Skipped: No level increase (still %d)", before))
+                        end
+                    else
+                        warn("[SKIP] Không tìm thấy tower hoặc vị trí.")
                     end
 
                 -- ChangeTarget
@@ -217,6 +243,7 @@ while true do
         end
 
         writefile(outJson, HttpService:JSONEncode(logs))
+        print("📦 Đã ghi macro vào:", outJson)
     end
-    task.wait(0.22)
+    wait(0.22)
 end
