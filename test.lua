@@ -164,9 +164,6 @@ if makefolder then
     pcall(function() makefolder("tdx/macros") end)
 end
 
--- đánh dấu đã in console
-local printedOnce = false
-
 while true do
     if isfile(txtFile) then
         local macro = readfile(txtFile)
@@ -197,9 +194,20 @@ while true do
 
                     if tower and pos and tower.LevelHandler then
                         local before = tower.LevelHandler:GetLevelOnPath(pathNum)
-                        task.wait(0.05)
-                        local after = tower.LevelHandler:GetLevelOnPath(pathNum)
-                        if after > before then
+                        local success = false
+                        local t0 = tick()
+
+                        -- đợi cấp tăng
+                        repeat
+                            task.wait(0.05)
+                            local current = tower.LevelHandler:GetLevelOnPath(pathNum)
+                            if current > before then
+                                success = true
+                                break
+                            end
+                        until tick() - t0 > 1.2
+
+                        if success then
                             local upgradeCost = GetUpgradeCost(tower, pathNum)
                             table.insert(logs, {
                                 UpgradeCost = upgradeCost,
@@ -238,10 +246,6 @@ while true do
         end
 
         writefile(outJson, HttpService:JSONEncode(logs))
-        if not printedOnce then
-            print("✅ Ghi file xong vào:", outJson)
-            printedOnce = true
-        end
     end
     wait(0.22)
 end
