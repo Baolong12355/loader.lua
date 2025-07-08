@@ -24,6 +24,7 @@ local skipTowerTypes = {
 	["Helicopter"] = true,
 	["Cryo Helicopter"] = true,
 	["Medic"] = true
+	["Combat Drone"] = true
 }
 
 -- Các tower đặc biệt cần xử lý nhanh hơn
