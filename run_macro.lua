@@ -134,7 +134,7 @@ local function ChangeTargetRetry(axisValue, targetType)
 			Remotes.ChangeQueryType:FireServer(hash, targetType)
 			return
 		end
-		task.wait(0.1)
+		task.wait()
 	end
 end
 
@@ -153,7 +153,7 @@ end
 
 -- Load macro
 local config = getgenv().TDX_Config or {}
-local macroName = config["Macro Name"] or "x"
+local macroName = config["Macro Name"] or "y"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
 globalPlaceMode = config["PlaceMode"] or "normal"
 
