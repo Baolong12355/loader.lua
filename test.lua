@@ -1,162 +1,187 @@
--- Health Tracker Executor Script
--- Đường dẫn chính xác: PlayerScripts/Client/GameClass/EnemyClass/HealthHandlerClass
-
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
 
--- =============================================
--- KẾT NỐI TỚI HEALTH HANDLER CLASS
--- =============================================
+local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
+local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
+local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
+local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
 
-local function GetHealthHandlerModule()
-    -- Kiểm tra từng cấp độ thư mục
-    local clientScripts = LocalPlayer:WaitForChild("PlayerScripts")
-    local clientModule = clientScripts:FindFirstChild("Client")
-    
-    if not clientModule then
-        warn("Không tìm thấy thư mục Client")
-        return nil
-    end
+local directionalTowerTypes = {
+	["Commander"] = { onlyAbilityIndex = 3 },
+	["Toxicnator"] = true,
+	["Ghost"] = true,
+	["Ice Breaker"] = true,
+	["Mobster"] = true,
+	["Golden Mobster"] = true,
+	["Artillery"] = true,
+	["Golden Mine Layer"] = true
+}
 
-    local gameClass = clientModule:FindFirstChild("GameClass")
-    if not gameClass then
-        warn("Không tìm thấy thư mục GameClass")
-        return nil
-    end
+local skipTowerTypes = {
+	["Helicopter"] = true,
+	["Cryo Helicopter"] = true,
+	["Medic"] = true,
+	["Combat Drone"] = true
+}
 
-    local enemyClass = gameClass:FindFirstChild("EnemyClass")
-    if not enemyClass then
-        warn("Không tìm thấy thư mục EnemyClass")
-        return nil
-    end
+local fastTowers = {
+	["Ice Breaker"] = true,
+	["John"] = true,
+	["Slammer"] = true,
+	["Mobster"] = true,
+	["Golden Mobster"] = true
+}
 
-    local healthHandler = enemyClass:FindFirstChild("HealthHandlerClass")
-    if not healthHandler then
-        warn("Không tìm thấy HealthHandlerClass")
-        return nil
-    end
+local lastUsedTime = {}
 
-    -- Thử require module
-    local success, module = pcall(require, healthHandler)
-    if not success then
-        warn("Không thể require HealthHandlerClass:", module)
-        return nil
-    end
-
-    return module
+local function SendSkill(hash, index, pos)
+	if useFireServer then
+		TowerUseAbilityRequest:FireServer(hash, index, pos)
+	else
+		TowerUseAbilityRequest:InvokeServer(hash, index, pos)
+	end
 end
 
-local HealthHandler = GetHealthHandlerModule()
-if not HealthHandler then
-    return
+local function GetFirstEnemyPosition()
+	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
+		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
+			return enemy.Position
+		end
+	end
+	return nil
 end
 
--- =============================================
--- HÀM HIỂN THỊ THÔNG TIN HEALTH
--- =============================================
-
-local function TrackEnemyHealth(enemy)
-    if not enemy or not enemy:FindFirstChild("HealthData") then
-        warn("Enemy không có dữ liệu máu")
-        return
-    end
-
-    -- Lấy health handler từ enemy
-    local healthData = enemy:FindFirstChild("HealthData")
-    local handler = healthData:GetAttribute("HealthHandler")
-    
-    if not handler then
-        warn("Không tìm thấy HealthHandler")
-        return
-    end
-
-    -- Hiển thị thông tin
-    print("=== ENEMY HEALTH INFO ===")
-    print("Loại enemy:", enemy:GetAttribute("Type") or "Unknown")
-    print("ID:", enemy:GetAttribute("UniqueId") or "N/A")
-    print("-----------------------")
-    print("Máu hiện tại:", HealthHandler.GetHealth(handler))
-    print("Máu tối đa:", HealthHandler.GetMaxHealth(handler))
-    print("Shield hiện tại:", HealthHandler.GetShield(handler))
-    print("Shield tối đa:", HealthHandler.GetMaxShield(handler))
-    print("-----------------------")
-    print("Có shield:", HealthHandler.HasShield(handler) and "CÓ" or "KHÔNG")
-    print("Shield đang hoạt động:", HealthHandler.IsShieldActive(handler) and "CÓ" or "KHÔNG")
-    print("Phần trăm máu:", string.format("%.1f%%", (HealthHandler.GetHealth(handler) / HealthHandler.GetMaxHealth(handler)) * 100))
+local function getTowerPos(tower)
+	if tower.GetPosition then
+		local ok, result = pcall(function() return tower:GetPosition() end)
+		if ok then return result end
+	end
+	if tower.Model and tower.Model:FindFirstChild("Root") then
+		return tower.Model.Root.Position
+	end
+	return nil
 end
 
--- =============================================
--- TỰ ĐỘNG THEO DÕI TẤT CẢ ENEMY
--- =============================================
-
-local function AutoTrackAllEnemies()
-    -- Tìm tất cả enemy trong workspace
-    local enemiesFolder = workspace:FindFirstChild("Enemies")
-    if not enemiesFolder then
-        warn("Không tìm thấy thư mục Enemies trong workspace")
-        return
-    end
-
-    -- Làm mới console
-    if _G.clear then _G.clear() end
-
-    print("=== THEO DÕI MÁU ENEMY TỰ ĐỘNG ===")
-    print("Nhấn F5 để dừng")
-
-    -- Kết nối sự kiện
-    local connection
-    connection = RunService.Heartbeat:Connect(function()
-        -- Kiểm tra phím tắt
-        if game:GetService("UserInputService"):IsKeyDown(Enum.KeyCode.F5) then
-            connection:Disconnect()
-            print("Đã dừng tự động theo dõi")
-            return
-        end
-
-        -- Làm mới console
-        if _G.clear then _G.clear() end
-
-        -- Duyệt qua tất cả enemy
-        for _, enemy in ipairs(enemiesFolder:GetChildren()) do
-            if enemy:FindFirstChild("HealthData") then
-                local healthData = enemy:FindFirstChild("HealthData")
-                local handler = healthData:GetAttribute("HealthHandler")
-
-                if handler then
-                    print(string.format("[%s] HP: %d/%d | Shield: %d/%d",
-                        enemy.Name,
-                        HealthHandler.GetHealth(handler),
-                        HealthHandler.GetMaxHealth(handler),
-                        HealthHandler.GetShield(handler),
-                        HealthHandler.GetMaxShield(handler)
-                    ))
-                end
-            end
-        end
-
-        wait(2) -- Làm mới mỗi 2 giây
-    end)
+local function getRange(tower)
+	local ok, result = pcall(function() return TowerClass.GetCurrentRange(tower) end)
+	if ok and typeof(result) == "number" then
+		return result
+	elseif tower.Stats and tower.Stats.Radius then
+		return tower.Stats.Radius * 4
+	end
+	return 0
 end
 
--- =============================================
--- GIAO DIỆN ĐIỀU KHIỂN
--- =============================================
-
-local function SetupControls()
-    local UIS = game:GetService("UserInputService")
-
-    -- F5: Theo dõi tất cả enemy
-    UIS.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
-
-        if input.KeyCode == Enum.KeyCode.F5 then
-            AutoTrackAllEnemies()
-        end
-    end)
-
-    print("Nhấn F5 để bắt đầu theo dõi máu tất cả enemy")
+local function hasEnemyInRange(tower, studsLimit)
+	local towerPos = getTowerPos(tower)
+	local range = studsLimit or getRange(tower)
+	if not towerPos or range <= 0 then return false end
+	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
+		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" and (enemy.Position - towerPos).Magnitude <= range then
+			return true
+		end
+	end
+	return false
 end
 
--- Khởi động
-SetupControls()
+local function GetCurrentUpgradeLevels(tower)
+	if not tower or not tower.LevelHandler then return 0, 0 end
+	local p1, p2 = 0, 0
+	pcall(function() p1 = tower.LevelHandler:GetLevelOnPath(1) or 0 end)
+	pcall(function() p2 = tower.LevelHandler:GetLevelOnPath(2) or 0 end)
+	return p1, p2
+end
+
+local function CanUseAbility(ability)
+	if not ability then return false end
+	if ability.Passive or ability.CustomTriggered or ability.Stunned or ability.Disabled or ability.Converted then return false end
+	if ability.CooldownRemaining > 0 then return false end
+	local ok, usable = pcall(function() return ability:CanUse(true) end)
+	return ok and usable
+end
+
+local function ShouldProcessNonDirectionalSkill(tower, index)
+	return tower.Type == "Commander" and index ~= 3
+end
+
+RunService.Heartbeat:Connect(function()
+	local now = tick()
+	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
+		if not tower or not tower.AbilityHandler then continue end
+
+		local towerType = tower.Type
+		if skipTowerTypes[towerType] then continue end
+
+		local delay = fastTowers[towerType] and 0.1 or 0.2
+		if lastUsedTime[hash] and now - lastUsedTime[hash] < delay then
+			continue
+		end
+		lastUsedTime[hash] = now
+
+		local directionalInfo = directionalTowerTypes[towerType]
+		local p1, p2 = GetCurrentUpgradeLevels(tower)
+
+		for index = 1, 3 do
+			pcall(function()
+				local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
+				if not CanUseAbility(ability) then return end
+
+				local allowUse = true
+
+				if towerType == "Ice Breaker" then
+					if index == 1 then
+						allowUse = true
+					elseif index == 2 then
+						allowUse = hasEnemyInRange(tower, 8)
+					else
+						allowUse = false
+					end
+				elseif towerType == "Slammer" then
+					allowUse = hasEnemyInRange(tower)
+				elseif towerType == "John" then
+					if p1 >= 5 then
+						allowUse = hasEnemyInRange(tower)
+					elseif p2 >= 5 then
+						allowUse = hasEnemyInRange(tower, 4.5)
+					else
+						allowUse = hasEnemyInRange(tower, 4.5)
+					end
+				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
+					if p1 >= 4 and p1 <= 5 then
+						allowUse = hasEnemyInRange(tower)
+					elseif p2 >= 3 and p2 <= 5 then
+						allowUse = true
+					else
+						allowUse = false
+					end
+				end
+
+				if allowUse then
+					local pos = GetFirstEnemyPosition()
+					local sendWithPos = false
+
+					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
+						if index == directionalInfo.onlyAbilityIndex then
+							sendWithPos = true
+						elseif ShouldProcessNonDirectionalSkill(tower, index) then
+							sendWithPos = false
+						else
+							return
+						end
+					elseif directionalInfo then
+						sendWithPos = true
+					end
+
+					if sendWithPos and pos then
+						SendSkill(hash, index, pos)
+					elseif not sendWithPos then
+						SendSkill(hash, index)
+					end
+				end
+			end)
+		end
+	end
+end)
