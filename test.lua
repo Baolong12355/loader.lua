@@ -1,25 +1,32 @@
--- Phiên bản đã sửa lỗi 'attempt to call a string value'
-local PlayerService = game:GetService("Players")
-local LocalPlayer = PlayerService.LocalPlayer
+--[[
+  ENEMY TRACKER EXECUTOR SCRIPT
+  Cách sử dụng:
+  1. Dán vào executor (Synapse, Krnl, Fluxus...)
+  2. Nhấn F5 để làm mới dữ liệu
+  3. Nhấn F6 để bật/tắt auto-refresh
+  4. Nhấn F7 để hiển thị ESP
+--]]
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
 
-local function SafeRequire(moduleScript)
-    local success, module = pcall(require, moduleScript)
-    return success and module or nil
-end
+-- =============================================
+-- PHẦN KẾT NỐI VỚI GAME
+-- =============================================
 
 local function GetEnemyModule()
-    -- Kiểm tra nhiều vị trí có thể
+    -- Thử các vị trí có thể chứa EnemyClass
     local locations = {
         LocalPlayer.PlayerScripts:FindFirstChild("GameClass") and LocalPlayer.PlayerScripts.GameClass.EnemyClass,
-        LocalPlayer.PlayerScripts:FindFirstChild("Game") and LocalPlayer.PlayerScripts.Game.EnemyClass,
-        ReplicatedStorage:FindFirstChild("TDX_Shared") and ReplicatedStorage.TDX_Shared.Common.EnemyClass
+        LocalPlayer.PlayerScripts:FindFirstChild("Client") and LocalPlayer.PlayerScripts.Client.GameClass.EnemyClass,
+        game:GetService("ReplicatedStorage"):FindFirstChild("EnemyClass")
     }
     
     for _, location in ipairs(locations) do
         if location then
-            local module = SafeRequire(location)
-            if module then return module end
+            local success, module = pcall(require, location)
+            if success then return module end
         end
     end
     return nil
@@ -27,125 +34,122 @@ end
 
 local EnemyClass = GetEnemyModule()
 if not EnemyClass then
-    warn("Không thể tìm thấy EnemyClass!")
+    warn("Không tìm thấy EnemyClass!")
     return
 end
 
--- Hàm giả lập để lấy enemies (thay thế bằng phương thức thực tế của game)
-local function GetLiveEnemies()
-    local enemies = {}
-    
-    -- Cách 1: Duyệt qua workspace (nếu game lưu enemy trong workspace)
-    if workspace:FindFirstChild("Enemies") then
-        for _, enemyModel in ipairs(workspace.Enemies:GetChildren()) do
-            if enemyModel:FindFirstChild("HumanoidRootPart") then
-                table.insert(enemies, {
-                    Model = enemyModel,
-                    Position = enemyModel.HumanoidRootPart.Position
-                })
-            end
-        end
-    end
-    
-    -- Cách 2: Dùng metatable hook (nâng cao)
-    -- ... (code hook sẽ phụ thuộc vào executor)
-    
-    return enemies
-end
+-- =============================================
+-- PHẦN HIỂN THỊ THÔNG TIN
+-- =============================================
 
-local function CreateEnemyInfoDisplay(enemy)
-    -- Kiểm tra enemy hợp lệ
-    if not enemy or typeof(enemy) ~= "table" then return end
-    
-    -- Lấy thông tin cơ bản
-    local info = {
-        Type = enemy._type or "Unknown",
-        Health = "N/A",
-        MaxHealth = "N/A",
-        Position = Vector3.new(0,0,0),
-        Bounty = 0,
-        States = {}
-    }
-    
-    -- Lấy thông tin máu (nếu có)
-    if enemy.Health and typeof(enemy.Health.GetPercent) == "function" then
-        info.Health = enemy.Health.Current or "N/A"
-        info.MaxHealth = enemy.Health.Max or "N/A"
-        info.HealthPercent = enemy.Health:GetPercent() or 0
-    end
-    
-    -- Lấy vị trí
-    if enemy.Movement and enemy.Movement.Position then
-        info.Position = enemy.Movement.Position
-    elseif enemy.Model and enemy.Model:FindFirstChild("HumanoidRootPart") then
-        info.Position = enemy.Model.HumanoidRootPart.Position
-    end
-    
-    -- Lấy trạng thái
-    if enemy._states then
-        info.States = {
-            Stunned = enemy._states.Stunned or false,
-            Stealthed = enemy._states.Stealthed or false,
-            Invulnerable = enemy._states.Invulnerable or false
-        }
-    end
-    
-    -- Lấy bounty (nếu có)
-    if enemy.Bounty and enemy.Bounty.Value then
-        info.Bounty = enemy.Bounty.Value
-    end
-    
-    return info
-end
+local ESPEnabled = false
+local ESPHighlights = {}
+local AutoRefresh = true
 
-local function UpdateEnemyTracker()
-    local enemies = GetLiveEnemies()
-    if not enemies then return end
-    
-    -- Xóa console cũ (nếu executor hỗ trợ)
+local function ClearConsole()
     if _G.clear then _G.clear() end
+end
+
+local function UpdateEnemyInfo()
+    ClearConsole()
+    
+    local enemies = EnemyClass.GetEnemies() or {}
+    local liveEnemies = 0
+    local bosses = 0
     
     print("=== ENEMY TRACKER ===")
     print("Thời gian:", os.date("%X"))
     print("Tổng số enemy:", #enemies)
     print("-----------------------")
     
-    for i, enemy in ipairs(enemies) do
-        local info = CreateEnemyInfoDisplay(enemy)
-        if info then
-            local statusFlags = ""
-            if info.States.Stunned then statusFlags = statusFlags.."STUN " end
-            if info.States.Stealthed then statusFlags = statusFlags.."STEALTH " end
-            if info.States.Invulnerable then statusFlags = statusFlags.."INVUL " end
+    for hash, enemy in pairs(enemies) do
+        if enemy:Alive() then
+            liveEnemies = liveEnemies + 1
+            if enemy:GetIsBoss() then bosses = bosses + 1 end
             
-            print(string.format("[%d] %s", i, info.Type))
-            print(string.format("HP: %s/%s (%d%%)", 
-                tostring(info.Health), 
-                tostring(info.MaxHealth), 
-                info.HealthPercent))
-            print("Bounty:", info.Bounty)
-            print("Position:", info.Position)
-            print("Status:", statusFlags)
+            -- Lấy thông tin cơ bản
+            local info = {
+                Type = enemy.Type or "Unknown",
+                HP = string.format("%d/%d", enemy:GetHealth(), enemy:GetMaxHealth()),
+                Shield = enemy:HasShield() and string.format("%d/%d", enemy:GetShield(), enemy:GetMaxShield()) or "None",
+                Position = enemy:GetPosition(),
+                Distance = (LocalPlayer.Character and LocalPlayer.Character:GetPivot().Position - enemy:GetPosition()).Magnitude or 0,
+                Status = (enemy:IsStunned() and "STUN " or "") .. 
+                        (enemy:IsStealthed() and "STEALTH " or "") ..
+                        (enemy:IsInvulnerable() and "INVUL " or "")
+            }
+            
+            -- Hiển thị thông tin
+            print(string.format("[%s] %s", hash:sub(1, 8), info.Type))
+            print("HP:", info.HP, "| Shield:", info.Shield)
+            print("Pos:", string.format("(%.1f, %.1f, %.1f)", info.Position.X, info.Position.Y, info.Position.Z))
+            print("Distance:", string.format("%.1f studs", info.Distance))
+            print("Status:", info.Status)
             print("-----------------------")
+            
+            -- Cập nhật ESP nếu bật
+            if ESPEnabled and enemy.Character then
+                if not ESPHighlights[hash] then
+                    local highlight = Instance.new("Highlight")
+                    highlight.FillTransparency = 0.5
+                    highlight.OutlineColor = enemy:GetIsBoss() and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(0, 255, 0)
+                    highlight.Parent = enemy.Character
+                    ESPHighlights[hash] = highlight
+                end
+            end
         end
     end
+    
+    print(string.format("ENEMY ĐANG SỐNG: %d (%d boss)", liveEnemies, bosses))
+    print("F5: Refresh | F6: Auto-refresh ("..(AutoRefresh and "ON" or "OFF")..") | F7: ESP ("..(ESPEnabled and "ON" or "OFF")..")")
 end
 
--- Tạo UI đồ họa (tùy chọn)
-local function CreateVisualTracker()
-    -- Code tạo ESP box, health bar...
-    -- Phụ thuộc vào executor cụ thể
+-- =============================================
+-- PHẦN ĐIỀU KHIỂN
+-- =============================================
+
+-- Auto-refresh loop
+local autoRefreshConnection
+local function ToggleAutoRefresh()
+    AutoRefresh = not AutoRefresh
+    if AutoRefresh then
+        autoRefreshConnection = RunService.Heartbeat:Connect(function()
+            UpdateEnemyInfo()
+            wait(3) -- Làm mới mỗi 3 giây
+        end)
+    elseif autoRefreshConnection then
+        autoRefreshConnection:Disconnect()
+    end
+    UpdateEnemyInfo()
 end
 
--- Main loop
-CreateVisualTracker()
-local trackerLoop = RunService.Heartbeat:Connect(function()
-    UpdateEnemyTracker()
-    wait(3) -- Làm mới mỗi 3 giây
+-- ESP toggle
+local function ToggleESP()
+    ESPEnabled = not ESPEnabled
+    if not ESPEnabled then
+        for _, highlight in pairs(ESPHighlights) do
+            highlight:Destroy()
+        end
+        ESPHighlights = {}
+    end
+    UpdateEnemyInfo()
+end
+
+-- Input bindings
+game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == Enum.KeyCode.F5 then
+        UpdateEnemyInfo()
+    elseif input.KeyCode == Enum.KeyCode.F6 then
+        ToggleAutoRefresh()
+    elseif input.KeyCode == Enum.KeyCode.F7 then
+        ToggleESP()
+    end
 end)
 
--- Tắt tracker khi không cần
-_G.StopEnemyTracker = function()
-    trackerLoop:Disconnect()
-    print("Đã tắt Enemy Tracker")
+-- Khởi động
+UpdateEnemyInfo()
+if AutoRefresh then
+    ToggleAutoRefresh()
 end
