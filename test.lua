@@ -96,8 +96,8 @@ local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
 local function SafeRequire(module)
-    local ok, result = pcall(require, module)
-    return ok and result or nil
+    local success, result = pcall(require, module)
+    return success and result or nil
 end
 
 local TowerClass
@@ -134,9 +134,22 @@ local function GetTowerPlaceCostByName(name)
     return 0
 end
 
-local cash = player:WaitForChild("leaderstats"):WaitForChild("Cash")
-local hash2pos = {}
+local function GetCash()
+    local stat = player:FindFirstChild("leaderstats")
+    if stat and stat:FindFirstChild("Cash") then
+        return stat.Cash.Value
+    end
+    return 0
+end
 
+local function IsUpgradeSuccess(tower, pathNum, beforeLvl, oldCash)
+    if not tower or not tower.LevelHandler then return false end
+    local after = tower.LevelHandler:GetLevelOnPath(pathNum)
+    local nowCash = GetCash()
+    return (after > beforeLvl) or (nowCash < oldCash)
+end
+
+local hash2pos = {}
 task.spawn(function()
     while true do
         local towers = TowerClass and TowerClass.GetTowers() or {}
@@ -175,23 +188,19 @@ while true do
             else
                 local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*(%d),')
                 if hash and path then
-                    local tower = TowerClass.GetTowers()[hash]
+                    local tower = TowerClass and TowerClass.GetTowers()[hash]
                     local pathNum = tonumber(path)
-                    if tower and tower.LevelHandler then
+                    local pos = hash2pos[tostring(hash)]
+                    if tower and tower.LevelHandler and pos then
                         local before = tower.LevelHandler:GetLevelOnPath(pathNum)
-                        local oldCash = cash.Value
-                        task.wait(0.1)
-                        local after = tower.LevelHandler:GetLevelOnPath(pathNum)
-                        local newCash = cash.Value
-                        if after and after > before or newCash < oldCash then
-                            local pos = hash2pos[tostring(hash)]
-                            if pos then
-                                table.insert(logs, {
-                                    TowerUpgraded = pos.x,
-                                    UpgradePath = pathNum,
-                                    UpgradeCost = 0
-                                })
-                            end
+                        local oldCash = GetCash()
+                        task.wait(0.15)
+                        if IsUpgradeSuccess(tower, pathNum, before, oldCash) then
+                            table.insert(logs, {
+                                UpgradeCost = 0,
+                                UpgradePath = pathNum,
+                                TowerUpgraded = pos.x
+                            })
                         end
                     end
                 else
@@ -218,6 +227,7 @@ while true do
                 end
             end
         end
+
         writefile(outJson, HttpService:JSONEncode(logs))
     end
     task.wait(0.22)
