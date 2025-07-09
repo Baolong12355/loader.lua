@@ -194,7 +194,7 @@ while true do
                     TowerA1 = tostring(a1)
                 })
                 matched = true
-            end
+            en
 
             if not matched then
                 local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*[^%)]+%)')
