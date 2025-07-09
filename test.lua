@@ -95,138 +95,138 @@ local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
--- Safe require
+-- Safe require TowerClass
 local function SafeRequire(module)
-	local success, result = pcall(require, module)
-	return success and result or nil
+    local success, result = pcall(require, module)
+    return success and result or nil
 end
 
--- Load TowerClass
 local TowerClass
 do
-	local client = PlayerScripts:WaitForChild("Client")
-	local gameClass = client:WaitForChild("GameClass")
-	local towerModule = gameClass:WaitForChild("TowerClass")
-	TowerClass = SafeRequire(towerModule)
+    local client = PlayerScripts:WaitForChild("Client")
+    local gameClass = client:WaitForChild("GameClass")
+    local towerModule = gameClass:WaitForChild("TowerClass")
+    TowerClass = SafeRequire(towerModule)
 end
 
 -- Lấy vị trí tower
 local function GetTowerPosition(tower)
-	if not tower or not tower.Character then return nil end
-	local model = tower.Character:GetCharacterModel()
-	local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
-	return root and root.Position or nil
+    if not tower or not tower.Character then return nil end
+    local model = tower.Character:GetCharacterModel()
+    local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+    return root and root.Position or nil
+end
+
+-- Tìm tower gần đúng theo trục X
+local function GetTowerByX(x)
+    local nearestTower = nil
+    local bestDist = 1
+    for _, tower in pairs(TowerClass.GetTowers()) do
+        local pos = GetTowerPosition(tower)
+        if pos then
+            local dx = math.abs(pos.X - x)
+            if dx <= bestDist then
+                nearestTower = tower
+                bestDist = dx
+            end
+        end
+    end
+    return nearestTower
 end
 
 -- Lấy giá đặt tower
 local function GetTowerPlaceCostByName(name)
-	local gui = player:FindFirstChild("PlayerGui")
-	local interface = gui and gui:FindFirstChild("Interface")
-	local bottomBar = interface and interface:FindFirstChild("BottomBar")
-	local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
-	if not towersBar then return 0 end
+    local gui = player:FindFirstChild("PlayerGui")
+    local interface = gui and gui:FindFirstChild("Interface")
+    local bottomBar = interface and interface:FindFirstChild("BottomBar")
+    local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
+    if not towersBar then return 0 end
 
-	for _, tower in ipairs(towersBar:GetChildren()) do
-		if tower.Name == name then
-			local costFrame = tower:FindFirstChild("CostFrame")
-			local costText = costFrame and costFrame:FindFirstChild("CostText")
-			if costText then
-				local raw = tostring(costText.Text):gsub("%D", "")
-				return tonumber(raw) or 0
-			end
-		end
-	end
-	return 0
+    for _, tower in ipairs(towersBar:GetChildren()) do
+        if tower.Name == name then
+            local costText = tower:FindFirstChild("CostFrame") and tower.CostFrame:FindFirstChild("CostText")
+            if costText then
+                local raw = tostring(costText.Text):gsub("%D", "")
+                return tonumber(raw) or 0
+            end
+        end
+    end
+    return 0
 end
 
--- Tạo ánh xạ hash → pos.X liên tục
-local hash2pos = {}
-task.spawn(function()
-	while true do
-		for hash, tower in pairs(TowerClass.GetTowers()) do
-			local pos = GetTowerPosition(tower)
-			if pos then
-				hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
-			end
-		end
-		task.wait(0.1)
-	end
-end)
-
--- Đảm bảo thư mục tồn tại
+-- Tạo thư mục nếu cần
 if makefolder then
-	pcall(function() makefolder("tdx") end)
-	pcall(function() makefolder("tdx/macros") end)
+    pcall(function() makefolder("tdx") end)
+    pcall(function() makefolder("tdx/macros") end)
 end
 
--- Vòng chuyển đổi chính
-print("🟡 Đang theo dõi ghi macro...")
+print("✅ Bắt đầu convert record.txt → x.json...")
+
 while true do
-	if isfile(txtFile) then
-		local macro = readfile(txtFile)
-		local logs = {}
+    if isfile(txtFile) then
+        local macro = readfile(txtFile)
+        local logs = {}
 
-		for line in macro:gmatch("[^\r\n]+") do
-			-- PLACE
-			local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*"([^"]+)",%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-			if a1 and name and x and y and z and rot then
-				local vector = x .. ", " .. y .. ", " .. z
-				local cost = GetTowerPlaceCostByName(name)
-				table.insert(logs, {
-					TowerPlaceCost = tonumber(cost) or 0,
-					TowerPlaced = name,
-					TowerVector = vector,
-					Rotation = rot,
-					TowerA1 = tostring(a1)
-				})
-				goto continue
-			end
+        for line in macro:gmatch("[^\r\n]+") do
+            -- PLACE
+            local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*"([^"]+)",%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+            if a1 and name and x and y and z and rot then
+                local vector = x .. ", " .. y .. ", " .. z
+                local cost = GetTowerPlaceCostByName(name)
+                table.insert(logs, {
+                    TowerPlaceCost = tonumber(cost) or 0,
+                    TowerPlaced = name,
+                    TowerVector = vector,
+                    Rotation = rot,
+                    TowerA1 = tostring(a1)
+                })
+                goto continue
+            end
 
-			-- UPGRADE
-			local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*(%d),')
-			if hash and path then
-				local tower = TowerClass.GetTowers()[hash]
-				local pos = hash2pos[tostring(hash)]
-				local pathNum = tonumber(path)
+            -- UPGRADE
+            local xVal, path = line:match('TDX:upgradeTower%(([%d%.]+),%s*(%d),')
+            if xVal and path then
+                local axisX = tonumber(xVal)
+                local tower = GetTowerByX(axisX)
+                local pathNum = tonumber(path)
+                if tower and tower.LevelHandler then
+                    local before = tower.LevelHandler:GetLevelOnPath(pathNum)
+                    task.wait(0.1)
+                    local after = tower.LevelHandler:GetLevelOnPath(pathNum)
+                    if after > before then
+                        table.insert(logs, {
+                            UpgradeCost = 0,
+                            UpgradePath = pathNum,
+                            TowerUpgraded = axisX
+                        })
+                    end
+                end
+                goto continue
+            end
 
-				if tower and tower.LevelHandler and pos then
-					local before = tower.LevelHandler:GetLevelOnPath(pathNum)
-					task.wait(0.05)
-					local after = tower.LevelHandler:GetLevelOnPath(pathNum)
-					if after > before then
-						table.insert(logs, {
-							UpgradeCost = 0, -- Run macros sẽ tự xử lý
-							UpgradePath = pathNum,
-							TowerUpgraded = pos.x
-						})
-					end
-				end
-				goto continue
-			end
+            -- CHANGE TARGET
+            local xTarget, targetType = line:match('TDX:changeQueryType%(([%d%.]+),%s*(%d)%)')
+            if xTarget and targetType then
+                table.insert(logs, {
+                    ChangeTarget = tonumber(xTarget),
+                    TargetType = tonumber(targetType)
+                })
+                goto continue
+            end
 
-			-- CHANGE TARGET
-			local xTarget, targetType = line:match('TDX:changeQueryType%(([%d%.]+),%s*(%d)%)')
-			if xTarget and targetType then
-				table.insert(logs, {
-					ChangeTarget = tonumber(xTarget),
-					TargetType = tonumber(targetType)
-				})
-				goto continue
-			end
+            -- SELL
+            local xSell = line:match('TDX:sellTower%(([%d%.]+)%)')
+            if xSell then
+                table.insert(logs, {
+                    SellTower = tonumber(xSell)
+                })
+                goto continue
+            end
 
-			-- SELL
-			local xSell = line:match('TDX:sellTower%(([%d%.]+)%)')
-			if xSell then
-				table.insert(logs, {
-					SellTower = tonumber(xSell)
-				})
-				goto continue
-			end
+            ::continue::
+        end
 
-			::continue::
-		end
-
-		writefile(outJson, HttpService:JSONEncode(logs))
-	end
-	wait(0.22)
+        writefile(outJson, HttpService:JSONEncode(logs))
+    end
+    wait(0.22)
 end
