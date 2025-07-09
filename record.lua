@@ -117,13 +117,10 @@ local function GetTowerPosition(tower)
 end
 
 local function GetTowerPlaceCostByName(name)
-    local playerGui = player:FindFirstChild("PlayerGui")
-    if not playerGui then return 0 end
-    local interface = playerGui:FindFirstChild("Interface")
-    if not interface then return 0 end
-    local bottomBar = interface:FindFirstChild("BottomBar")
-    if not bottomBar then return 0 end
-    local towersBar = bottomBar:FindFirstChild("TowersBar")
+    local gui = player:FindFirstChild("PlayerGui")
+    local interface = gui and gui:FindFirstChild("Interface")
+    local bottomBar = interface and interface:FindFirstChild("BottomBar")
+    local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
     if not towersBar then return 0 end
     for _, tower in ipairs(towersBar:GetChildren()) do
         if tower.Name == name then
@@ -147,7 +144,7 @@ local function GetUpgradeCost(tower, path)
     if not tower or not tower.LevelHandler then return 0 end
     local lvl = tower.LevelHandler:GetLevelOnPath(path)
     local ok, cost = pcall(function()
-        return tower.LevelHandler:GetLevelUpgradeCost(path, lvl+1)
+        return tower.LevelHandler:GetLevelUpgradeCost(path, lvl + 1)
     end)
     if ok and cost then
         return ParseUpgradeCost(cost)
@@ -155,7 +152,7 @@ local function GetUpgradeCost(tower, path)
     return 0
 end
 
--- Get level safely
+-- Get current level
 local function GetLevel(tower, path)
     local ok, lvl = pcall(function()
         return tower.LevelHandler:GetLevelOnPath(path)
@@ -163,7 +160,7 @@ local function GetLevel(tower, path)
     return ok and lvl or nil
 end
 
--- Ánh xạ hash -> pos liên tục
+-- ánh xạ hash -> pos liên tục
 local hash2pos = {}
 task.spawn(function()
     while true do
@@ -181,6 +178,8 @@ if makefolder then
     pcall(function() makefolder("tdx") end)
     pcall(function() makefolder("tdx/macros") end)
 end
+
+print("✅ Đã bật ghi macro vào: " .. outJson)
 
 while true do
     if isfile(txtFile) then
@@ -201,9 +200,8 @@ while true do
                     Rotation = rot,
                     TowerA1 = tostring(a1)
                 })
-
-            -- UPGRADE
             else
+                -- UPGRADE
                 local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*[^%)]+%)')
                 if hash and path then
                     local tower = TowerClass and TowerClass.GetTowers()[hash]
@@ -219,12 +217,7 @@ while true do
                                 UpgradePath = pathNum,
                                 TowerUpgraded = pos.x
                             })
-                            print(string.format("✅ Ghi upgrade: X=%.2f | Path=%d | %d ➜ %d", pos.x, pathNum, before, after))
-                        else
-                            print(string.format("⛔ Không ghi upgrade (không đổi cấp): hash=%s | Path=%d", hash, pathNum))
                         end
-                    else
-                        print(string.format("⚠️ Không tìm thấy tower hash=%s hoặc thiếu dữ liệu", hash))
                     end
 
                 -- CHANGE TARGET
@@ -256,7 +249,6 @@ while true do
         end
 
         writefile(outJson, HttpService:JSONEncode(logs))
-        print("✅ Đã ghi lại macro vào:", outJson)
     end
     wait(0.22)
 end
