@@ -1,4 +1,4 @@
---cak
+-- cak
 local startTime = time()
 local offset = 0
 local fileName = "record.txt"
