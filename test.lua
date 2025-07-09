@@ -256,7 +256,6 @@ while true do
         end
 
         writefile(outJson, HttpService:JSONEncode(logs))
-        print("✅ Đã ghi lại macro vào:", outJson)
     end
     wait(0.22)
 end
