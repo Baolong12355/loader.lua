@@ -95,145 +95,158 @@ local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
+-- Require tower module
 local function SafeRequire(module)
-	local ok, result = pcall(require, module)
-	return ok and result or nil
+    local ok, result = pcall(require, module)
+    return ok and result or nil
 end
 
 local TowerClass
 do
-	local client = PlayerScripts:WaitForChild("Client")
-	local gameClass = client:WaitForChild("GameClass")
-	local towerModule = gameClass:WaitForChild("TowerClass")
-	TowerClass = SafeRequire(towerModule)
+    local client = PlayerScripts:WaitForChild("Client")
+    local gameClass = client:WaitForChild("GameClass")
+    local towerModule = gameClass:WaitForChild("TowerClass")
+    TowerClass = SafeRequire(towerModule)
 end
 
+if not TowerClass then
+    error("❌ Không load được TowerClass")
+end
+
+-- Get position
 local function GetTowerPosition(tower)
-	if not tower or not tower.Character then return nil end
-	local model = tower.Character:GetCharacterModel()
-	local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
-	return root and root.Position or nil
+    if not tower or not tower.Character then return nil end
+    local model = tower.Character:GetCharacterModel()
+    local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+    return root and root.Position or nil
 end
 
+-- Get tower cost
 local function GetTowerPlaceCostByName(name)
-	local gui = player:FindFirstChild("PlayerGui")
-	local interface = gui and gui:FindFirstChild("Interface")
-	local bottomBar = interface and interface:FindFirstChild("BottomBar")
-	local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
-	if not towersBar then return 0 end
-	for _, tower in ipairs(towersBar:GetChildren()) do
-		if tower.Name == name then
-			local costFrame = tower:FindFirstChild("CostFrame")
-			local costText = costFrame and costFrame:FindFirstChild("CostText")
-			if costText then
-				local raw = tostring(costText.Text):gsub("%D", "")
-				return tonumber(raw) or 0
-			end
-		end
-	end
-	return 0
+    local gui = player:FindFirstChild("PlayerGui")
+    local interface = gui and gui:FindFirstChild("Interface")
+    local bottomBar = interface and interface:FindFirstChild("BottomBar")
+    local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
+    if not towersBar then return 0 end
+    for _, tower in ipairs(towersBar:GetChildren()) do
+        if tower.Name == name then
+            local costText = tower:FindFirstChild("CostFrame") and tower.CostFrame:FindFirstChild("CostText")
+            if costText then
+                local raw = tostring(costText.Text):gsub("%D", "")
+                return tonumber(raw) or 0
+            end
+        end
+    end
+    return 0
 end
 
+-- Get path level
 local function GetPathLevel(tower, path)
-	if not tower or not tower.LevelHandler then return nil end
-	local ok, result = pcall(function()
-		return tower.LevelHandler:GetLevelOnPath(path)
-	end)
-	return ok and result or nil
+    if not tower or not tower.LevelHandler then return nil end
+    local ok, result = pcall(function()
+        return tower.LevelHandler:GetLevelOnPath(path)
+    end)
+    return ok and result or nil
 end
 
+-- Get cash
+local function GetCash()
+    local stats = player:FindFirstChild("leaderstats")
+    local cash = stats and stats:FindFirstChild("Cash")
+    return cash and cash.Value or nil
+end
+
+-- Hash ↔ pos mapping
 local hash2pos = {}
 task.spawn(function()
-	while true do
-		for hash, tower in pairs(TowerClass and TowerClass.GetTowers() or {}) do
-			local pos = GetTowerPosition(tower)
-			if pos then
-				hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
-			end
-		end
-		task.wait(0.1)
-	end
+    while true do
+        for hash, tower in pairs(TowerClass and TowerClass.GetTowers() or {}) do
+            local pos = GetTowerPosition(tower)
+            if pos then
+                hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+            end
+        end
+        task.wait(0.1)
+    end
 end)
 
 if makefolder then
-	pcall(function() makefolder("tdx") end)
-	pcall(function() makefolder("tdx/macros") end)
+    pcall(function() makefolder("tdx") end)
+    pcall(function() makefolder("tdx/macros") end)
 end
 
-print("✅ Đang theo dõi và convert macro...")
+print("✅ Convert đang chạy...")
 
 while true do
-	if isfile(txtFile) then
-		local macro = readfile(txtFile)
-		local logs = {}
+    if isfile(txtFile) then
+        local macro = readfile(txtFile)
+        local logs = {}
 
-		for line in macro:gmatch("[^\r\n]+") do
-			-- PLACE
-			local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-			if a1 and name and x and y and z and rot then
-				name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
-				local cost = GetTowerPlaceCostByName(name)
-				local vector = x .. ", " .. y .. ", " .. z
-				table.insert(logs, {
-					TowerPlaceCost = tonumber(cost) or 0,
-					TowerPlaced = name,
-					TowerVector = vector,
-					Rotation = rot,
-					TowerA1 = tostring(a1)
-				})
-			else
-				-- UPGRADE
-				local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*(%d),')
-				if hash and path then
-					local tower = TowerClass and TowerClass.GetTowers()[hash]
-					local pathNum = tonumber(path)
-					local before = GetPathLevel(tower, pathNum)
-					task.wait(0.25)
-					local after = GetPathLevel(tower, pathNum)
+        for line in macro:gmatch("[^\r\n]+") do
+            -- PLACE
+            local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*"([^"]+)",%s*([%d%.%-]+),%s*([%d%.%-]+),%s*([%d%.%-]+),%s*([%d%.%-]+)%)')
+            if a1 and name and x and y and z and rot then
+                name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
+                table.insert(logs, {
+                    TowerA1 = a1,
+                    TowerPlaced = name,
+                    TowerVector = x .. ", " .. y .. ", " .. z,
+                    Rotation = rot,
+                    TowerPlaceCost = GetTowerPlaceCostByName(name)
+                })
+            else
+                -- UPGRADE
+                local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*(%d),')
+                if hash and path then
+                    local tower = TowerClass and TowerClass.GetTowers()[hash]
+                    local pathNum = tonumber(path)
+                    local pos = hash2pos[tostring(hash)]
+                    if tower and pos then
+                        local lvlBefore = GetPathLevel(tower, pathNum)
+                        local cashBefore = GetCash()
+                        task.wait(0.1)
+                        local lvlAfter = GetPathLevel(tower, pathNum)
+                        local cashAfter = GetCash()
 
-					print(string.format("🔍 Upgrade Debug | Hash=%s | Path=%d | Before=%s | After=%s", tostring(hash), pathNum, tostring(before), tostring(after)))
+                        local ok1 = lvlBefore and lvlAfter and lvlAfter > lvlBefore
+                        local ok2 = cashBefore and cashAfter and cashAfter < cashBefore
 
-					if typeof(before) == "number" and typeof(after) == "number" and after > before then
-						local pos = hash2pos[tostring(hash)]
-						if pos then
-							table.insert(logs, {
-								TowerUpgraded = pos.x,
-								UpgradePath = pathNum,
-								UpgradeCost = 0
-							})
-							print(string.format("✅ Upgrade thành công | X=%.2f | Path=%d | %d ➜ %d", pos.x, pathNum, before, after))
-						end
-					else
-						print("❌ Upgrade thất bại hoặc không thay đổi cấp.")
-					end
-				else
-					-- CHANGE TARGET
-					local hash, qtype = line:match('TDX:changeQueryType%(([^,]+),%s*(%d)%)')
-					if hash and qtype then
-						local pos = hash2pos[tostring(hash)]
-						if pos then
-							table.insert(logs, {
-								ChangeTarget = pos.x,
-								TargetType = tonumber(qtype)
-							})
-						end
-					else
-						-- SELL
-						local hash = line:match('TDX:sellTower%(([^%)]+)%)')
-						if hash then
-							local pos = hash2pos[tostring(hash)]
-							if pos then
-								table.insert(logs, {
-									SellTower = pos.x
-								})
-							end
-						end
-					end
-				end
-			end
-		end
+                        if ok1 or ok2 then
+                            table.insert(logs, {
+                                TowerUpgraded = pos.x,
+                                UpgradePath = pathNum,
+                                UpgradeCost = 0
+                            })
+                        end
+                    end
+                else
+                    -- CHANGE TARGET
+                    local hash, qtype = line:match('TDX:changeQueryType%(([^,]+),%s*(%d)%)')
+                    if hash and qtype then
+                        local pos = hash2pos[tostring(hash)]
+                        if pos then
+                            table.insert(logs, {
+                                ChangeTarget = pos.x,
+                                TargetType = tonumber(qtype)
+                            })
+                        end
+                    else
+                        -- SELL
+                        local hash = line:match('TDX:sellTower%(([^%)]+)%)')
+                        if hash then
+                            local pos = hash2pos[tostring(hash)]
+                            if pos then
+                                table.insert(logs, {
+                                    SellTower = pos.x
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+        end
 
-		writefile(outJson, HttpService:JSONEncode(logs))
-	end
-	task.wait(0.22)
+        writefile(outJson, HttpService:JSONEncode(logs))
+    end
+    task.wait(0.22)
 end
