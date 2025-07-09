@@ -98,140 +98,146 @@ local PlayerScripts = player:WaitForChild("PlayerScripts")
 
 -- Safe require
 local function SafeRequire(module)
-	local success, result = pcall(require, module)
-	return success and result or nil
+    local success, result = pcall(require, module)
+    return success and result or nil
 end
 
 -- Load TowerClass
 local TowerClass
 do
-	local client = PlayerScripts:WaitForChild("Client")
-	local gameClass = client:WaitForChild("GameClass")
-	local towerModule = gameClass:WaitForChild("TowerClass")
-	TowerClass = SafeRequire(towerModule)
+    local client = PlayerScripts:WaitForChild("Client")
+    local gameClass = client:WaitForChild("GameClass")
+    local towerModule = gameClass:WaitForChild("TowerClass")
+    TowerClass = SafeRequire(towerModule)
 end
 
+-- Get tower position
 local function GetTowerPosition(tower)
-	if not tower or not tower.Character then return nil end
-	local model = tower.Character:GetCharacterModel()
-	local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
-	return root and root.Position or nil
+    if not tower or not tower.Character then return nil end
+    local model = tower.Character:GetCharacterModel()
+    local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+    return root and root.Position or nil
 end
 
-local function GetTowerByX(axisX)
-	local nearestTower = nil
-	local minDist = 1
-	for _, tower in pairs(TowerClass.GetTowers()) do
-		local pos = GetTowerPosition(tower)
-		if pos then
-			local dist = math.abs(pos.X - axisX)
-			if dist <= minDist then
-				minDist = dist
-				nearestTower = tower
-			end
-		end
-	end
-	return nearestTower
+-- Tìm tower gần đúng theo X
+local function GetTowerByX(x)
+    local bestTower, bestDist = nil, math.huge
+    for _, tower in pairs(TowerClass.GetTowers()) do
+        local pos = GetTowerPosition(tower)
+        if pos then
+            local dist = math.abs(pos.X - x)
+            if dist < bestDist and dist <= 1 then
+                bestDist = dist
+                bestTower = tower
+            end
+        end
+    end
+    return bestTower
 end
 
+-- Get tower place cost
 local function GetTowerPlaceCostByName(name)
-	local gui = player:FindFirstChild("PlayerGui")
-	local interface = gui and gui:FindFirstChild("Interface")
-	local bottomBar = interface and interface:FindFirstChild("BottomBar")
-	local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
-	if not towersBar then return 0 end
+    local gui = player:FindFirstChild("PlayerGui")
+    local interface = gui and gui:FindFirstChild("Interface")
+    local bottomBar = interface and interface:FindFirstChild("BottomBar")
+    local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
+    if not towersBar then return 0 end
 
-	for _, tower in ipairs(towersBar:GetChildren()) do
-		if tower.Name == name then
-			local costFrame = tower:FindFirstChild("CostFrame")
-			local costText = costFrame and costFrame:FindFirstChild("CostText")
-			if costText then
-				local raw = tostring(costText.Text):gsub("%D", "")
-				return tonumber(raw) or 0
-			end
-		end
-	end
-	return 0
+    for _, tower in ipairs(towersBar:GetChildren()) do
+        if tower.Name == name then
+            local costFrame = tower:FindFirstChild("CostFrame")
+            local costText = costFrame and costFrame:FindFirstChild("CostText")
+            if costText then
+                local raw = tostring(costText.Text):gsub("%D", "")
+                return tonumber(raw) or 0
+            end
+        end
+    end
+    return 0
 end
 
--- init folder
+-- Tạo folder nếu chưa có
 if makefolder then
-	pcall(function() makefolder("tdx") end)
-	pcall(function() makefolder("tdx/macros") end)
+    pcall(function() makefolder("tdx") end)
+    pcall(function() makefolder("tdx/macros") end)
 end
 
+-- Chạy liên tục
 while true do
-	if isfile(txtFile) then
-		local macro = readfile(txtFile)
-		local logs = {}
+    if isfile(txtFile) then
+        local macro = readfile(txtFile)
+        local logs = {}
 
-		for line in macro:gmatch("[^\r\n]+") do
-			local matched = false
+        for line in macro:gmatch("[^\r\n]+") do
+            local matched = false
 
-			local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*"([^"]+)",%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-			if a1 and name and x and y and z and rot then
-				local vector = x .. ", " .. y .. ", " .. z
-				local cost = GetTowerPlaceCostByName(name)
-				table.insert(logs, {
-					TowerPlaceCost = tonumber(cost) or 0,
-					TowerPlaced = name,
-					TowerVector = vector,
-					Rotation = rot,
-					TowerA1 = tostring(a1)
-				})
-				matched = true
-			end
+            -- Đặt tower
+            local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*"([^"]+)",%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+            if a1 and name and x and y and z and rot then
+                local cost = GetTowerPlaceCostByName(name)
+                table.insert(logs, {
+                    TowerPlaceCost = tonumber(cost) or 0,
+                    TowerPlaced = name,
+                    TowerVector = x .. ", " .. y .. ", " .. z,
+                    Rotation = rot,
+                    TowerA1 = tostring(a1)
+                })
+                matched = true
+            end
 
-			if not matched then
-				local xVal, path = line:match('TDX:upgradeTower%(([%d%.]+),%s*(%d),')
-				if xVal and path then
-					local axisX = tonumber(xVal)
-					local tower = GetTowerByX(axisX)
-					local pathNum = tonumber(path)
-					if tower and tower.LevelHandler then
-						local before = tower.LevelHandler:GetLevelOnPath(pathNum)
-						task.wait(0.1)
-						local after = tower.LevelHandler:GetLevelOnPath(pathNum)
-						if after > before then
-							table.insert(logs, {
-								UpgradeCost = 0,
-								UpgradePath = pathNum,
-								TowerUpgraded = axisX
-							})
-							print(string.format("✅ Upgrade: X=%.2f | Path=%d | %d➜%d", axisX, pathNum, before, after))
-						else
-							print(string.format("⛔ Không ghi nâng (không đổi cấp): X=%.2f | Path=%d", axisX, pathNum))
-						end
-					else
-						print(string.format("⚠️ Tower không tồn tại tại X=%.2f", axisX))
-					end
-					matched = true
-				end
-			end
+            -- Nâng cấp tower
+            if not matched then
+                local xVal, path = line:match('TDX:upgradeTower%(([%d%.]+),%s*(%d),')
+                if xVal and path then
+                    local axisX = tonumber(xVal)
+                    local tower = GetTowerByX(axisX)
+                    local pathNum = tonumber(path)
+                    if tower and tower.LevelHandler then
+                        local before = tower.LevelHandler:GetLevelOnPath(pathNum)
+                        task.wait(0.1) -- nhỏ delay để kịp bắt nâng
+                        local after = tower.LevelHandler:GetLevelOnPath(pathNum)
+                        if after and after > before then
+                            table.insert(logs, {
+                                UpgradeCost = 0, -- để run xử lý
+                                UpgradePath = pathNum,
+                                TowerUpgraded = axisX
+                            })
+                            print(string.format("✅ Ghi nâng cấp: X=%.2f | Path=%d | %d ➜ %d", axisX, pathNum, before, after))
+                        else
+                            print(string.format("❌ Không ghi nâng (không tăng cấp): X=%.2f | Path=%d", axisX, pathNum))
+                        end
+                    else
+                        print(string.format("⚠️ Không tìm thấy tower tại X=%.2f", axisX))
+                    end
+                    matched = true
+                end
+            end
 
-			if not matched then
-				local xTarget, targetType = line:match('TDX:changeQueryType%(([%d%.]+),%s*(%d)%)')
-				if xTarget and targetType then
-					table.insert(logs, {
-						ChangeTarget = tonumber(xTarget),
-						TargetType = tonumber(targetType)
-					})
-					matched = true
-				end
-			end
+            -- Đổi target
+            if not matched then
+                local xTarget, targetType = line:match('TDX:changeQueryType%(([%d%.]+),%s*(%d)%)')
+                if xTarget and targetType then
+                    table.insert(logs, {
+                        ChangeTarget = tonumber(xTarget),
+                        TargetType = tonumber(targetType)
+                    })
+                    matched = true
+                end
+            end
 
-			if not matched then
-				local xSell = line:match('TDX:sellTower%(([%d%.]+)%)')
-				if xSell then
-					table.insert(logs, {
-						SellTower = tonumber(xSell)
-					})
-				end
-			end
-		end
+            -- Bán tower
+            if not matched then
+                local xSell = line:match('TDX:sellTower%(([%d%.]+)%)')
+                if xSell then
+                    table.insert(logs, {
+                        SellTower = tonumber(xSell)
+                    })
+                end
+            end
+        end
 
-		writefile(outJson, HttpService:JSONEncode(logs))
-		print("✅ Đã ghi lại macro vào", outJson)
-	end
-	wait(0.22)
+        writefile(outJson, HttpService:JSONEncode(logs))
+        print("✅ Ghi file thành công:", outJson)
+    end
+    wait(0.22)
 end
