@@ -101,14 +101,15 @@ local function SafeRequire(module)
     return success and result or nil
 end
 
-local TowerClass
-do
+-- Load TowerClass
+local TowerClass = (function()
     local client = PlayerScripts:WaitForChild("Client")
     local gameClass = client:WaitForChild("GameClass")
     local towerModule = gameClass:WaitForChild("TowerClass")
-    TowerClass = SafeRequire(towerModule)
-end
+    return SafeRequire(towerModule)
+end)()
 
+-- Lấy vị trí tower từ mô hình
 local function GetTowerPosition(tower)
     if not tower or not tower.Character then return nil end
     local model = tower.Character:GetCharacterModel()
@@ -116,6 +117,7 @@ local function GetTowerPosition(tower)
     return root and root.Position or nil
 end
 
+-- Lấy giá đặt tower
 local function GetTowerPlaceCostByName(name)
     local gui = player:FindFirstChild("PlayerGui")
     local interface = gui and gui:FindFirstChild("Interface")
@@ -136,6 +138,21 @@ local function GetTowerPlaceCostByName(name)
     return 0
 end
 
+-- Ánh xạ hash → pos
+local hash2pos = {}
+task.spawn(function()
+    while true do
+        for hash, tower in pairs(TowerClass.GetTowers()) do
+            local pos = GetTowerPosition(tower)
+            if pos then
+                hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+            end
+        end
+        task.wait(0.1)
+    end
+end)
+
+-- Tạo folder nếu cần
 if makefolder then
     pcall(function() makefolder("tdx") end)
     pcall(function() makefolder("tdx/macros") end)
@@ -147,7 +164,7 @@ while true do
         local logs = {}
 
         for line in macro:gmatch("[^\r\n]+") do
-            -- PlaceTower
+            -- Đặt tower
             local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
             if a1 and name and x and y and z and rot then
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
@@ -160,56 +177,60 @@ while true do
                     Rotation = rot,
                     TowerA1 = tostring(a1)
                 })
+                print(string.format("📦 Ghi TowerPlaced: %s tại (%.2f, %.2f, %.2f)", name, x, y, z))
 
-            -- UpgradeTower
+            -- Nâng cấp tower
             else
                 local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*[^%)]+%)')
                 if hash and path then
-                    local tower = TowerClass and TowerClass.GetTowers()[hash]
                     local pathNum = tonumber(path)
-                    if tower and tower.LevelHandler then
-                        local lvlBefore = tower.LevelHandler:GetLevelOnPath(pathNum)
-                        task.wait(0.1) -- delay để chắc chắn nâng
-                        local lvlAfter = tower.LevelHandler:GetLevelOnPath(pathNum)
+                    local tower = TowerClass.GetTowers()[hash]
+                    local pos = hash2pos[hash]
 
-                        if lvlAfter > lvlBefore then
-                            local pos = GetTowerPosition(tower)
-                            if pos then
-                                table.insert(logs, {
-                                    UpgradeCost = 0,
-                                    UpgradePath = pathNum,
-                                    TowerUpgraded = pos.X
-                                })
-                                print(string.format("✅ Ghi nâng: X=%.2f | Path=%d | %d ➜ %d", pos.X, pathNum, lvlBefore, lvlAfter))
-                            end
+                    if tower and pos and tower.LevelHandler then
+                        local before = tower.LevelHandler:GetLevelOnPath(pathNum)
+                        task.wait(0.05) -- Delay để đảm bảo nâng cấp đã thực hiện
+                        local after = tower.LevelHandler:GetLevelOnPath(pathNum)
+
+                        print(string.format("🔍 Xác thực nâng cấp | Hash: %s | Path: %d | Level: %d -> %d", hash, pathNum, before, after))
+
+                        if after > before then
+                            table.insert(logs, {
+                                UpgradeCost = 0,
+                                UpgradePath = pathNum,
+                                TowerUpgraded = pos.x
+                            })
+                            print(string.format("✅ Ghi Upgrade: X=%.2f | Path=%d | Level %d ➜ %d", pos.x, pathNum, before, after))
                         else
-                            print(string.format("❌ Bỏ nâng (không tăng cấp): Hash=%s | Path=%d", hash, pathNum))
+                            print(string.format("❌ Bỏ Upgrade (không tăng cấp): X=%.2f | Path=%d", pos.x or 0, pathNum))
                         end
+                    else
+                        print(string.format("⚠️ Không tìm thấy tower để nâng cấp: hash=%s", tostring(hash)))
                     end
 
-                -- ChangeTarget
+                -- Đổi target
                 else
                     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
                     if hash and targetType then
-                        local tower = TowerClass and TowerClass.GetTowers()[hash]
-                        local pos = GetTowerPosition(tower)
+                        local pos = hash2pos[tostring(hash)]
                         if pos then
                             table.insert(logs, {
-                                ChangeTarget = pos.X,
+                                ChangeTarget = pos.x,
                                 TargetType = tonumber(targetType)
                             })
+                            print(string.format("🎯 Ghi ChangeTarget: X=%.2f → %s", pos.x, targetType))
                         end
 
-                    -- SellTower
+                    -- Bán tower
                     else
                         local hash = line:match('TDX:sellTower%(([^%)]+)%)')
                         if hash then
-                            local tower = TowerClass and TowerClass.GetTowers()[hash]
-                            local pos = GetTowerPosition(tower)
+                            local pos = hash2pos[tostring(hash)]
                             if pos then
                                 table.insert(logs, {
-                                    SellTower = pos.X
+                                    SellTower = pos.x
                                 })
+                                print(string.format("💰 Ghi SellTower: X=%.2f", pos.x))
                             end
                         end
                     end
@@ -218,7 +239,7 @@ while true do
         end
 
         writefile(outJson, HttpService:JSONEncode(logs))
-        print("✅ Ghi xong vào:", outJson)
+        print("📝 Ghi JSON xong: ", outJson)
     end
     wait(0.22)
 end
