@@ -87,9 +87,6 @@ end)
 
 print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
 
--- Script chuyển đổi record.txt thành macro runner (dùng trục X), với thứ tự trường upgrade là: UpgradeCost, UpgradePath, TowerUpgraded
--- Đặt script này trong môi trường Roblox hoặc môi trường hỗ trợ các API Roblox tương ứng
-
 local txtFile = "record.txt"
 local outJson = "tdx/macros/x.json"
 
@@ -158,6 +155,14 @@ local function GetUpgradeCost(tower, path)
     return 0
 end
 
+-- Get level safely
+local function GetLevel(tower, path)
+    local ok, lvl = pcall(function()
+        return tower.LevelHandler:GetLevelOnPath(path)
+    end)
+    return ok and lvl or nil
+end
+
 -- Ánh xạ hash -> pos liên tục
 local hash2pos = {}
 task.spawn(function()
@@ -183,7 +188,7 @@ while true do
         local logs = {}
 
         for line in macro:gmatch("[^\r\n]+") do
-            -- Đặt tower: a1, name, x, y, z, rot
+            -- PLACE
             local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
             if a1 and name and x and y and z and rot then
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
@@ -196,22 +201,34 @@ while true do
                     Rotation = rot,
                     TowerA1 = tostring(a1)
                 })
+
+            -- UPGRADE
             else
-                -- Nâng cấp tower: chuyển đổi đúng thứ tự UpgradeCost, UpgradePath, TowerUpgraded (X)
                 local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*[^%)]+%)')
                 if hash and path then
-                    local pos = hash2pos[tostring(hash)]
                     local tower = TowerClass and TowerClass.GetTowers()[hash]
-                    local upgradeCost = GetUpgradeCost(tower, tonumber(path))
-                    if pos then
-                        table.insert(logs, {
-                            UpgradeCost = upgradeCost,
-                            UpgradePath = tonumber(path),
-                            TowerUpgraded = pos.x
-                        })
+                    local pos = hash2pos[tostring(hash)]
+                    local pathNum = tonumber(path)
+                    if tower and pos and tower.LevelHandler then
+                        local before = GetLevel(tower, pathNum)
+                        task.wait(0.1)
+                        local after = GetLevel(tower, pathNum)
+                        if before and after and after > before then
+                            table.insert(logs, {
+                                UpgradeCost = 0,
+                                UpgradePath = pathNum,
+                                TowerUpgraded = pos.x
+                            })
+                            print(string.format("✅ Ghi upgrade: X=%.2f | Path=%d | %d ➜ %d", pos.x, pathNum, before, after))
+                        else
+                            print(string.format("⛔ Không ghi upgrade (không đổi cấp): hash=%s | Path=%d", hash, pathNum))
+                        end
+                    else
+                        print(string.format("⚠️ Không tìm thấy tower hash=%s hoặc thiếu dữ liệu", hash))
                     end
+
+                -- CHANGE TARGET
                 else
-                    -- Đổi target
                     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
                     if hash and targetType then
                         local pos = hash2pos[tostring(hash)]
@@ -221,8 +238,9 @@ while true do
                                 TargetType = tonumber(targetType)
                             })
                         end
+
+                    -- SELL
                     else
-                        -- Bán tower
                         local hash = line:match('TDX:sellTower%(([^%)]+)%)')
                         if hash then
                             local pos = hash2pos[tostring(hash)]
@@ -238,6 +256,7 @@ while true do
         end
 
         writefile(outJson, HttpService:JSONEncode(logs))
+        print("✅ Đã ghi lại macro vào:", outJson)
     end
     wait(0.22)
 end
