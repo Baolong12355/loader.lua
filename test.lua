@@ -159,6 +159,32 @@ while true do
         local logs = {}
         for line in macro:gmatch("[^\r\n]+") do
             -- PlaceTower
+            local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*"([^"]+)",%s*([%d%.%-]+),%s*([%d%.%-]+),%s*([%d%.%-]+),%s*([%d%.%-]+)%)')
+if a1 and name and x and y and z and rot then
+	local cost = GetTowerPlaceCostByName(name)
+	local vector = x .. ", " .. y .. ", " .. z
+	local placedX = tonumber(x)
+
+	-- Xác định tower vừa được đặt (tìm tower gần tọa độ X)
+	local matched = false
+	for _, tower in pairs(TowerClass.GetTowers()) do
+		local pos = GetTowerPosition(tower)
+		if pos and math.abs(pos.X - placedX) <= 1 then
+			matched = true
+			break
+		end
+	end
+
+	if matched then
+		table.insert(logs, {
+			TowerPlaceCost = tonumber(cost) or 0,
+			TowerPlaced = name,
+			TowerVector = vector,
+			Rotation = rot,
+			TowerA1 = tostring(a1)
+		})
+	end
+            end
             
                 -- TowerUpgradeRequest
                 local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*(%d),')
