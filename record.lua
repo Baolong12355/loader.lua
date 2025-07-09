@@ -182,8 +182,6 @@ if makefolder then
     pcall(function() makefolder("tdx/macros") end)
 end
 
-print("✅ Đang ghi macro vào: " .. outJson)
-
 while true do
     if isfile(txtFile) then
         local macro = readfile(txtFile)
@@ -221,7 +219,12 @@ while true do
                                 UpgradePath = pathNum,
                                 TowerUpgraded = pos.x
                             })
+                            print(string.format("✅ Ghi upgrade: X=%.2f | Path=%d | %d ➜ %d", pos.x, pathNum, before, after))
+                        else
+                            print(string.format("⛔ Không ghi upgrade (không đổi cấp): hash=%s | Path=%d", hash, pathNum))
                         end
+                    else
+                        print(string.format("⚠️ Không tìm thấy tower hash=%s hoặc thiếu dữ liệu", hash))
                     end
 
                 -- CHANGE TARGET
