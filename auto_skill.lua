@@ -27,7 +27,6 @@ local skipTowerTypes = {
 	["Combat Drone"] = true
 }
 
--- Các tower đặc biệt cần xử lý nhanh hơn
 local fastTowers = {
 	["Ice Breaker"] = true,
 	["John"] = true,
@@ -51,6 +50,20 @@ local function GetFirstEnemyPosition()
 		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
 			return enemy.Position
 		end
+	end
+	return nil
+end
+
+local function GetRandomEnemyPosition()
+	local enemies = {}
+	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
+		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
+			table.insert(enemies, enemy)
+		end
+	end
+	if #enemies > 0 then
+		local randomEnemy = enemies[math.random(1, #enemies)]
+		return randomEnemy.Position
 	end
 	return nil
 end
@@ -81,7 +94,7 @@ local function hasEnemyInRange(tower, studsLimit)
 	local range = studsLimit or getRange(tower)
 	if not towerPos or range <= 0 then return false end
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-		if enemy:IsA("BasePart") and (enemy.Position - towerPos).Magnitude <= range then
+		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" and (enemy.Position - towerPos).Magnitude <= range then
 			return true
 		end
 	end
@@ -161,9 +174,14 @@ RunService.Heartbeat:Connect(function()
 				end
 
 				if allowUse then
-					local pos = GetFirstEnemyPosition()
-					local sendWithPos = false
+					local pos
+					if towerType == "Commander" and index == 3 then
+						pos = GetRandomEnemyPosition()
+					else
+						pos = GetFirstEnemyPosition()
+					end
 
+					local sendWithPos = false
 					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
 						if index == directionalInfo.onlyAbilityIndex then
 							sendWithPos = true
