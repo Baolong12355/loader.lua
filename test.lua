@@ -95,7 +95,7 @@ local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local Workspace = game:GetService("Workspace")
 
--- Lấy cấp path
+-- Hàm lấy cấp path
 local function GetPathLevel(tower, path)
 	if not tower or not tower.LevelHandler then return nil end
 	local ok, result = pcall(function()
@@ -104,7 +104,7 @@ local function GetPathLevel(tower, path)
 	return ok and result or nil
 end
 
--- Tạo ánh xạ hash → info từ workspace
+-- Ánh xạ hash -> info từ workspace
 local hash2info = {}
 task.spawn(function()
 	while true do
@@ -135,7 +135,7 @@ task.spawn(function()
 	end
 end)
 
--- Get cost đặt tower
+-- Lấy giá đặt tower
 local function GetTowerPlaceCostByName(name)
 	local gui = player:FindFirstChild("PlayerGui")
 	local interface = gui and gui:FindFirstChild("Interface")
@@ -153,7 +153,7 @@ local function GetTowerPlaceCostByName(name)
 	return 0
 end
 
--- Tạo thư mục nếu cần
+-- Tạo thư mục
 if makefolder then
 	pcall(function() makefolder("tdx") end)
 	pcall(function() makefolder("tdx/macros") end)
@@ -170,50 +170,50 @@ while true do
 			local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
 			if a1 and name and x and y and z and rot then
 				name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
-				local vector = x .. ", " .. y .. ", " .. z
 				table.insert(logs, {
 					TowerA1 = a1,
 					TowerPlaced = name,
-					TowerVector = vector,
+					TowerVector = x .. ", " .. y .. ", " .. z,
 					Rotation = rot,
 					TowerPlaceCost = GetTowerPlaceCostByName(name)
 				})
-			else
-				-- UPGRADE
-				local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*(%d),')
-				if hash and path and hash2info[hash] then
-					local info = hash2info[hash]
-					local tower = info.tower
-					local before = GetPathLevel(tower, tonumber(path))
-					task.wait(0.1)
-					local after = GetPathLevel(tower, tonumber(path))
-					if after and before and after > before then
-						table.insert(logs, {
-							TowerUpgraded = info.x,
-							UpgradePath = tonumber(path),
-							UpgradeCost = 0
-						})
-					end
-				end
+			end
 
-				-- CHANGE TARGET
-				local hash, qtype = line:match('TDX:changeQueryType%(([^,]+),%s*(%d)%)')
-				if hash and qtype and hash2info[hash] then
-					local info = hash2info[hash]
+			-- UPGRADE
+			local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*(%d),')
+			if hash and path and hash2info[hash] then
+				local info = hash2info[hash]
+				local tower = info.tower
+				local pathNum = tonumber(path)
+				local before = GetPathLevel(tower, pathNum)
+				task.wait(0.1)
+				local after = GetPathLevel(tower, pathNum)
+				if before and after and after > before then
 					table.insert(logs, {
-						ChangeTarget = info.x,
-						TargetType = tonumber(qtype)
+						TowerUpgraded = info.x,
+						UpgradePath = pathNum,
+						UpgradeCost = 0
 					})
 				end
+			end
 
-				-- SELL
-				local hash = line:match('TDX:sellTower%(([^%)]+)%)')
-				if hash and hash2info[hash] then
-					local info = hash2info[hash]
-					table.insert(logs, {
-						SellTower = info.x
-					})
-				end
+			-- CHANGE TARGET
+			local hash, qtype = line:match('TDX:changeQueryType%(([^,]+),%s*(%d)%)')
+			if hash and qtype and hash2info[hash] then
+				local info = hash2info[hash]
+				table.insert(logs, {
+					ChangeTarget = info.x,
+					TargetType = tonumber(qtype)
+				})
+			end
+
+			-- SELL
+			local hash = line:match('TDX:sellTower%(([^%)]+)%)')
+			if hash and hash2info[hash] then
+				local info = hash2info[hash]
+				table.insert(logs, {
+					SellTower = info.x
+				})
 			end
 		end
 
