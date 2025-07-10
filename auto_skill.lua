@@ -5,6 +5,7 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
 
 local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
+local EnemyClass = require(PlayerScripts.Client.GameClass:WaitForChild("EnemyClass"))
 local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
 local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
@@ -54,18 +55,34 @@ local function GetFirstEnemyPosition()
 	return nil
 end
 
-local function GetRandomEnemyPosition()
+local function GetRandomCommanderTarget()
 	local enemies = {}
-	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
+	local strongest, maxHP = nil, -1
+	for _, enemy in pairs(EnemyClass.GetEnemies()) do
+		if enemy.IsAlive and not enemy.IsAirUnit and enemy.Type ~= "Arrow" then
+			local hp = 0
+			if enemy.HealthHandler and enemy.HealthHandler.GetHealth then
+				local ok, result = pcall(function()
+					return enemy.HealthHandler:GetHealth()
+				end)
+				if ok and typeof(result) == "number" then
+					hp = result
+				end
+			end
+			if hp > maxHP then
+				strongest = enemy
+				maxHP = hp
+			end
 			table.insert(enemies, enemy)
 		end
 	end
-	if #enemies > 0 then
-		local randomEnemy = enemies[math.random(1, #enemies)]
-		return randomEnemy.Position
+	if #enemies == 0 then return nil end
+	if math.random() <= 0.6 then
+		return strongest and strongest:GetPosition() or nil
+	else
+		local chosen = enemies[math.random(1, #enemies)]
+		return chosen and chosen:GetPosition() or nil
 	end
-	return nil
 end
 
 local function getTowerPos(tower)
@@ -95,7 +112,9 @@ local function hasEnemyInRange(tower, studsLimit)
 	if not towerPos or range <= 0 then return false end
 	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
 		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" and (enemy.Position - towerPos).Magnitude <= range then
-			return true
+			if not enemy:FindFirstChild("IsAirUnit") or not enemy.IsAirUnit.Value then
+				return true
+			end
 		end
 	end
 	return false
@@ -125,14 +144,10 @@ RunService.Heartbeat:Connect(function()
 	local now = tick()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
 		if not tower or not tower.AbilityHandler then continue end
-
 		local towerType = tower.Type
 		if skipTowerTypes[towerType] then continue end
-
 		local delay = fastTowers[towerType] and 0.1 or 0.2
-		if lastUsedTime[hash] and now - lastUsedTime[hash] < delay then
-			continue
-		end
+		if lastUsedTime[hash] and now - lastUsedTime[hash] < delay then continue end
 		lastUsedTime[hash] = now
 
 		local directionalInfo = directionalTowerTypes[towerType]
@@ -142,17 +157,10 @@ RunService.Heartbeat:Connect(function()
 			pcall(function()
 				local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
 				if not CanUseAbility(ability) then return end
-
 				local allowUse = true
 
 				if towerType == "Ice Breaker" then
-					if index == 1 then
-						allowUse = true
-					elseif index == 2 then
-						allowUse = hasEnemyInRange(tower, 8)
-					else
-						allowUse = false
-					end
+					allowUse = (index == 1) or (index == 2 and hasEnemyInRange(tower, 8))
 				elseif towerType == "Slammer" then
 					allowUse = hasEnemyInRange(tower)
 				elseif towerType == "John" then
@@ -176,7 +184,7 @@ RunService.Heartbeat:Connect(function()
 				if allowUse then
 					local pos
 					if towerType == "Commander" and index == 3 then
-						pos = GetRandomEnemyPosition()
+						pos = GetRandomCommanderTarget()
 					else
 						pos = GetFirstEnemyPosition()
 					end
