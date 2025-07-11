@@ -96,12 +96,12 @@ local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 local Workspace = game:GetService("Workspace")
 
+-- Safe require tower module
 local function SafeRequire(module)
 	local ok, result = pcall(require, module)
 	return ok and result or nil
 end
 
--- Load TowerClass
 local TowerClass
 do
 	local client = PlayerScripts:FindFirstChild("Client")
@@ -115,6 +115,16 @@ if not TowerClass then
 	return
 end
 
+-- Lấy cấp path
+local function GetPathLevel(tower, path)
+	if not tower or not tower.LevelHandler then return nil end
+	local ok, result = pcall(function()
+		return tower.LevelHandler:GetLevelOnPath(path)
+	end)
+	return ok and result or nil
+end
+
+-- Lấy vị trí tower
 local function GetTowerPosition(tower)
 	if not tower or not tower.Character then return nil end
 	local ok, pos = pcall(function()
@@ -125,19 +135,9 @@ local function GetTowerPosition(tower)
 	return ok and pos or nil
 end
 
-local function GetPathLevel(tower, path)
-	if not tower or not tower.LevelHandler then return nil end
-	local ok, result = pcall(function()
-		return tower.LevelHandler:GetLevelOnPath(path)
-	end)
-	return ok and result or nil
-end
-
--- cache cấp độ tower theo axisX
-local levelCache = {}
-
+-- Tìm tower bằng X
 local function GetTowerByAxis(axisX)
-	for hash, tower in pairs(TowerClass.GetTowers()) do
+	for _, tower in pairs(TowerClass.GetTowers()) do
 		local pos = GetTowerPosition(tower)
 		if pos and math.abs(pos.X - axisX) <= 0.5 then
 			return tower
@@ -146,6 +146,7 @@ local function GetTowerByAxis(axisX)
 	return nil
 end
 
+-- Lấy giá tiền
 local function GetTowerPlaceCostByName(name)
 	local gui = player:FindFirstChild("PlayerGui")
 	local interface = gui and gui:FindFirstChild("Interface")
@@ -169,7 +170,7 @@ if makefolder then
 	pcall(function() makefolder("tdx/macros") end)
 end
 
-print("✅ Bắt đầu convert record.txt → x.json")
+print("✅ Đang convert record.txt → x.json...")
 
 while true do
 	if isfile(txtFile) then
@@ -177,10 +178,10 @@ while true do
 		local logs = {}
 
 		for line in macro:gmatch("[^\r\n]+") do
-			-- PLACE
-			local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+			-- PLACE: không được sai định dạng
+			local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*("?[^,"]+"?),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
 			if a1 and name and x and y and z and rot then
-				name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
+				name = name:gsub('^%s*"(.-)"%s*$', '%1') -- loại bỏ dấu "
 				local cost = GetTowerPlaceCostByName(name)
 				local vector = x .. ", " .. y .. ", " .. z
 				table.insert(logs, {
@@ -190,7 +191,7 @@ while true do
 					Rotation = rot,
 					TowerA1 = tostring(a1)
 				})
-				print("[✓] Place:", name, vector)
+				print("[✓] PLACE:", name, vector)
 			else
 				-- UPGRADE
 				local axis, path = line:match('TDX:upgradeTower%(([^,]+),%s*(%d),')
@@ -208,26 +209,24 @@ while true do
 								UpgradePath = path,
 								TowerUpgraded = axisX
 							})
-							print(string.format("[✓] Upgrade success: X=%.2f | path=%d | %d➜%d", axisX, path, before, after))
+							print(string.format("[✓] UPGRADE: %.2f | path %d | %d➜%d", axisX, path, before, after))
 						else
-							print(string.format("[✗] Upgrade failed: X=%.2f | path=%d | before=%s | after=%s", axisX, path, tostring(before), tostring(after)))
+							print(string.format("[✗] Upgrade failed: X=%.2f path=%d", axisX, path))
 						end
-					else
-						print("[!] Tower not found at X:", axisX)
 					end
 				end
 
 				-- CHANGE TARGET
-				local axis, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*(%d)%)')
-				if axis and targetType then
+				local axis, qtype = line:match('TDX:changeQueryType%(([^,]+),%s*(%d)%)')
+				if axis and qtype then
 					local tower = GetTowerByAxis(tonumber(axis))
 					if tower then
 						local pos = GetTowerPosition(tower)
 						table.insert(logs, {
 							ChangeTarget = pos.X,
-							TargetType = tonumber(targetType)
+							TargetType = tonumber(qtype)
 						})
-						print("[✓] Change target:", pos.X, targetType)
+						print("[✓] TARGET:", pos.X, qtype)
 					end
 				end
 
@@ -240,7 +239,7 @@ while true do
 						table.insert(logs, {
 							SellTower = pos.X
 						})
-						print("[✓] Sell:", pos.X)
+						print("[✓] SELL:", pos.X)
 					end
 				end
 			end
@@ -248,5 +247,5 @@ while true do
 
 		writefile(outJson, HttpService:JSONEncode(logs))
 	end
-	task.wait(0.2)
+	task.wait(0.22)
 end
