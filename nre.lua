@@ -96,13 +96,11 @@ local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 local Workspace = game:GetService("Workspace")
 
--- Safe require tower module
 local function SafeRequire(module)
     local ok, result = pcall(require, module)
     return ok and result or nil
 end
 
--- Load TowerClass
 local TowerClass
 do
     local client = PlayerScripts:FindFirstChild("Client")
@@ -116,7 +114,6 @@ if not TowerClass then
     return
 end
 
--- Lấy cấp path
 local function GetPathLevel(tower, path)
     if not tower or not tower.LevelHandler then return nil end
     local ok, result = pcall(function()
@@ -125,10 +122,9 @@ local function GetPathLevel(tower, path)
     return ok and result or nil
 end
 
--- Cache cấp path
+-- cache nâng cấp
 local upgradeCache = {}
 
--- Cập nhật cache trước khi nâng cấp
 local function CacheCurrentLevels()
     for hash, tower in pairs(TowerClass.GetTowers()) do
         local h = tostring(hash)
@@ -142,21 +138,20 @@ local function CacheCurrentLevels()
     end
 end
 
--- Kiểm tra nâng cấp thành công
 local function IsUpgradeSuccess(hash, path)
     local tower = TowerClass.GetTowers()[hash]
     if not tower then return false end
     local cur = GetPathLevel(tower, path)
     local old = upgradeCache[hash] and upgradeCache[hash][path]
     if old ~= nil and cur and cur > old then
-        print(string.format("[UPGRADE SUCCESS] hash: %s | path: %d | %d ➜ %d", hash, path, old, cur))
         upgradeCache[hash][path] = cur
+        print(string.format("✅ Upgrade thành công: hash=%s | path=%d | %d ➜ %d", hash, path, old, cur))
         return true
     end
     return false
 end
 
--- Get Tower position
+-- get pos
 local function GetTowerPosition(tower)
     if not tower or not tower.Character then return nil end
     local ok, pos = pcall(function()
@@ -167,7 +162,7 @@ local function GetTowerPosition(tower)
     return ok and pos or nil
 end
 
--- Ánh xạ hash → pos
+-- ánh xạ hash → pos
 local hash2pos = {}
 task.spawn(function()
     while true do
@@ -181,25 +176,27 @@ task.spawn(function()
     end
 end)
 
--- Lấy giá đặt tower
+-- lấy giá đặt tower
 local function GetTowerPlaceCostByName(name)
     local gui = player:FindFirstChild("PlayerGui")
     local interface = gui and gui:FindFirstChild("Interface")
     local bottomBar = interface and interface:FindFirstChild("BottomBar")
     local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
     if not towersBar then return 0 end
+
     for _, tower in ipairs(towersBar:GetChildren()) do
         if tower.Name == name then
             local text = tower:FindFirstChild("CostFrame") and tower.CostFrame:FindFirstChild("CostText")
             if text then
-                return tonumber(text.Text:gsub("%D", "")) or 0
+                local raw = tostring(text.Text):gsub("%D", "")
+                return tonumber(raw) or 0
             end
         end
     end
     return 0
 end
 
--- Tạo thư mục nếu cần
+-- tạo thư mục nếu chưa có
 if makefolder then
     pcall(function() makefolder("tdx") end)
     pcall(function() makefolder("tdx/macros") end)
@@ -207,14 +204,16 @@ end
 
 print("✅ Bắt đầu chuyển đổi record.txt → x.json...")
 
+-- Lặp chuyển đổi liên tục
 while true do
     if isfile(txtFile) then
+        CacheCurrentLevels() -- cập nhật trước khi chuyển
         local macro = readfile(txtFile)
         local logs = {}
 
         for line in macro:gmatch("[^\r\n]+") do
             -- PLACE
-            local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+            local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*"?([^,"]+)"?,%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
             if a1 and name and x and y and z and rot then
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
                 local cost = GetTowerPlaceCostByName(name)
@@ -235,6 +234,7 @@ while true do
                     local tower = TowerClass.GetTowers()[hash]
                     local pos = hash2pos[hash]
                     if tower and pos then
+                        task.wait(0.05)
                         if IsUpgradeSuccess(hash, path) then
                             table.insert(logs, {
                                 UpgradeCost = 0,
@@ -242,10 +242,10 @@ while true do
                                 TowerUpgraded = pos.x
                             })
                         else
-                            print("[SKIP] Upgrade failed (no level increase):", hash)
+                            print("[SKIP] Upgrade failed:", hash)
                         end
                     else
-                        print("[SKIP] Upgrade: tower or pos nil:", hash)
+                        print("[WARN] Tower hoặc vị trí không tìm thấy:", hash)
                     end
                 end
 
@@ -258,7 +258,7 @@ while true do
                             ChangeTarget = pos.x,
                             TargetType = tonumber(qtype)
                         })
-                        print("[LOG] Change target:", pos.x, qtype)
+                        print("[LOG] Change Target:", hash, qtype)
                     end
                 end
 
@@ -270,12 +270,13 @@ while true do
                         table.insert(logs, {
                             SellTower = pos.x
                         })
-                        print("[LOG] Sell:", pos.x)
+                        print("[LOG] Sell:", hash)
                     end
                 end
             end
         end
 
+        print("✅ Đã ghi", #logs, "dòng vào x.json")
         writefile(outJson, HttpService:JSONEncode(logs))
     end
     task.wait(0.22)
