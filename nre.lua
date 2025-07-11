@@ -94,14 +94,13 @@ local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Load TowerClass
 local TowerClass
 do
     local client = PlayerScripts:FindFirstChild("Client")
     local gameClass = client and client:FindFirstChild("GameClass")
-    local towerModule = gameClass and (gameClass:FindFirstChild("TowerClass") or gameClass:FindFirstChild("TowerModule"))
+    local towerModule = gameClass and gameClass:FindFirstChild("TowerClass")
     TowerClass = towerModule and require(towerModule)
 end
 
@@ -110,65 +109,34 @@ if not TowerClass then
     return
 end
 
--- Hàm lấy giá đặt tháp từ UI
-local function GetTowerPlaceCost(towerName)
-    -- Kiểm tra các vị trí UI phổ biến
-    local uiLocations = {
-        player.PlayerGui:FindFirstChild("Interface") and player.PlayerGui.Interface:FindFirstChild("BottomBar"),
-        player.PlayerGui:FindFirstChild("TowerSelect"),
-        player.PlayerGui:FindFirstChild("BuildMenu")
-    }
+-- Hàm lấy giá đặt tháp từ UI (theo đúng định dạng bạn cần)
+local function GetTowerPlaceCostByName(name)
+    local gui = player:FindFirstChild("PlayerGui")
+    local interface = gui and gui:FindFirstChild("Interface")
+    local bottomBar = interface and interface:FindFirstChild("BottomBar")
+    local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
     
-    for _, location in ipairs(uiLocations) do
-        if location then
-            local towerBar = location:FindFirstChild("TowersBar") or location:FindFirstChild("TowerContainer")
-            if towerBar then
-                for _, towerBtn in ipairs(towerBar:GetChildren()) do
-                    if towerBtn.Name == towerName then
-                        local costText = towerBtn:FindFirstChild("CostText") or 
-                                        (towerBtn:FindFirstChild("CostFrame") and towerBtn.CostFrame:FindFirstChild("CostText"))
-                        if costText then
-                            local cost = tonumber(costText.Text:match("%d+"))
-                            return cost or 0
-                        end
+    if towersBar then
+        for _, towerBtn in ipairs(towersBar:GetChildren()) do
+            if towerBtn.Name == name then
+                local costFrame = towerBtn:FindFirstChild("CostFrame")
+                if costFrame then
+                    local costText = costFrame:FindFirstChild("CostText")
+                    if costText then
+                        local cost = tonumber(costText.Text:match("%d+"))
+                        return cost or 0
                     end
                 end
             end
         end
     end
-    
-    -- Fallback: Thử từ ReplicatedStorage nếu có config
-    local towerConfig = ReplicatedStorage:FindFirstChild("TowerConfigs")
-    if towerConfig then
-        local config = towerConfig:FindFirstChild(towerName)
-        if config and config:FindFirstChild("Cost") then
-            return config.Cost.Value
-        end
-    end
-    
     return 0
 end
 
--- Cache system
+-- Cache và Position Tracker (giữ nguyên từ script gốc của bạn)
 local upgradeCache = {}
-local function CacheCurrentLevels()
-    for hash, tower in pairs(TowerClass.GetTowers()) do
-        upgradeCache[tostring(hash)] = {}
-        for path = 1, 2 do
-            local success, level = pcall(function()
-                return tower.LevelHandler:GetPathLevel(path)
-                    or tower.LevelHandler:GetLevelOnPath(path)
-                    or tower.LevelHandler:GetLevel(path)
-            end)
-            if success then
-                upgradeCache[tostring(hash)][path] = level
-            end
-        end
-    end
-end
-
--- Position tracking
 local hash2pos = {}
+
 task.spawn(function()
     while true do
         for hash, tower in pairs(TowerClass.GetTowers()) do
@@ -185,88 +153,101 @@ task.spawn(function()
                 }
             end
         end
-        task.wait(0.1)
+        task.wait(0.05)
     end
 end)
 
--- Tạo thư mục nếu cần
+local function CacheCurrentLevels()
+    for hash, tower in pairs(TowerClass.GetTowers()) do
+        upgradeCache[tostring(hash)] = {}
+        for path = 1, 2 do
+            local success, level = pcall(function()
+                return tower.LevelHandler:GetPathLevel(path)
+            end)
+            if success then
+                upgradeCache[tostring(hash)][path] = level
+            end
+        end
+    end
+end
+
+local function IsUpgradeSuccess(hash, path)
+    local h = tostring(hash)
+    if not upgradeCache[h] then return false end
+    
+    local tower = TowerClass.GetTowers()[hash]
+    if not tower then return false end
+    
+    local cur = tower.LevelHandler:GetPathLevel(path)
+    local old = upgradeCache[h][path]
+    
+    return old and cur and cur > old
+end
+
+-- Tạo thư mục
 if makefolder then
     pcall(makefolder, "tdx")
     pcall(makefolder, "tdx/macros")
 end
 
--- Main conversion loop
+-- Main loop (đúng định dạng đầu ra bạn yêu cầu)
 while true do
     if isfile(txtFile) then
         local logs = {}
         CacheCurrentLevels()
         
         for line in readfile(txtFile):gmatch("[^\r\n]+") do
-            -- PLACE command
+            -- PLACE (giữ nguyên định dạng đầu ra)
             local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*"([^"]+)",%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
             if a1 and name and x and y and z and rot then
-                local placeCost = GetTowerPlaceCost(name)
                 table.insert(logs, {
-                    action = "place",
-                    TowerPlaceCost = placeCost,
+                    TowerPlaceCost = GetTowerPlaceCostByName(name),
                     TowerPlaced = name,
-                    TowerVector = string.format("%.2f, %.2f, %.2f", tonumber(x), tonumber(y), tonumber(z)),
-                    Rotation = tonumber(rot),
+                    TowerVector = x..", "..y..", "..z,
+                    Rotation = rot,
                     TowerA1 = a1
                 })
             end
             
-            -- UPGRADE command
+            -- UPGRADE (đúng định dạng)
             local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*(%d)%)')
             if hash and path then
                 path = tonumber(path)
-                task.wait(0.15) -- Chờ hệ thống xử lý nâng cấp
+                task.wait(0.05)
                 
-                local tower = TowerClass.GetTowers()[hash]
-                if tower then
-                    local success, newLevel = pcall(function()
-                        return tower.LevelHandler:GetPathLevel(path)
-                            or tower.LevelHandler:GetLevelOnPath(path)
-                            or tower.LevelHandler:GetLevel(path)
-                    end)
-                    
-                    if success and upgradeCache[tostring(hash)] and newLevel and (newLevel > (upgradeCache[tostring(hash)][path] or 0)) then
-                        local pos = hash2pos[tostring(hash)]
-                        if pos then
-                            table.insert(logs, {
-                                action = "upgrade",
-                                UpgradePath = path,
-                                TowerUpgraded = pos.x,
-                                NewLevel = newLevel
-                            })
-                        end
+                if IsUpgradeSuccess(hash, path) then
+                    local pos = hash2pos[tostring(hash)]
+                    if pos then
+                        table.insert(logs, {
+                            UpgradeCost = 0,  -- Có thể thay bằng giá thực tế
+                            UpgradePath = path,
+                            TowerUpgraded = pos.x
+                        })
                     end
                 end
             end
             
-            -- SELL command
+            -- SELL (đúng định dạng)
             local hash = line:match('TDX:sellTower%(([^%)]+)%)')
             if hash and hash2pos[tostring(hash)] then
                 table.insert(logs, {
-                    action = "sell",
                     SellTower = hash2pos[tostring(hash)].x
                 })
             end
             
-            -- CHANGE TARGET command
+            -- CHANGE TARGET (đúng định dạng)
             local hash, qtype = line:match('TDX:changeQueryType%(([^,]+),%s*(%d)%)')
             if hash and qtype and hash2pos[tostring(hash)] then
                 table.insert(logs, {
-                    action = "change_target",
-                    TargetType = tonumber(qtype),
-                    Position = hash2pos[tostring(hash)].x
+                    ChangeTarget = hash2pos[tostring(hash)].x,
+                    TargetType = tonumber(qtype)
                 })
             end
         end
         
         if #logs > 0 then
             writefile(outJson, HttpService:JSONEncode(logs))
-            print("Đã ghi", #logs, "bản ghi vào", outJson)
+            print("✅ Đã ghi", #logs, "bản ghi vào x.json")
         end
     end
     task.wait(1)
