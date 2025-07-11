@@ -1,202 +1,279 @@
--- Cấu hình file
-local inputFile = "record.txt"
-local outputFile = "tdx/macros/x.json"
+local startTime = time()
+local offset = 0
+local fileName = "record.txt"
 
--- Khởi tạo services
-local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
-local player = Players.LocalPlayer
-
--- 1. PHẦN GHI MACRO ==============================================
-local macroStartTime = time()
-local macroOffset = 0
-
--- Xóa file cũ nếu tồn tại
-if isfile(inputFile) then
-    delfile(inputFile)
+-- Xóa file cũ nếu có
+if isfile(fileName) then
+    delfile(fileName)
 end
-writefile(inputFile, "-- TDX Macro Recording --\n")
+writefile(fileName, "")
 
--- Serialize dữ liệu
-local function serialize(val)
-    if type(val) == "string" then
-        return string.format("%q", val)
-    elseif type(val) == "table" then
-        local parts = {}
-        for k, v in pairs(val) do
-            table.insert(parts, string.format("[%s]=%s", serialize(k), serialize(v)))
+-- Serialize giá trị
+local function serialize(value)
+    if type(value) == "table" then
+        local result = "{"
+        for k, v in pairs(value) do
+            result ..= "[" .. serialize(k) .. "]=" .. serialize(v) .. ", "
         end
-        return "{" .. table.concat(parts, ",") .. "}"
+        if result ~= "{" then
+            result = result:sub(1, -3)
+        end
+        return result .. "}"
     else
-        return tostring(val)
+        return tostring(value)
     end
 end
 
--- Ghi lệnh vào file
-local function recordCommand(cmdName, ...)
+-- Serialize toàn bộ argument
+local function serializeArgs(...)
     local args = {...}
-    local serializedArgs = table.concat({serialize(v) for _, v in ipairs(args)}, ", ")
-    local waitTime = time() - macroStartTime - macroOffset
-    
-    appendfile(inputFile, string.format(
-        "task.wait(%.3f)\n%s(%s)\n",
-        waitTime,
-        cmdName,
-        serializedArgs
-    ))
-    
-    macroStartTime = time() - macroOffset
+    local output = {}
+    for i, v in ipairs(args) do
+        output[i] = serialize(v)
+    end
+    return table.concat(output, ", ")
 end
 
--- Hook RemoteEvents
-local originalFireServer
-originalFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-    local cmdName = self.Name
-    if cmdName == "PlaceTower" then
-        recordCommand("TDX:placeTower", ...)
-    elseif cmdName == "SellTower" then
-        recordCommand("TDX:sellTower", ...)
-    elseif cmdName == "UpgradeTower" then
-        recordCommand("TDX:upgradeTower", ...)
-    elseif cmdName == "ChangeTarget" then
-        recordCommand("TDX:changeQueryType", ...)
+-- Ghi log vào file
+local function log(method, self, serializedArgs)
+    local name = tostring(self.Name)
+
+    if name == "PlaceTower" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
+
+    elseif name == "SellTower" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
+
+    elseif name == "TowerUpgradeRequest" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:upgradeTower(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
+
+    elseif name == "ChangeQueryType" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
     end
-    return originalFireServer(self, ...)
+end
+
+-- Hook FireServer
+local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+    local args = serializeArgs(...)
+    log("FireServer", self, args)
+    return oldFireServer(self, ...)
 end)
 
-print("🔴 Bắt đầu ghi macro TDX...")
+-- Hook InvokeServer
+local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+    local args = serializeArgs(...)
+    log("InvokeServer", self, args)
+    return oldInvokeServer(self, ...)
+end)
 
--- 2. PHẦN CONVERT SANG JSON ======================================
+-- Hook __namecall
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    if method == "FireServer" or method == "InvokeServer" then
+        local args = serializeArgs(...)
+        log(method, self, args)
+    end
+    return oldNamecall(self, ...)
+end)
+
+print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
+
+local txtFile = "record.txt"
+local outJson = "tdx/macros/x.json"
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
+local PlayerScripts = player:WaitForChild("PlayerScripts")
+local Workspace = game:GetService("Workspace")
+
+-- Safe require TowerClass
+local function SafeRequire(module)
+	local ok, result = pcall(require, module)
+	return ok and result or nil
+end
+
+-- Load TowerClass
 local TowerClass
 do
-    local success, result = pcall(function()
-        return require(player.PlayerScripts.Client.GameClass.TowerClass)
-    end)
-    TowerClass = success and result or nil
+	local client = PlayerScripts:FindFirstChild("Client")
+	local gameClass = client and client:FindFirstChild("GameClass")
+	local towerModule = gameClass and gameClass:FindFirstChild("TowerClass")
+	TowerClass = towerModule and SafeRequire(towerModule)
 end
 
 if not TowerClass then
-    warn("Không thể load TowerClass - Chỉ có thể ghi macro cơ bản")
-else
-    print("✅ Đã load TowerClass - Sẵn sàng convert nâng cao")
-    
-    -- Hệ thống theo dõi tháp
-    local towerData = {
-        positions = {},
-        levels = {}
-    }
-    
-    -- Cập nhật vị trí tháp
-    task.spawn(function()
-        while true do
-            local towers = TowerClass.GetTowers()
-            if towers then
-                for hash, tower in pairs(towers) do
-                    local success, pos = pcall(function()
-                        local model = tower.Character:GetCharacterModel()
-                        local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
-                        return root and root.Position
-                    end)
-                    if success and pos then
-                        towerData.positions[tostring(hash)] = {
-                            x = math.floor(pos.X * 100)/100,
-                            y = math.floor(pos.Y * 100)/100,
-                            z = math.floor(pos.Z * 100)/100
-                        }
-                    end
-                end
-            end
-            task.wait(0.1)
-        end
-    end)
-    
-    -- Lấy giá tháp từ UI
-    local function GetTowerCost(towerName)
-        local gui = player:FindFirstChild("PlayerGui")
-        if gui then
-            local towerBtn = gui:FindFirstChild(towerName, true)
-            if towerBtn then
-                local costText = towerBtn:FindFirstChild("CostText", true)
-                if costText then
-                    return tonumber(costText.Text:match("%d+")) or 0
-                end
-            end
-        end
-        return 0
-    end
-    
-    -- Convert tự động
-    local function ConvertToJson()
-        if not isfile(inputFile) then return end
-        
-        local logs = {}
-        for line in readfile(inputFile):gmatch("[^\r\n]+") do
-            -- Bỏ qua comment
-            if not line:match("^%-%-") then
-                -- Phát hiện lệnh place
-                local placeArgs = {line:match('TDX:placeTower%(([^,]+),%s*"([^"]+)",%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')}
-                if #placeArgs >= 6 then
-                    table.insert(logs, {
-                        TowerPlaceCost = GetTowerCost(placeArgs[2]),
-                        TowerPlaced = placeArgs[2],
-                        TowerVector = table.concat({placeArgs[3], placeArgs[4], placeArgs[5]}, ", "),
-                        Rotation = placeArgs[6],
-                        TowerA1 = placeArgs[1]
-                    })
-                end
-                
-                -- Phát hiện lệnh upgrade
-                local upgradeArgs = {line:match('TDX:upgradeTower%(([^,]+),%s*(%d)%)')}
-                if #upgradeArgs >= 2 then
-                    table.insert(logs, {
-                        UpgradeCost = 0,
-                        UpgradePath = tonumber(upgradeArgs[2]),
-                        TowerUpgraded = towerData.positions[upgradeArgs[1]] and towerData.positions[upgradeArgs[1]].x or 0
-                    })
-                end
-                
-                -- Phát hiện lệnh sell
-                local sellHash = line:match('TDX:sellTower%(([^%)]+)%)')
-                if sellHash and towerData.positions[sellHash] then
-                    table.insert(logs, {
-                        SellTower = towerData.positions[sellHash].x
-                    })
-                end
-                
-                -- Phát hiện lệnh change target
-                local targetArgs = {line:match('TDX:changeQueryType%(([^,]+),%s*(%d)%)')}
-                if #targetArgs >= 2 then
-                    table.insert(logs, {
-                        ChangeTarget = towerData.positions[targetArgs[1]] and towerData.positions[targetArgs[1]].x or 0,
-                        TargetType = tonumber(targetArgs[2])
-                    })
-                end
-            end
-        end
-        
-        -- Ghi file JSON
-        if #logs > 0 then
-            writefile(outputFile, HttpService:JSONEncode(logs))
-            print("💾 Đã lưu", #logs, "lệnh vào", outputFile)
-        end
-    end
-    
-    -- Tự động convert mỗi 5 giây
-    task.spawn(function()
-        while true do
-            ConvertToJson()
-            task.wait(5)
-        end
-    end)
+	warn("❌ Không thể load TowerClass")
+	return
 end
 
--- Hiển thị hướng dẫn
-print([[
-=======================================
-  TDX MACRO RECORDER ĐÃ SẴN SÀNG
----------------------------------------
-1. Mọi thao tác sẽ được ghi vào: record.txt
-2. Dữ liệu JSON tự động lưu tại: tdx/macros/x.json
-3. Nhấn F9 để xem console nếu cần
-=======================================
-]])
+-- Get level on path
+local function GetPathLevel(tower, path)
+	if not tower or not tower.LevelHandler then return nil end
+	local ok, result = pcall(function()
+		return tower.LevelHandler:GetLevelOnPath(path)
+	end)
+	return ok and result or nil
+end
+
+-- Get tower position
+local function GetTowerPosition(tower)
+	if not tower or not tower.Character then return nil end
+	local ok, pos = pcall(function()
+		local model = tower.Character:GetCharacterModel()
+		local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+		return root and root.Position
+	end)
+	return ok and pos or nil
+end
+
+-- Cache cấp độ
+local upgradeCache = {}
+
+-- Ánh xạ X → hash
+local x2hash = {}
+local hash2pos = {}
+task.spawn(function()
+	while true do
+		for hash, tower in pairs(TowerClass.GetTowers()) do
+			local h = tostring(hash)
+			local pos = GetTowerPosition(tower)
+			if pos then
+				local x = math.floor(pos.X + 0.5)
+				x2hash[x] = h
+				hash2pos[h] = {x = pos.X, y = pos.Y, z = pos.Z}
+			end
+
+			-- Cập nhật cache cấp
+			upgradeCache[h] = upgradeCache[h] or {}
+			for path = 1, 2 do
+				local lvl = GetPathLevel(tower, path)
+				if lvl ~= nil then
+					upgradeCache[h][path] = lvl
+				end
+			end
+		end
+		task.wait(0.05)
+	end
+end)
+
+-- Kiểm tra upgrade thành công
+local function IsUpgradeSuccess(hash, path)
+	local tower = TowerClass.GetTowers()[hash]
+	if not tower then return false end
+	local cur = GetPathLevel(tower, path)
+	local old = upgradeCache[hash] and upgradeCache[hash][path]
+	if old ~= nil and cur and cur > old then
+		upgradeCache[hash][path] = cur
+		print(string.format("✅ Upgrade: %s path %d (%d → %d)", hash, path, old, cur))
+		return true
+	end
+	return false
+end
+
+-- Lấy giá đặt tower
+local function GetTowerPlaceCostByName(name)
+	local gui = player:FindFirstChild("PlayerGui")
+	local interface = gui and gui:FindFirstChild("Interface")
+	local bottomBar = interface and interface:FindFirstChild("BottomBar")
+	local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
+	if not towersBar then return 0 end
+	for _, tower in ipairs(towersBar:GetChildren()) do
+		if tower.Name == name then
+			local text = tower:FindFirstChild("CostFrame") and tower.CostFrame:FindFirstChild("CostText")
+			if text then
+				return tonumber(text.Text:gsub("%D", "")) or 0
+			end
+		end
+	end
+	return 0
+end
+
+-- Tạo thư mục nếu cần
+if makefolder then
+	pcall(function() makefolder("tdx") end)
+	pcall(function() makefolder("tdx/macros") end)
+end
+
+print("📜 Đang chuyển đổi record.txt → x.json...")
+
+while true do
+	if isfile(txtFile) then
+		local macro = readfile(txtFile)
+		local logs = {}
+
+		for line in macro:gmatch("[^\r\n]+") do
+			-- PLACE
+			local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+			if a1 and name and x and y and z and rot then
+				name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
+				local vector = x .. ", " .. y .. ", " .. z
+				local cost = GetTowerPlaceCostByName(name)
+				table.insert(logs, {
+					TowerA1 = a1,
+					TowerPlaced = name,
+					TowerVector = vector,
+					Rotation = rot,
+					TowerPlaceCost = tonumber(cost)
+				})
+				print("[+] Place:", name, vector)
+			end
+
+			-- UPGRADE
+			local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*(%d),')
+			if hash and path then
+				path = tonumber(path)
+				if IsUpgradeSuccess(hash, path) then
+					local pos = hash2pos[hash]
+					if pos then
+						table.insert(logs, {
+							UpgradeCost = 0,
+							UpgradePath = path,
+							TowerUpgraded = pos.x
+						})
+						print("[+] Upgrade:", hash, "→", pos.x)
+					end
+				else
+					print("[×] Upgrade thất bại:", hash)
+				end
+			end
+
+			-- CHANGE TARGET
+			local hash, target = line:match('TDX:changeQueryType%(([^,]+),%s*(%d)%)')
+			if hash and target then
+				local pos = hash2pos[hash]
+				if pos then
+					table.insert(logs, {
+						ChangeTarget = pos.x,
+						TargetType = tonumber(target)
+					})
+					print("[+] Target:", pos.x, target)
+				end
+			end
+
+			-- SELL
+			local hash = line:match('TDX:sellTower%(([^%)]+)%)')
+			if hash then
+				local pos = hash2pos[hash]
+				if pos then
+					table.insert(logs, {
+						SellTower = pos.x
+					})
+					print("[+] Sell:", pos.x)
+				end
+			end
+		end
+
+		writefile(outJson, HttpService:JSONEncode(logs))
+	end
+	task.wait(0.22)
+end
