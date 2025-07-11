@@ -2,66 +2,90 @@ local startTime = time()
 local offset = 0
 local fileName = "record.txt"
 
-if isfile(fileName) then delfile(fileName) end
+-- Xóa file cũ nếu có
+if isfile(fileName) then
+    delfile(fileName)
+end
 writefile(fileName, "")
 
+-- Serialize giá trị
 local function serialize(value)
-	if type(value) == "table" then
-		local result = "{"
-		for k, v in pairs(value) do
-			result ..= "[" .. serialize(k) .. "]=" .. serialize(v) .. ", "
-		end
-		if result ~= "{" then result = result:sub(1, -3) end
-		return result .. "}"
-	else
-		return tostring(value)
-	end
+    if type(value) == "table" then
+        local result = "{"
+        for k, v in pairs(value) do
+            result ..= "[" .. serialize(k) .. "]=" .. serialize(v) .. ", "
+        end
+        if result ~= "{" then
+            result = result:sub(1, -3)
+        end
+        return result .. "}"
+    else
+        return tostring(value)
+    end
 end
 
+-- Serialize toàn bộ argument
 local function serializeArgs(...)
-	local args, output = {...}, {}
-	for i, v in ipairs(args) do output[i] = serialize(v) end
-	return table.concat(output, ", ")
+    local args = {...}
+    local output = {}
+    for i, v in ipairs(args) do
+        output[i] = serialize(v)
+    end
+    return table.concat(output, ", ")
 end
 
+-- Ghi log vào file
 local function log(method, self, serializedArgs)
-	local name = tostring(self.Name)
-	local waitTime = ((time() - offset) - startTime)
-	if name == "PlaceTower" then
-		appendfile(fileName, ("task.wait(%.2f)\nTDX:placeTower(%s)\n"):format(waitTime, serializedArgs))
-	elseif name == "SellTower" then
-		appendfile(fileName, ("task.wait(%.2f)\nTDX:sellTower(%s)\n"):format(waitTime, serializedArgs))
-	elseif name == "TowerUpgradeRequest" then
-		appendfile(fileName, ("task.wait(%.2f)\nTDX:upgradeTower(%s)\n"):format(waitTime, serializedArgs))
-	elseif name == "ChangeQueryType" then
-		appendfile(fileName, ("task.wait(%.2f)\nTDX:changeQueryType(%s)\n"):format(waitTime, serializedArgs))
-	end
-	startTime = time() - offset
+    local name = tostring(self.Name)
+
+    if name == "PlaceTower" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
+
+    elseif name == "SellTower" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
+
+    elseif name == "TowerUpgradeRequest" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:upgradeTower(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
+
+    elseif name == "ChangeQueryType" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
+    end
 end
 
+-- Hook FireServer
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-	local args = serializeArgs(...)
-	log("FireServer", self, args)
-	return oldFireServer(self, ...)
+    local args = serializeArgs(...)
+    log("FireServer", self, args)
+    return oldFireServer(self, ...)
 end)
 
+-- Hook InvokeServer
 local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-	local args = serializeArgs(...)
-	log("InvokeServer", self, args)
-	return oldInvokeServer(self, ...)
+    local args = serializeArgs(...)
+    log("InvokeServer", self, args)
+    return oldInvokeServer(self, ...)
 end)
 
+-- Hook __namecall
 local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-	local method = getnamecallmethod()
-	if method == "FireServer" or method == "InvokeServer" then
-		local args = serializeArgs(...)
-		log(method, self, args)
-	end
-	return oldNamecall(self, ...)
+    local method = getnamecallmethod()
+    if method == "FireServer" or method == "InvokeServer" then
+        local args = serializeArgs(...)
+        log(method, self, args)
+    end
+    return oldNamecall(self, ...)
 end)
 
-print("✅ Ghi macro TDX đã bắt đầu.")
+print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
 
 local txtFile = "record.txt"
 local outJson = "tdx/macros/x.json"
