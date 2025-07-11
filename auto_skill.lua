@@ -5,6 +5,7 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
 
 local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
+local EnemyClass = require(PlayerScripts.Client.GameClass:WaitForChild("EnemyClass"))
 local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
 local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 local EnemiesFolder = workspace:WaitForChild("Game"):WaitForChild("Enemies")
@@ -35,7 +36,16 @@ local fastTowers = {
 	["Golden Mobster"] = true
 }
 
+local skipAirTowers = {
+	["Ice Breaker"] = true,
+	["John"] = true,
+	["Slammer"] = true,
+	["Mobster"] = true,
+	["Golden Mobster"] = true
+}
+
 local lastUsedTime = {}
+local mobsterUsedEnemies = {} -- skip path 2
 
 local function SendSkill(hash, index, pos)
 	if useFireServer then
@@ -45,19 +55,20 @@ local function SendSkill(hash, index, pos)
 	end
 end
 
-local function GetFirstEnemyPosition()
-	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" then
-			return enemy.Position
+local function GetAliveEnemies()
+	local result = {}
+	for _, e in pairs(EnemyClass.GetEnemies()) do
+		if e and e.IsAlive and not e.IsFakeEnemy then
+			table.insert(result, e)
 		end
 	end
-	return nil
+	return result
 end
 
 local function getTowerPos(tower)
 	if tower.GetPosition then
-		local ok, result = pcall(function() return tower:GetPosition() end)
-		if ok then return result end
+		local ok, pos = pcall(function() return tower:GetPosition() end)
+		if ok then return pos end
 	end
 	if tower.Model and tower.Model:FindFirstChild("Root") then
 		return tower.Model.Root.Position
@@ -75,12 +86,79 @@ local function getRange(tower)
 	return 0
 end
 
+local function getNearestEnemy(towerPos, range)
+	for _, enemy in pairs(GetAliveEnemies()) do
+		if enemy and enemy.GetPosition then
+			local pos = enemy:GetPosition()
+			if (pos - towerPos).Magnitude <= range and enemy.Type ~= "Arrow" then
+				return pos
+			end
+		end
+	end
+	return nil
+end
+
+local function getMobsterTarget(tower, hash, path)
+	local pos = getTowerPos(tower)
+	local range = getRange(tower)
+	local maxHP = -1
+	local chosen = nil
+
+	for _, enemy in pairs(GetAliveEnemies()) do
+		if enemy.IsAirUnit then continue end
+		local ePos = enemy:GetPosition()
+		if (ePos - pos).Magnitude <= range and enemy.HealthHandler then
+			local id = tostring(enemy)
+			if path == 2 and mobsterUsedEnemies[hash] and mobsterUsedEnemies[hash][id] then
+				continue
+			end
+			local hp = enemy.HealthHandler:GetMaxHealth()
+			if hp > maxHP then
+				maxHP = hp
+				chosen = enemy
+			end
+		end
+	end
+
+	if chosen and path == 2 then
+		mobsterUsedEnemies[hash] = mobsterUsedEnemies[hash] or {}
+		mobsterUsedEnemies[hash][tostring(chosen)] = true
+	end
+
+	return chosen and chosen:GetPosition() or nil
+end
+
+local function getCommanderTarget()
+	local alive = GetAliveEnemies()
+	local airSkip = {}
+
+	for i = #alive, 1, -1 do
+		if alive[i].IsAirUnit or alive[i].Type == "Arrow" then
+			table.remove(alive, i)
+		end
+	end
+
+	if #alive == 0 then return nil end
+
+	table.sort(alive, function(a, b)
+		return (a.HealthHandler:GetMaxHealth() or 0) > (b.HealthHandler:GetMaxHealth() or 0)
+	end)
+
+	if math.random(1, 10) <= 6 then
+		return alive[1]:GetPosition()
+	else
+		return alive[math.random(1, #alive)]:GetPosition()
+	end
+end
+
 local function hasEnemyInRange(tower, studsLimit)
-	local towerPos = getTowerPos(tower)
+	local pos = getTowerPos(tower)
 	local range = studsLimit or getRange(tower)
-	if not towerPos or range <= 0 then return false end
-	for _, enemy in ipairs(EnemiesFolder:GetChildren()) do
-		if enemy:IsA("BasePart") and enemy.Name ~= "Arrow" and (enemy.Position - towerPos).Magnitude <= range then
+	if not pos or range <= 0 then return false end
+	for _, enemy in pairs(GetAliveEnemies()) do
+		if skipAirTowers[tower.Type] and enemy.IsAirUnit then continue end
+		local enemyPos = enemy:GetPosition()
+		if (enemyPos - pos).Magnitude <= range and enemy.Type ~= "Arrow" then
 			return true
 		end
 	end
@@ -103,11 +181,14 @@ local function CanUseAbility(ability)
 	return ok and usable
 end
 
+local function ShouldProcessNonDirectionalSkill(tower, index)
+	return tower.Type == "Commander" and index ~= 3
+end
+
 RunService.Heartbeat:Connect(function()
 	local now = tick()
 	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
 		if not tower or not tower.AbilityHandler then continue end
-
 		local towerType = tower.Type
 		if skipTowerTypes[towerType] then continue end
 
@@ -117,8 +198,8 @@ RunService.Heartbeat:Connect(function()
 		end
 		lastUsedTime[hash] = now
 
-		local directionalInfo = directionalTowerTypes[towerType]
 		local p1, p2 = GetCurrentUpgradeLevels(tower)
+		local directionalInfo = directionalTowerTypes[towerType]
 
 		for index = 1, 3 do
 			pcall(function()
@@ -128,23 +209,11 @@ RunService.Heartbeat:Connect(function()
 				local allowUse = true
 
 				if towerType == "Ice Breaker" then
-					if index == 1 then
-						allowUse = true
-					elseif index == 2 then
-						allowUse = hasEnemyInRange(tower, 8)
-					else
-						allowUse = false
-					end
+					allowUse = (index == 1) or (index == 2 and hasEnemyInRange(tower, 8))
 				elseif towerType == "Slammer" then
 					allowUse = hasEnemyInRange(tower)
 				elseif towerType == "John" then
-					if p1 >= 5 then
-						allowUse = hasEnemyInRange(tower)
-					elseif p2 >= 5 then
-						allowUse = hasEnemyInRange(tower, 4.5)
-					else
-						allowUse = hasEnemyInRange(tower, 4.5)
-					end
+					allowUse = (p1 >= 5 and hasEnemyInRange(tower)) or hasEnemyInRange(tower, 4.5)
 				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
 					if p1 >= 4 and p1 <= 5 then
 						allowUse = hasEnemyInRange(tower)
@@ -156,24 +225,35 @@ RunService.Heartbeat:Connect(function()
 				end
 
 				if allowUse then
-					local pos = GetFirstEnemyPosition()
-					local sendWithPos = false
-
-					if towerType == "Commander" and index ~= 3 then
-						sendWithPos = false
-					elseif typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
-						if index == directionalInfo.onlyAbilityIndex then
-							sendWithPos = true
-						else
-							return
+					local pos = nil
+					if towerType == "Mobster" or towerType == "Golden Mobster" then
+						if p2 >= 3 and p2 <= 5 then
+							pos = getMobsterTarget(tower, hash, 2)
+							if not pos then return end
+						elseif p1 >= 4 and p1 <= 5 then
+							if not hasEnemyInRange(tower) then return end
+							local enemy = getMobsterTarget(tower, hash, 1)
+							if not enemy then return end
+							pos = enemy
 						end
+					elseif towerType == "Commander" and index == 3 then
+						pos = getCommanderTarget()
+						if not pos then return end
+					else
+						pos = getNearestEnemy(getTowerPos(tower), getRange(tower))
+						if not pos then return end
+					end
+
+					local sendWithPos = false
+					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
+						sendWithPos = index == directionalInfo.onlyAbilityIndex
 					elseif directionalInfo then
 						sendWithPos = true
 					end
 
-					if sendWithPos and pos then
+					if sendWithPos then
 						SendSkill(hash, index, pos)
-					elseif not sendWithPos then
+					else
 						SendSkill(hash, index)
 					end
 				end
