@@ -91,18 +91,17 @@ local txtFile = "record.txt"
 local outJson = "tdx/macros/x.json"
 
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
-local Workspace = game:GetService("Workspace")
 
--- Safe require
 local function SafeRequire(module)
-	local ok, result = pcall(require, module)
-	return ok and result or nil
+	local success, result = pcall(require, module)
+	return success and result or nil
 end
 
-local TowerClass
+local TowerClass = nil
 do
 	local client = PlayerScripts:FindFirstChild("Client")
 	if client then
@@ -116,94 +115,62 @@ do
 	end
 end
 
-if not TowerClass then
-	warn("❌ Không thể load TowerClass")
-	return
-end
-
-local function GetTowerPosition(tower)
-	if not tower or not tower.Character then return nil end
-	local ok, pos = pcall(function()
-		local model = tower.Character:GetCharacterModel()
-		local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
-		return root and root.Position
-	end)
-	return ok and pos or nil
-end
-
-local function GetTowerPlaceCostByName(name)
-	local gui = player:FindFirstChild("PlayerGui")
-	local interface = gui and gui:FindFirstChild("Interface")
-	local bottomBar = interface and interface:FindFirstChild("BottomBar")
-	local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
-	if not towersBar then
-		warn("⚠️ Không tìm thấy TowersBar trong GUI")
-		return 0
-	end
-	for _, tower in ipairs(towersBar:GetChildren()) do
-		if tower.Name == name then
-			local costFrame = tower:FindFirstChild("CostFrame")
-			local costText = costFrame and costFrame:FindFirstChild("CostText")
-			if costText and costText.Text then
-				local raw = tostring(costText.Text):gsub("%D", "")
-				local value = tonumber(raw)
-				if value then
-					return value
-				else
-					warn("⚠️ Không thể chuyển costText.Text thành số:", costText.Text)
-				end
-			else
-				warn("⚠️ Không tìm thấy CostText trong tower:", name)
-			end
-		end
-	end
-	warn("⚠️ Không tìm thấy tower tên:", name)
-	return 0
-end
-
 local function GetPathLevel(tower, path)
 	if not tower or not tower.LevelHandler then return nil end
-	local ok, result = pcall(function()
+	local ok, level = pcall(function()
 		return tower.LevelHandler:GetLevelOnPath(path)
 	end)
-	return ok and result or nil
+	return ok and level or nil
 end
 
--- Cache hash → position, name, tower
-local hash2info = {}
+-- ánh xạ hash đến model name và position
+local hashInfo = {}
 task.spawn(function()
 	while true do
 		local towersFolder = Workspace:FindFirstChild("Game") and Workspace.Game:FindFirstChild("Towers")
 		if towersFolder then
-			for _, part in pairs(towersFolder:GetChildren()) do
-				if part:IsA("BasePart") then
-					local pos = part.Position
-					local name = part.Name
+			for _, model in ipairs(towersFolder:GetChildren()) do
+				if model:IsA("BasePart") then
 					for hash, tower in pairs(TowerClass.GetTowers()) do
-						local tpos = GetTowerPosition(tower)
-						if tpos and (tpos - pos).Magnitude <= 1 then
-							hash2info[tostring(hash)] = {
-								x = pos.X,
-								y = pos.Y,
-								z = pos.Z,
-								name = name,
-								tower = tower
+						local ok, pos = pcall(function()
+							local m = tower.Character and tower.Character:GetCharacterModel()
+							return m and m.PrimaryPart and m.PrimaryPart.Position
+						end)
+						if ok and pos and (model.Position - pos).Magnitude <= 0.5 then
+							hashInfo[tostring(hash)] = {
+								x = model.Position.X,
+								name = model.Name,
+								tower = tower,
+								lastLevel = { [1] = GetPathLevel(tower, 1), [2] = GetPathLevel(tower, 2) }
 							}
 						end
 					end
 				end
 			end
-		else
-			warn("⚠️ Không tìm thấy Workspace.Game.Towers")
 		end
 		task.wait(0.1)
 	end
 end)
 
--- Cache nâng cấp
-local cache = {}
+-- lấy cost từ gui
+local function GetTowerPlaceCostByName(name)
+	local gui = player:FindFirstChild("PlayerGui")
+	local interface = gui and gui:FindFirstChild("Interface")
+	local bottomBar = interface and interface:FindFirstChild("BottomBar")
+	local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
+	if not towersBar then return 0 end
+	for _, tower in ipairs(towersBar:GetChildren()) do
+		if tower.Name == name then
+			local text = tower:FindFirstChild("CostFrame") and tower.CostFrame:FindFirstChild("CostText")
+			if text then
+				return tonumber(text.Text:gsub("%D", "")) or 0
+			end
+		end
+	end
+	return 0
+end
 
--- Tạo thư mục nếu cần
+-- chuyển đổi record
 if makefolder then
 	pcall(function() makefolder("tdx") end)
 	pcall(function() makefolder("tdx/macros") end)
@@ -216,78 +183,58 @@ while true do
 
 		for line in macro:gmatch("[^\r\n]+") do
 			-- PLACE
-			local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+			local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*"(.-)",%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^)]+)%)')
 			if a1 and name and x and y and z and rot then
-				name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
-				local cost = GetTowerPlaceCostByName(name)
-				local vector = x .. ", " .. y .. ", " .. z
-				print("✅ Ghi PLACE:", name, "| Cost:", cost)
 				table.insert(logs, {
-					TowerPlaceCost = cost,
+					TowerA1 = a1,
 					TowerPlaced = name,
-					TowerVector = vector,
+					TowerVector = x .. ", " .. y .. ", " .. z,
 					Rotation = rot,
-					TowerA1 = tostring(a1)
+					TowerPlaceCost = GetTowerPlaceCostByName(name)
 				})
+				print("[LOG] PLACE:", name)
 			else
 				-- UPGRADE
 				local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*(%d),')
-				if hash and path then
-					local info = hash2info[hash]
-					if info then
-						local tower = info.tower
-						local p = tonumber(path)
-						local before = GetPathLevel(tower, p)
-						task.wait(0.05)
-						local after = GetPathLevel(tower, p)
-						if before and after and after > before then
-							print(string.format("✅ Ghi UPGRADE: hash=%s | path=%d | %d ➜ %d", hash, p, before, after))
-							table.insert(logs, {
-								TowerUpgraded = info.x,
-								UpgradePath = p,
-								UpgradeCost = 0
-							})
-						else
-							print(string.format("❌ Bỏ qua UPGRADE: hash=%s | path=%d | before=%s | after=%s", hash, p, tostring(before), tostring(after)))
-						end
+				if hash and path and hashInfo[hash] then
+					local info = hashInfo[hash]
+					local newLevel = GetPathLevel(info.tower, tonumber(path))
+					if newLevel and info.lastLevel and info.lastLevel[tonumber(path)] and newLevel > info.lastLevel[tonumber(path)] then
+						table.insert(logs, {
+							UpgradeCost = 0,
+							UpgradePath = tonumber(path),
+							TowerUpgraded = info.x
+						})
+						print(("[LOG] UPGRADE: hash %s | path %s | %d ➜ %d"):format(hash, path, info.lastLevel[tonumber(path)], newLevel))
+						info.lastLevel[tonumber(path)] = newLevel
 					else
-						warn("❌ Không tìm thấy info cho hash (UPGRADE):", hash)
+						print("[SKIP] upgrade không thành công", hash, path)
 					end
 				end
 
 				-- CHANGE TARGET
-				local hash, qtype = line:match('TDX:changeQueryType%(([^,]+),%s*(%d)%)')
-				if hash and qtype then
-					local info = hash2info[hash]
-					if info then
-						print("✅ Ghi CHANGE TARGET:", info.name, "| TargetType:", qtype)
-						table.insert(logs, {
-							ChangeTarget = info.x,
-							TargetType = tonumber(qtype)
-						})
-					else
-						warn("❌ Không tìm thấy info cho hash (CHANGE TARGET):", hash)
-					end
+				local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*(%d)%)')
+				if hash and targetType and hashInfo[hash] then
+					table.insert(logs, {
+						ChangeTarget = hashInfo[hash].x,
+						TargetType = tonumber(targetType)
+					})
+					print("[LOG] CHANGE TARGET", hash)
 				end
 
 				-- SELL
 				local hash = line:match('TDX:sellTower%(([^%)]+)%)')
-				if hash then
-					local info = hash2info[hash]
-					if info then
-						print("✅ Ghi SELL:", info.name)
-						table.insert(logs, {
-							SellTower = info.x
-						})
-					else
-						warn("❌ Không tìm thấy info cho hash (SELL):", hash)
-					end
+				if hash and hashInfo[hash] then
+					table.insert(logs, {
+						SellTower = hashInfo[hash].x
+					})
+					print("[LOG] SELL", hash)
 				end
 			end
 		end
 
 		writefile(outJson, HttpService:JSONEncode(logs))
-		print("📁 Ghi xong x.json, số dòng:", #logs)
+		print("✅ Đã ghi", #logs, "entry vào", outJson)
 	end
-	task.wait(0.22)
+	task.wait(0.2)
 end
