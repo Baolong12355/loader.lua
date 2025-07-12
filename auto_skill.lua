@@ -36,14 +36,6 @@ local fastTowers = {
 	["Golden Mobster"] = true
 }
 
-local skipAirTowers = {
-	["Ice Breaker"] = true,
-	["John"] = true,
-	["Slammer"] = true,
-	["Mobster"] = true,
-	["Golden Mobster"] = true
-}
-
 local lastUsedTime = {}
 local mobsterUsedEnemies = {}
 
@@ -130,34 +122,24 @@ end
 
 local function getCommanderTarget()
 	local alive = GetAliveEnemies()
+
 	for i = #alive, 1, -1 do
 		if alive[i].IsAirUnit or alive[i].Type == "Arrow" then
 			table.remove(alive, i)
 		end
 	end
+
 	if #alive == 0 then return nil end
+
 	table.sort(alive, function(a, b)
 		return (a.HealthHandler:GetMaxHealth() or 0) > (b.HealthHandler:GetMaxHealth() or 0)
 	end)
+
 	if math.random(1, 10) <= 6 then
 		return alive[1]:GetPosition()
 	else
 		return alive[math.random(1, #alive)]:GetPosition()
 	end
-end
-
-local function hasEnemyInRange(tower, studsLimit)
-	local pos = getTowerPos(tower)
-	local range = studsLimit or getRange(tower)
-	if not pos or range <= 0 then return false end
-	for _, enemy in pairs(GetAliveEnemies()) do
-		if skipAirTowers[tower.Type] and enemy.IsAirUnit then continue end
-		local enemyPos = enemy:GetPosition()
-		if (enemyPos - pos).Magnitude <= range and enemy.Type ~= "Arrow" then
-			return true
-		end
-	end
-	return false
 end
 
 local function GetCurrentUpgradeLevels(tower)
@@ -174,10 +156,6 @@ local function CanUseAbility(ability)
 	if ability.CooldownRemaining > 0 then return false end
 	local ok, usable = pcall(function() return ability:CanUse(true) end)
 	return ok and usable
-end
-
-local function ShouldProcessNonDirectionalSkill(tower, index)
-	return tower.Type == "Commander" and index ~= 3
 end
 
 RunService.Heartbeat:Connect(function()
@@ -202,40 +180,50 @@ RunService.Heartbeat:Connect(function()
 				if not CanUseAbility(ability) then return end
 
 				local allowUse = true
+				local pos = nil
+
+				-- ✅ Logic đặc biệt
+				if towerType == "Ghost" then
+					local maxHP = -1
+					for _, enemy in pairs(GetAliveEnemies()) do
+						if enemy.Type ~= "Arrow" and enemy.HealthHandler then
+							local hp = enemy.HealthHandler:GetMaxHealth()
+							if hp > maxHP then
+								maxHP = hp
+								pos = enemy:GetPosition()
+							end
+						end
+					end
+					if not pos then return end
+					SendSkill(hash, index, pos)
+					return
+				end
 
 				if towerType == "Ice Breaker" then
-					allowUse = (index == 1) or (index == 2 and hasEnemyInRange(tower, 8))
+					allowUse = (index == 1) or (index == 2 and getNearestEnemy(getTowerPos(tower), 8))
 				elseif towerType == "Slammer" then
-					allowUse = hasEnemyInRange(tower)
+					allowUse = getNearestEnemy(getTowerPos(tower), getRange(tower)) ~= nil
 				elseif towerType == "John" then
-					allowUse = (p1 >= 5 and hasEnemyInRange(tower)) or hasEnemyInRange(tower, 4.5)
+					allowUse = (p1 >= 5 and getNearestEnemy(getTowerPos(tower), getRange(tower))) or getNearestEnemy(getTowerPos(tower), 4.5)
 				elseif towerType == "Mobster" or towerType == "Golden Mobster" then
-					if p1 >= 4 and p1 <= 5 then
-						allowUse = hasEnemyInRange(tower)
-					elseif p2 >= 3 and p2 <= 5 then
-						allowUse = true
+					if p2 >= 3 and p2 <= 5 then
+						pos = getMobsterTarget(tower, hash, 2)
+						if not pos then return end
+					elseif p1 >= 4 and p1 <= 5 then
+						pos = getMobsterTarget(tower, hash, 1)
+						if not pos then return end
 					else
 						allowUse = false
 					end
 				end
 
-				if not allowUse then return end
-
-				local pos
-				if towerType == "Mobster" or towerType == "Golden Mobster" then
-					if p2 >= 3 and p2 <= 5 then
-						pos = getMobsterTarget(tower, hash, 2)
-						if not pos then return end
-					elseif p1 >= 4 and p1 <= 5 then
-						if not hasEnemyInRange(tower) then return end
-						pos = getMobsterTarget(tower, hash, 1)
-						if not pos then return end
+				if not pos and allowUse then
+					if towerType == "Commander" and index == 3 then
+						pos = getCommanderTarget()
+					else
+						pos = getNearestEnemy(getTowerPos(tower), getRange(tower))
 					end
-				elseif towerType == "Commander" and index == 3 then
-					pos = getCommanderTarget()
 					if not pos then return end
-				else
-					pos = getNearestEnemy(getTowerPos(tower), getRange(tower))
 				end
 
 				local sendWithPos = false
