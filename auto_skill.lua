@@ -217,22 +217,19 @@ RunService.Heartbeat:Connect(function()
 					else
 						allowUse = false
 					end
-				else
-					allowUse = true -- ✅ Tower thường như Ghost không cần check enemy
 				end
 
 				if not allowUse then return end
 
-				local pos = nil
+				local pos
 				if towerType == "Mobster" or towerType == "Golden Mobster" then
 					if p2 >= 3 and p2 <= 5 then
 						pos = getMobsterTarget(tower, hash, 2)
 						if not pos then return end
 					elseif p1 >= 4 and p1 <= 5 then
 						if not hasEnemyInRange(tower) then return end
-						local enemy = getMobsterTarget(tower, hash, 1)
-						if not enemy then return end
-						pos = enemy
+						pos = getMobsterTarget(tower, hash, 1)
+						if not pos then return end
 					end
 				elseif towerType == "Commander" and index == 3 then
 					pos = getCommanderTarget()
