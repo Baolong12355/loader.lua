@@ -130,7 +130,6 @@ end
 
 local function getCommanderTarget()
 	local alive = GetAliveEnemies()
-	local airSkip = {}
 
 	for i = #alive, 1, -1 do
 		if alive[i].IsAirUnit or alive[i].Type == "Arrow" then
