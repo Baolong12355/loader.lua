@@ -45,7 +45,7 @@ local skipAirTowers = {
 }
 
 local lastUsedTime = {}
-local mobsterUsedEnemies = {} -- skip path 2
+local mobsterUsedEnemies = {}
 
 local function SendSkill(hash, index, pos)
 	if useFireServer then
@@ -130,19 +130,15 @@ end
 
 local function getCommanderTarget()
 	local alive = GetAliveEnemies()
-
 	for i = #alive, 1, -1 do
 		if alive[i].IsAirUnit or alive[i].Type == "Arrow" then
 			table.remove(alive, i)
 		end
 	end
-
 	if #alive == 0 then return nil end
-
 	table.sort(alive, function(a, b)
 		return (a.HealthHandler:GetMaxHealth() or 0) > (b.HealthHandler:GetMaxHealth() or 0)
 	end)
-
 	if math.random(1, 10) <= 6 then
 		return alive[1]:GetPosition()
 	else
@@ -221,40 +217,41 @@ RunService.Heartbeat:Connect(function()
 					else
 						allowUse = false
 					end
+				else
+					allowUse = true -- ✅ Tower thường như Ghost không cần check enemy
 				end
 
-				if allowUse then
-					local pos = nil
-					if towerType == "Mobster" or towerType == "Golden Mobster" then
-						if p2 >= 3 and p2 <= 5 then
-							pos = getMobsterTarget(tower, hash, 2)
-							if not pos then return end
-						elseif p1 >= 4 and p1 <= 5 then
-							if not hasEnemyInRange(tower) then return end
-							local enemy = getMobsterTarget(tower, hash, 1)
-							if not enemy then return end
-							pos = enemy
-						end
-					elseif towerType == "Commander" and index == 3 then
-						pos = getCommanderTarget()
-						if not pos then return end
-					else
-						pos = getNearestEnemy(getTowerPos(tower), getRange(tower))
-						if not pos then return end
-					end
+				if not allowUse then return end
 
-					local sendWithPos = false
-					if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
-						sendWithPos = index == directionalInfo.onlyAbilityIndex
-					elseif directionalInfo then
-						sendWithPos = true
+				local pos = nil
+				if towerType == "Mobster" or towerType == "Golden Mobster" then
+					if p2 >= 3 and p2 <= 5 then
+						pos = getMobsterTarget(tower, hash, 2)
+						if not pos then return end
+					elseif p1 >= 4 and p1 <= 5 then
+						if not hasEnemyInRange(tower) then return end
+						local enemy = getMobsterTarget(tower, hash, 1)
+						if not enemy then return end
+						pos = enemy
 					end
+				elseif towerType == "Commander" and index == 3 then
+					pos = getCommanderTarget()
+					if not pos then return end
+				else
+					pos = getNearestEnemy(getTowerPos(tower), getRange(tower))
+				end
 
-					if sendWithPos then
-						SendSkill(hash, index, pos)
-					else
-						SendSkill(hash, index)
-					end
+				local sendWithPos = false
+				if typeof(directionalInfo) == "table" and directionalInfo.onlyAbilityIndex then
+					sendWithPos = index == directionalInfo.onlyAbilityIndex
+				elseif directionalInfo then
+					sendWithPos = true
+				end
+
+				if sendWithPos and pos then
+					SendSkill(hash, index, pos)
+				elseif not sendWithPos then
+					SendSkill(hash, index)
 				end
 			end)
 		end
