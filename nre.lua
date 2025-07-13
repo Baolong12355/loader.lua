@@ -1,101 +1,93 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
+-- Sử dụng NetworkingHandler từ game
+local Common = game:GetService("ReplicatedStorage"):WaitForChild("TDX_Shared"):WaitForChild("Common")
+local NetworkingHandler = require(Common:WaitForChild("NetworkingHandler"))
+local BindableHandler = require(Common:WaitForChild("BindableHandler"))
+
 -- Config
 local CONFIG = {
     RECORD_FILE = "record.txt",
     OUTPUT_JSON = "x-1.json"
 }
 
--- Initialize TowerClass
+-- Lấy TowerClass từ hệ thống game
 local TowerClass
-do
-    local PlayerScripts = Players.LocalPlayer:WaitForChild("PlayerScripts")
-    local Client = PlayerScripts:WaitForChild("Client")
-    local GameClass = Client:WaitForChild("GameClass")
-    TowerClass = require(GameClass:WaitForChild("TowerClass"))
+local function GetTowerClass()
+    if not TowerClass then
+        local PlayerScripts = Players.LocalPlayer:WaitForChild("PlayerScripts")
+        local Client = PlayerScripts:WaitForChild("Client")
+        local GameClass = Client:WaitForChild("GameClass")
+        TowerClass = require(GameClass:WaitForChild("TowerClass"))
+    end
+    return TowerClass
 end
 
--- Lấy giá tower từ UI (update theo cách hoạt động của game)
-local function GetTowerCost(towerName)
-    local interface = Players.LocalPlayer.PlayerGui:WaitForChild("Interface")
-    local bottomBar = interface:WaitForChild("BottomBar")
-    local towersBar = bottomBar:WaitForChild("TowersBar")
+-- Hệ thống ghi macro
+local MacroRecorder = {
+    _remoteEvents = {},
+    _towerPositions = {},
     
-    for _, towerBtn in ipairs(towersBar:GetChildren()) do
-        if towerBtn.Name == towerName then
-            local costText = towerBtn.CostFrame.CostText.Text
-            return tonumber(string.match(costText, "%d+")) or 0
-        end
-    end
-    return 0
-end
-
--- Main recorder
-local function RecordActions()
-    -- Clear old file
-    if isfile(CONFIG.RECORD_FILE) then
-        delfile(CONFIG.RECORD_FILE)
-    end
-    writefile(CONFIG.RECORD_FILE, "")
-    
-    -- Track tower positions
-    local towerPositions = {}
-    local function UpdateTowerPositions()
-        while true do
-            local towers = TowerClass.GetTowers()
-            for hash, tower in pairs(towers) do
-                if tower and tower.Character then
-                    local model = tower.Character:GetCharacterModel()
-                    if model then
-                        local root = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
-                        if root then
-                            towerPositions[tostring(hash)] = root.Position
-                        end
-                    end
-                end
-            end
-            task.wait(0.1)
-        end
-    end
-    task.spawn(UpdateTowerPositions)
-    
-    -- Hook remote events
-    local originalFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-        local args = {...}
-        local eventName = self.Name
+    Init = function(self)
+        -- Hook các remote event quan trọng
+        self:_HookRemoteEvent("PlaceTower")
+        self:_HookRemoteEvent("TowerUpgradeRequest")
+        self:_HookRemoteEvent("SellTower")
         
-        if eventName == "PlaceTower" then
+        -- Bắt đầu theo dõi vị trí tower
+        self:_StartTracking()
+    end,
+    
+    _HookRemoteEvent = function(self, eventName)
+        local event = NetworkingHandler.GetEvent(eventName)
+        
+        local originalFireServer = event.FireServer
+        event.FireServer = function(_, ...)
+            local args = {...}
+            self:_ProcessEvent(eventName, args)
+            return originalFireServer(event, ...)
+        end
+        
+        table.insert(self._remoteEvents, event)
+    end,
+    
+    _ProcessEvent = function(self, eventName, args)
+        if eventName == "PlaceTower" and #args >= 5 then
             local towerType = args[1]
-            local pos = Vector3.new(args[2], args[3], args[4])
+            local position = Vector3.new(args[2], args[3], args[4])
             local rotation = args[5]
             local a1 = args[6] or ""
             
+            -- Lấy giá từ BindableEvent (nếu cần)
+            local costEvent = BindableHandler.GetEvent("GetTowerCost")
+            local cost = costEvent and costEvent:Invoke(towerType) or 0
+            
             appendfile(CONFIG.RECORD_FILE, string.format(
-                "Place|%s|%s|%.17g,%.17g,%.17g|%s|%s\n",
+                "Place|%s|%d|%.17g,%.17g,%.17g|%.17g|%s\n",
                 towerType,
-                GetTowerCost(towerType),
-                pos.X, pos.Y, pos.Z,
+                cost,
+                position.X, position.Y, position.Z,
                 rotation,
                 a1
             ))
             
-        elseif eventName == "TowerUpgradeRequest" then
-            local hash = args[1]
+        elseif eventName == "TowerUpgradeRequest" and #args >= 2 then
+            local towerHash = args[1]
             local path = args[2]
-            local pos = towerPositions[tostring(hash)]
+            local pos = self._towerPositions[tostring(towerHash)]
             
             if pos then
                 appendfile(CONFIG.RECORD_FILE, string.format(
-                    "Upgrade|%.17g|0|%s\n",  -- UpgradeCost luôn 0 theo yêu cầu
+                    "Upgrade|%.17g|0|%d\n",
                     pos.X,
                     path
                 ))
             end
             
-        elseif eventName == "SellTower" then
-            local hash = args[1]
-            local pos = towerPositions[tostring(hash)]
+        elseif eventName == "SellTower" and #args >= 1 then
+            local towerHash = args[1]
+            local pos = self._towerPositions[tostring(towerHash)]
             
             if pos then
                 appendfile(CONFIG.RECORD_FILE, string.format(
@@ -104,51 +96,73 @@ local function RecordActions()
                 ))
             end
         end
-        
-        return originalFireServer(self, ...)
-    end)
+    end,
     
-    -- Process and convert to JSON
-    while true do
-        task.wait(1)
-        if isfile(CONFIG.RECORD_FILE) then
-            local actions = {}
-            
-            for line in readfile(CONFIG.RECORD_FILE):gmatch("[^\r\n]+") do
-                local parts = {}
-                for part in line:gmatch("([^|]+)") do
-                    table.insert(parts, part)
+    _StartTracking = function(self)
+        task.spawn(function()
+            while true do
+                local towers = GetTowerClass().GetTowers()
+                for hash, tower in pairs(towers) do
+                    if tower and tower.Character then
+                        local model = tower.Character:GetCharacterModel()
+                        local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+                        if root then
+                            self._towerPositions[tostring(hash)] = root.Position
+                        end
+                    end
                 end
-                
-                local actionType = parts[1]
-                local action = {}
-                
-                if actionType == "Place" then
-                    action.TowerPlaceCost = tonumber(parts[2])
-                    action.TowerPlaced = parts[3]
-                    action.TowerVector = parts[4]
-                    action.Rotation = parts[5]
-                    action.TowerA1 = parts[6] or ""
-                    
-                elseif actionType == "Upgrade" then
-                    action.TowerUpgraded = parts[2]
-                    action.UpgradeCost = tonumber(parts[3])
-                    action.UpgradePath = parts[4]
-                    
-                elseif actionType == "Sell" then
-                    action.SellTower = parts[2]
-                end
-                
-                table.insert(actions, action)
+                task.wait(0.1)
             end
-            
-            if #actions > 0 then
-                writefile(CONFIG.OUTPUT_JSON, HttpService:JSONEncode(actions))
-                delfile(CONFIG.RECORD_FILE)
+        end)
+    end,
+    
+    ProcessToJson = function(self)
+        while true do
+            task.wait(1)
+            if isfile(CONFIG.RECORD_FILE) then
+                local content = readfile(CONFIG.RECORD_FILE)
+                local actions = {}
+                
+                for line in content:gmatch("[^\r\n]+") do
+                    local parts = {}
+                    for part in line:gmatch("([^|]+)") do
+                        table.insert(parts, part)
+                    end
+                    
+                    local action = {}
+                    if parts[1] == "Place" then
+                        action.TowerPlaceCost = tonumber(parts[3])
+                        action.TowerPlaced = parts[2]
+                        action.TowerVector = parts[4]
+                        action.Rotation = parts[5]
+                        action.TowerA1 = parts[6] or ""
+                        
+                    elseif parts[1] == "Upgrade" then
+                        action.TowerUpgraded = parts[2]
+                        action.UpgradeCost = 0
+                        action.UpgradePath = tonumber(parts[4])
+                        
+                    elseif parts[1] == "Sell" then
+                        action.SellTower = parts[2]
+                    end
+                    
+                    table.insert(actions, action)
+                end
+                
+                if #actions > 0 then
+                    writefile(CONFIG.OUTPUT_JSON, HttpService:JSONEncode(actions))
+                    delfile(CONFIG.RECORD_FILE)
+                end
             end
         end
     end
-end
+}
 
--- Start
-RecordActions()
+-- Khởi động hệ thống
+if isfile(CONFIG.RECORD_FILE) then
+    delfile(CONFIG.RECORD_FILE)
+end
+writefile(CONFIG.RECORD_FILE, "")
+
+MacroRecorder:Init()
+MacroRecorder:ProcessToJson()
