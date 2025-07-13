@@ -87,161 +87,179 @@ end)
 
 print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
 
--- Script chuyển đổi record.txt thành macro runner (dùng trục X), với thứ tự trường upgrade là: UpgradeCost, UpgradePath, TowerUpgraded
--- Đặt script này trong môi trường Roblox hoặc môi trường hỗ trợ các API Roblox tương ứng
-
-local txtFile = "record.txt"
+-- TDX Macro Recorder v2.5 (Universal Executor Version)
+local txtFile = "tdx_records.txt"
 local outJson = "tdx/macros/x.json"
+local DELAY = 0.05 -- Ultra-fast 50ms processing
 
-local Players = game:GetService("Players")
-local player = Players.LocalPlayer
-local HttpService = game:GetService("HttpService")
-local PlayerScripts = player:WaitForChild("PlayerScripts")
-
--- Safe require tower module
-local function SafeRequire(module)
-    local success, result = pcall(require, module)
-    return success and result or nil
+-- Universal service getter with fallback
+local function GetService(serviceName)
+    return pcall(function() 
+        return game:GetService(serviceName) or game[serviceName]
+    end)
 end
 
-local TowerClass
-do
-    local client = PlayerScripts:WaitForChild("Client")
-    local gameClass = client:WaitForChild("GameClass")
-    local towerModule = gameClass:WaitForChild("TowerClass")
-    TowerClass = SafeRequire(towerModule)
-end
+-- Initialize essential services
+local success, Players = GetService("Players")
+local _, HttpService = GetService("HttpService")
+if not success then error("Failed to get Players service") end
 
-local function GetTowerPosition(tower)
-    if not tower or not tower.Character then return nil end
-    local model = tower.Character:GetCharacterModel()
-    local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
-    return root and root.Position or nil
-end
+-- Debug mode for executors (enable for detailed logging)
+local DEBUG_MODE = true
 
-local function GetTowerPlaceCostByName(name)
-    local playerGui = player:FindFirstChild("PlayerGui")
-    if not playerGui then return 0 end
-    local interface = playerGui:FindFirstChild("Interface")
-    if not interface then return 0 end
-    local bottomBar = interface:FindFirstChild("BottomBar")
-    if not bottomBar then return 0 end
-    local towersBar = bottomBar:FindFirstChild("TowersBar")
-    if not towersBar then return 0 end
-    for _, tower in ipairs(towersBar:GetChildren()) do
-        if tower.Name == name then
-            local costFrame = tower:FindFirstChild("CostFrame")
-            local costText = costFrame and costFrame:FindFirstChild("CostText")
-            if costText then
-                local raw = tostring(costText.Text):gsub("%D", "")
-                return tonumber(raw) or 0
+-- Enhanced directory creator
+local function CreateDir(path)
+    if not makefolder then return false end
+    local parts = {}
+    for part in path:gmatch("[^/]+") do
+        table.insert(parts, part)
+        local current = table.concat(parts, "/")
+        if not isfolder(current) then
+            local ok, _ = pcall(makefolder, current)
+            if not ok and DEBUG_MODE then
+                warn("Failed to create dir:", current)
             end
         end
     end
-    return 0
+    return true
 end
 
-local function ParseUpgradeCost(costStr)
-    local num = tostring(costStr):gsub("[^%d]", "")
-    return tonumber(num) or 0
+-- Safe require with executor detection
+local function SafeRequire(module)
+    local executorType = (identifyexecutor or getexecutorname or function() return "Unknown" end)()
+    local isSynapse = string.find(tostring(executorType):lower(), "synapse") ~= nil
+
+    -- Special handling for different executors
+    if isSynapse then
+        return pcall(require, module)
+    elseif getrequired then
+        return pcall(getrequired, module)
+    elseif require then
+        return pcall(require, module)
+    else
+        return false, "No require function available"
+    end
 end
 
-local function GetUpgradeCost(tower, path)
-    if not tower or not tower.LevelHandler then return 0 end
-    local lvl = tower.LevelHandler:GetLevelOnPath(path)
-    local ok, cost = pcall(function()
-        return tower.LevelHandler:GetLevelUpgradeCost(path, lvl+1)
-local txtFile = "record.txt"
-local outJson = "tdx/macros/x.json"
-local DELAY = 0.05  -- Ultra-fast processing
-
--- Services
-local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
-local PlayerScripts = Players.LocalPlayer:WaitForChild("PlayerScripts")
-
--- Initialize TowerClass
+-- Load game modules
 local TowerClass
 do
-    local client = PlayerScripts:WaitForChild("Client")
-    local gameClass = client:WaitForChild("GameClass")
-    local towerModule = gameClass:WaitForChild("TowerClass")
-    local success, result = pcall(require, towerModule)
-    TowerClass = success and result or nil
+    local player = Players.LocalPlayer
+    if player then
+        local PlayerScripts = player:FindFirstChild("PlayerScripts")
+        if PlayerScripts then
+            local client = PlayerScripts:FindFirstChild("Client")
+            if client then
+                local gameClass = client:FindFirstChild("GameClass")
+                if gameClass then
+                    local towerModule = gameClass:FindFirstChild("TowerClass")
+                    if towerModule then
+                        local success, result = SafeRequire(towerModule)
+                        if success then
+                            TowerClass = result
+                            if DEBUG_MODE then
+                                print("✅ Successfully loaded TowerClass")
+                            end
+                        elseif DEBUG_MODE then
+                            warn("Failed to require TowerClass:", result)
+                        end
+                    end
+                end
+            end
+        end
+    end
 end
 
--- Tracking and Utility Functions
-local hash2pos = {}
-
-local function TrackTowerPositions()
+-- Tower position tracker (optimized)
+local towerPositions = {}
+local function TrackTowers()
     while true do
-        if TowerClass then
+        if TowerClass and TowerClass.GetTowers then
             for hash, tower in pairs(TowerClass.GetTowers()) do
                 if tower and tower.Character then
                     local model = tower.Character:GetCharacterModel()
                     local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
                     if root then
-                        hash2pos[tostring(hash)] = {x = root.Position.X, y = root.Position.Y, z = root.Position.Z}
+                        towerPositions[tostring(hash)] = {
+                            x = root.Position.X,
+                            y = root.Position.Y,
+                            z = root.Position.Z
+                        }
                     end
                 end
             end
         end
-        task.wait(0.1)
+        task.wait(0.1) -- Position update interval
     end
 end
+task.spawn(TrackTowers)
 
-task.spawn(TrackTowerPositions)
+-- Cost utilities
+local function ParseCost(text)
+    if not text then return 0 end
+    local num = tostring(text):gsub("%D", "")
+    return tonumber(num) or 0
+end
 
--- Processing Functions with Verification
-local function ProcessPlace(a1, name, x, y, z, rot)
-    local cost = 0
-    pcall(function()
-        local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
-        if playerGui then
-            local towerBtn = playerGui:FindFirstChild("Interface/BottomBar/TowersBar/"..name)
-            if towerBtn then
-                local costText = towerBtn:FindFirstChild("CostFrame/CostText") or towerBtn:FindFirstChild("CostFrame/OrderText")
-                if costText then
-                    cost = tonumber(costText.Text:match("%d+")) or 0
-                end
-            end
-        end
-    end)
+local function GetTowerCost(name)
+    local interface = Players.LocalPlayer.PlayerGui:FindFirstChild("Interface")
+    if not interface then return 0 end
     
-    print(string.format("🏗️ Placed | %-15s | Cost: $%-5d | Pos: %s,%s,%s | Rot: %s",
-        name, cost, x, y, z, rot))
+    local towerBtn = interface:FindFirstChild("BottomBar/TowersBar/"..name, true)
+    if not towerBtn then return 0 end
+    
+    local costFrame = towerBtn:FindFirstChild("CostFrame")
+    if not costFrame then return 0 end
+    
+    local costText = costFrame:FindFirstChildWhichIsA("TextLabel", true)
+    return ParseCost(costText and costText.Text)
+end
+
+-- Processing functions
+local function ProcessPlace(a1, name, x, y, z, rot)
+    rot = rot or "0"
+    local cost = GetTowerCost(name:gsub('"', ''))
+    
+    if DEBUG_MODE then
+        print(string.format(
+            "🏗️ Place | %-12s | $%-4d | Pos: %8s,%-8s,%-8s | Rot: %-4s",
+            name, cost, x, y, z, rot
+        ))
+    end
     
     return {
         TowerPlaceCost = cost,
-        TowerPlaced = name,
-        TowerVector = x..","..y..","..z,
+        TowerPlaced = name:gsub('"', ''),
+        TowerVector = string.format("%s,%s,%s", x, y, z),
         Rotation = rot,
         TowerA1 = tostring(a1)
     }
 end
 
 local function ProcessUpgrade(hash, path)
-    local pos = hash2pos[tostring(hash)]
+    local pos = towerPositions[hash]
     if not pos then return nil end
     
-    local tower = TowerClass and TowerClass.GetTower(hash)
+    local tower = TowerClass and TowerClass.GetTower(tonumber(hash) or hash)
     if not tower then return nil end
     
     local initialLevel = tower.LevelHandler:GetLevelOnPath(path)
-    task.wait(DELAY) -- Wait for game processing
+    task.wait(DELAY) -- Let game process
     
     local newLevel = tower.LevelHandler:GetLevelOnPath(path)
     local success = newLevel > initialLevel
-    local cost = GetUpgradeCost(tower, path)
+    local cost = 0 -- Default as requested
     
-    print(string.format("%s Upgrade | %-15s | Path: %d | %s | Cost: $%d",
-        success and "✅" or "❌",
-        hash:sub(1, 15),
-        path,
-        success and string.format("Success (Lv.%d→Lv.%d)", initialLevel, newLevel) 
-               or string.format("Failed (Lv.%d)", initialLevel),
-        cost
-    ))
+    if DEBUG_MODE then
+        print(string.format(
+            "%s Upgrade | %-12s | Path: %d | %s",
+            success and "✅" or "❌", 
+            hash:sub(1, 12),
+            path,
+            success and string.format("Lv.%d→Lv.%d", initialLevel, newLevel) 
+                   or string.format("Stuck at Lv.%d", initialLevel)
+        ))
+    end
     
     return {
         UpgradeCost = cost,
@@ -251,105 +269,120 @@ local function ProcessUpgrade(hash, path)
     }
 end
 
-local function ProcessTargetChange(hash, targetType)
-    local pos = hash2pos[tostring(hash)]
-    if pos then
-        print(string.format("🎯 Target Change | %-15s | Type: %d | Pos: %.1f",
-            hash:sub(1, 15), targetType, pos.x))
-        return {
-            ChangeTarget = pos.x,
-            TargetType = targetType
-        }
+local function ProcessTarget(hash, targetType)
+    local pos = towerPositions[hash]
+    if not pos then return nil end
+
+    if DEBUG_MODE then
+        print(string.format(
+            "🎯 Target | %-12s | Type: %d | Pos: %.1f",
+            hash:sub(1, 12), targetType, pos.x
+        ))
     end
-    return nil
+    
+    return {
+        ChangeTarget = pos.x,
+        TargetType = targetType
+    }
 end
 
 local function ProcessSell(hash)
-    local pos = hash2pos[tostring(hash)]
-    if pos then
-        print(string.format("💵 Sold | %-15s | Pos: %.1f", hash:sub(1, 15), pos.x))
-        return {
-            SellTower = pos.x
-        }
+    local pos = towerPositions[hash]
+    if not pos then return nil end
+    
+    if DEBUG_MODE then
+        print(string.format("💵 Sold | %-12s | Pos: %.1f", hash:sub(1, 12), pos.x))
     end
-    return nil
+    
+    return {
+        SellTower = pos.x
+    }
 end
 
--- Main Processing Loop
-while true do
-    if isfile(txtFile) then
-        local macro = readfile(txtFile)
-        local logs = {}
-        local stats = {
-            place = 0,
-            upgrade = {total = 0, success = 0},
-            target = 0,
-            sell = 0
-        }
+-- Main processing loop
+CreateDir("tdx/macros")
 
-        for line in macro:gmatch("[^\r\n]+") do
-            -- Place Tower
-            local placeData = {line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),?%s*([^%)]*)%)')}
-            if #placeData >= 5 then
-                local record = ProcessPlace(
-                    placeData[1], -- a1
-                    placeData[2]:gsub('["\']', ''), -- name
-                    placeData[3], -- x
-                    placeData[4], -- y
-                    placeData[5], -- z
-                    placeData[6] or "0" -- rot
-                )
+while true do
+    if not isfile(txtFile) then
+        task.wait(DELAY)
+        continue
+    end
+
+    local content = readfile(txtFile)
+    local records = {}
+    local stats = {
+        place = 0,
+        upgrade = { total = 0, success = 0 },
+        target = 0,
+        sell = 0
+    }
+
+    -- Process each line
+    for line in content:gmatch("[^\r\n]+") do
+        -- Place Tower
+        local placeArgs = { line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),?%s*([^%)]*)%)') }
+        if #placeArgs >= 5 then
+            local record = ProcessPlace(
+                placeArgs[1], placeArgs[2], 
+                placeArgs[3], placeArgs[4], 
+                placeArgs[5], placeArgs[6]
+            )
+            if record then
+                table.insert(records, record)
+                stats.place = stats.place + 1
+            end
+        else
+            -- Upgrade Tower
+            local upgradeArgs = { line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+)') }
+            if #upgradeArgs >= 2 then
+                local record = ProcessUpgrade(upgradeArgs[1], tonumber(upgradeArgs[2]))
                 if record then
-                    table.insert(logs, record)
-                    stats.place = stats.place + 1
+                    table.insert(records, record)
+                    stats.upgrade.total = stats.upgrade.total + 1
+                    if record._success then
+                        stats.upgrade.success = stats.upgrade.success + 1
+                    end
                 end
             else
-                -- Upgrade Tower
-                local upgradeData = {line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+)')}
-                if #upgradeData >= 2 then
-                    local record = ProcessUpgrade(upgradeData[1], tonumber(upgradeData[2]))
+                -- Change Target
+                local targetArgs = { line:match('TDX:changeQueryType%(([^,]+),%s*([^,]+)') }
+                if #targetArgs >= 2 then
+                    local record = ProcessTarget(targetArgs[1], tonumber(targetArgs[2]))
                     if record then
-                        table.insert(logs, record)
-                        stats.upgrade.total = stats.upgrade.total + 1
-                        if record._success then
-                            stats.upgrade.success = stats.upgrade.success + 1
-                        end
+                        table.insert(records, record)
+                        stats.target = stats.target + 1
                     end
                 else
-                    -- Target Change
-                    local targetData = {line:match('TDX:changeQueryType%(([^,]+),%s*([^,]+)')}
-                    if #targetData >= 2 then
-                        local record = ProcessTargetChange(targetData[1], tonumber(targetData[2]))
+                    -- Sell Tower
+                    local sellArgs = { line:match('TDX:sellTower%(([^%)]+)') }
+                    if #sellArgs >= 1 then
+                        local record = ProcessSell(sellArgs[1])
                         if record then
-                            table.insert(logs, record)
-                            stats.target = stats.target + 1
-                        end
-                    else
-                        -- Sell Tower
-                        local sellData = {line:match('TDX:sellTower%(([^%)]+)')}
-                        if #sellData >= 1 then
-                            local record = ProcessSell(sellData[1])
-                            if record then
-                                table.insert(logs, record)
-                                stats.sell = stats.sell + 1
-                            end
+                            table.insert(records, record)
+                            stats.sell = stats.sell + 1
                         end
                     end
                 end
             end
         end
-
-        -- Print summary
-        print("\n📊 Macro Processing Complete:")
-        print(string.format("• Placed: %d towers", stats.place))
-        print(string.format("• Upgrades: %d/%d successful (%.1f%%)", 
-            stats.upgrade.success, stats.upgrade.total,
-            stats.upgrade.total > 0 and (stats.upgrade.success/stats.upgrade.total)*100 or 0))
-        print(string.format("• Target Changes: %d", stats.target))
-        print(string.format("• Sold: %d towers", stats.sell))
-
-        writefile(outJson, HttpService:JSONEncode(logs))
-        delfile(txtFile)
     end
+
+    -- Save output
+    if #records > 0 then
+        writefile(outJson, HttpService:JSONEncode(records))
+    end
+    delfile(txtFile)
+
+    -- Print summary
+    if DEBUG_MODE then
+        print("\n📊 Session Summary:")
+        print(string.format("Placed: %d towers", stats.place))
+        print(string.format("Upgrades: %d/%d successful", stats.upgrade.success, stats.upgrade.total))
+        print(string.format("Target Changes: %d", stats.target))
+        print(string.format("Sold: %d towers\n", stats.sell))
+    end
+
     task.wait(DELAY)
 end
+
+print("✅ TDX Macro Recorder is running! Press F9 to see debug output")
