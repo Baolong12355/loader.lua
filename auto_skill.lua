@@ -132,7 +132,7 @@ local function getCommanderTarget()
 	table.sort(list, function(a, b)
 		return (a.HealthHandler:GetMaxHealth() or 0) > (b.HealthHandler:GetMaxHealth() or 0)
 	end)
-	if math.random(1, 10) <= 6 then
+	if math.random(1, 10) <= 3 then
 		return list[1]:GetPosition()
 	else
 		return list[math.random(1, #list)]:GetPosition()
