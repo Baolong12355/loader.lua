@@ -1,279 +1,289 @@
-local startTime = time()
-local offset = 0
-local fileName = "record.txt"
-
--- Xóa file cũ nếu có
-if isfile(fileName) then
-    delfile(fileName)
-end
-writefile(fileName, "")
-
--- Serialize giá trị
-local function serialize(value)
-    if type(value) == "table" then
-        local result = "{"
-        for k, v in pairs(value) do
-            result ..= "[" .. serialize(k) .. "]=" .. serialize(v) .. ", "
-        end
-        if result ~= "{" then
-            result = result:sub(1, -3)
-        end
-        return result .. "}"
-    else
-        return tostring(value)
-    end
-end
-
--- Serialize toàn bộ argument
-local function serializeArgs(...)
-    local args = {...}
-    local output = {}
-    for i, v in ipairs(args) do
-        output[i] = serialize(v)
-    end
-    return table.concat(output, ", ")
-end
-
--- Ghi log vào file
-local function log(method, self, serializedArgs)
-    local name = tostring(self.Name)
-
-    if name == "PlaceTower" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
-
-    elseif name == "SellTower" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
-
-    elseif name == "TowerUpgradeRequest" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:upgradeTower(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
-
-    elseif name == "ChangeQueryType" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
-    end
-end
-
--- Hook FireServer
-local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-    local args = serializeArgs(...)
-    log("FireServer", self, args)
-    return oldFireServer(self, ...)
-end)
-
--- Hook InvokeServer
-local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-    local args = serializeArgs(...)
-    log("InvokeServer", self, args)
-    return oldInvokeServer(self, ...)
-end)
-
--- Hook __namecall
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    local method = getnamecallmethod()
-    if method == "FireServer" or method == "InvokeServer" then
-        local args = serializeArgs(...)
-        log(method, self, args)
-    end
-    return oldNamecall(self, ...)
-end)
-
-print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
-
-local txtFile = "record.txt"
-local outJson = "tdx/macros/x.json"
-
-local Players = game:GetService("Players")
-local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
-local PlayerScripts = player:WaitForChild("PlayerScripts")
-local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
--- Safe require TowerClass
-local function SafeRequire(module)
-	local ok, result = pcall(require, module)
-	return ok and result or nil
-end
+-- Cấu hình chính xác
+local CONFIG = {
+    RECORD_FILE = "tdx_macro_records.txt",
+    OUTPUT_JSON = "tdx/macros/processed.json",
+    TOWER_POSITION_UPDATE_INTERVAL = 0.05,  -- Giảm khoảng thời gian cập nhật
+    FILE_CHECK_INTERVAL = 0.2,
+    VERSION = "2.2",
+    PRECISION = 17  -- Số chữ số thập phân tối đa (double precision)
+}
 
--- Load TowerClass
+-- Khởi tạo TowerClass với xử lý lỗi chi tiết
 local TowerClass
-do
-	local client = PlayerScripts:FindFirstChild("Client")
-	local gameClass = client and client:FindFirstChild("GameClass")
-	local towerModule = gameClass and gameClass:FindFirstChild("TowerClass")
-	TowerClass = towerModule and SafeRequire(towerModule)
+local function loadTowerClass()
+    if TowerClass then return true end
+    
+    local function warnLoadFailure(step)
+        warn("[TDX Macro] Không thể load TowerClass tại bước:", step)
+    end
+
+    local success, result = pcall(function()
+        local PlayerScripts = Players.LocalPlayer:WaitForChild("PlayerScripts", 5)
+        if not PlayerScripts then warnLoadFailure("PlayerScripts"); return nil end
+        
+        local client = PlayerScripts:FindFirstChild("Client")
+        if not client then warnLoadFailure("Client"); return nil end
+        
+        local gameClass = client:FindFirstChild("GameClass")
+        if not gameClass then warnLoadFailure("GameClass"); return nil end
+        
+        local towerModule = gameClass:FindFirstChild("TowerClass")
+        if not towerModule then warnLoadFailure("TowerClass module"); return nil end
+        
+        return require(towerModule)
+    end)
+
+    if success and result then
+        TowerClass = result
+        return true
+    end
+    return false
 end
 
-if not TowerClass then
-	warn("❌ Không thể load TowerClass")
-	return
+-- Serializer chính xác tuyệt đối
+local function serializeExactValue(value)
+    if typeof(value) == "Vector3" then
+        return string.format("Vector3.new(%.17g, %.17g, %.17g)", value.X, value.Y, value.Z)
+    elseif typeof(value) == "CFrame" then
+        local components = {value:GetComponents()}
+        local parts = {}
+        for i, v in ipairs(components) do
+            table.insert(parts, string.format("%.17g", v))
+        end
+        return string.format("CFrame.new(%s)", table.concat(parts, ", "))
+    elseif typeof(value) == "Instance" then
+        return string.format('game:GetService("%s"):WaitForChild("%s")', value.Parent.ClassName, value.Name)
+    elseif type(value) == "number" then
+        return string.format("%.17g", value)
+    elseif type(value) == "table" then
+        local parts = {}
+        for k, v in pairs(value) do
+            table.insert(parts, string.format("[%s] = %s", 
+                serializeExactValue(k), 
+                serializeExactValue(v)))
+        end
+        return "{"..table.concat(parts, ", ").."}"
+    elseif type(value) == "string" then
+        return string.format("%q", value)
+    end
+    return tostring(value)
 end
 
--- Get level on path
-local function GetPathLevel(tower, path)
-	if not tower or not tower.LevelHandler then return nil end
-	local ok, result = pcall(function()
-		return tower.LevelHandler:GetLevelOnPath(path)
-	end)
-	return ok and result or nil
-end
+-- Bộ đếm thời gian chính xác cao
+local HighPrecisionTimer = {
+    _lastTime = os.clock(),
+    getElapsed = function(self)
+        local current = os.clock()
+        local elapsed = current - self._lastTime
+        self._lastTime = current
+        return string.format("%.17g", elapsed)
+    end,
+    reset = function(self)
+        self._lastTime = os.clock()
+    end
+}
 
--- Get tower position
-local function GetTowerPosition(tower)
-	if not tower or not tower.Character then return nil end
-	local ok, pos = pcall(function()
-		local model = tower.Character:GetCharacterModel()
-		local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
-		return root and root.Position
-	end)
-	return ok and pos or nil
-end
+-- Trình theo dõi vị trí tower chính xác
+local PrecisionTowerTracker = {
+    _positions = {},
+    _connections = {},
+    _isRunning = false,
+    
+    start = function(self)
+        if self._isRunning then return end
+        self._isRunning = true
+        
+        if not loadTowerClass() then
+            warn("[Tracker] Không thể khởi động do thiếu TowerClass")
+            return
+        end
 
--- Cache cấp độ
-local upgradeCache = {}
+        -- Kết nối Heartbeat với tốc độ cao
+        table.insert(self._connections, 
+            RunService.Heartbeat:Connect(function()
+                local towers = TowerClass.GetTowers()
+                for hash, tower in pairs(towers) do
+                    if tower and tower.Character then
+                        local model = tower.Character:GetCharacterModel()
+                        local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+                        if root then
+                            local pos = root.Position
+                            self._positions[tostring(hash)] = {
+                                x = pos.X,
+                                y = pos.Y,
+                                z = pos.Z
+                            }
+                        end
+                    end
+                end
+            end)
+        )
+    end,
+    
+    stop = function(self)
+        self._isRunning = false
+        for _, conn in ipairs(self._connections) do
+            conn:Disconnect()
+        end
+        self._connections = {}
+    end,
+    
+    getPosition = function(self, hash)
+        return self._positions[tostring(hash)] or false
+    end
+}
 
--- Ánh xạ X → hash
-local x2hash = {}
-local hash2pos = {}
-task.spawn(function()
-	while true do
-		for hash, tower in pairs(TowerClass.GetTowers()) do
-			local h = tostring(hash)
-			local pos = GetTowerPosition(tower)
-			if pos then
-				local x = math.floor(pos.X + 0.5)
-				x2hash[x] = h
-				hash2pos[h] = {x = pos.X, y = pos.Y, z = pos.Z}
-			end
+-- Bản ghi macro chính xác
+local MacroRecorder = {
+    _initialized = false,
+    
+    init = function(self)
+        if self._initialized then return end
+        self._initialized = true
 
-			-- Cập nhật cache cấp
-			upgradeCache[h] = upgradeCache[h] or {}
-			for path = 1, 2 do
-				local lvl = GetPathLevel(tower, path)
-				if lvl ~= nil then
-					upgradeCache[h][path] = lvl
-				end
-			end
-		end
-		task.wait(0.05)
-	end
-end)
+        -- Chuẩn bị file
+        if isfile(CONFIG.RECORD_FILE) then
+            delfile(CONFIG.RECORD_FILE)
+        end
+        writefile(CONFIG.RECORD_FILE, "-- TDX Macro v"..CONFIG.VERSION.." (Precision Mode)\n")
+        
+        -- Hook hàm FireServer chính xác
+        local originalFireServer = nil
+        originalFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+            if not self:IsA("RemoteEvent") then
+                return originalFireServer(self, ...)
+            end
 
--- Kiểm tra upgrade thành công
-local function IsUpgradeSuccess(hash, path)
-	local tower = TowerClass.GetTowers()[hash]
-	if not tower then return false end
-	local cur = GetPathLevel(tower, path)
-	local old = upgradeCache[hash] and upgradeCache[hash][path]
-	if old ~= nil and cur and cur > old then
-		upgradeCache[hash][path] = cur
-		print(string.format("✅ Upgrade: %s path %d (%d → %d)", hash, path, old, cur))
-		return true
-	end
-	return false
-end
+            local eventName = self.Name
+            local args = {...}
+            
+            -- Chỉ ghi lại các event quan trọng của TDX
+            if table.find({"PlaceTower", "SellTower", "TowerUpgradeRequest", "ChangeQueryType"}, eventName) then
+                local serializedArgs = {}
+                for _, arg in ipairs(args) do
+                    table.insert(serializedArgs, serializeExactValue(arg))
+                end
+                
+                local recordLine = string.format("wait(%s)\n%s:FireServer(%s)\n",
+                    HighPrecisionTimer:getElapsed(),
+                    serializeExactValue(self),
+                    table.concat(serializedArgs, ", ")
+                )
+                
+                appendfile(CONFIG.RECORD_FILE, recordLine)
+            end
+            
+            return originalFireServer(self, ...)
+        end)
 
--- Lấy giá đặt tower
-local function GetTowerPlaceCostByName(name)
-	local gui = player:FindFirstChild("PlayerGui")
-	local interface = gui and gui:FindFirstChild("Interface")
-	local bottomBar = interface and interface:FindFirstChild("BottomBar")
-	local towersBar = bottomBar and bottomBar:FindFirstChild("TowersBar")
-	if not towersBar then return 0 end
-	for _, tower in ipairs(towersBar:GetChildren()) do
-		if tower.Name == name then
-			local text = tower:FindFirstChild("CostFrame") and tower.CostFrame:FindFirstChild("CostText")
-			if text then
-				return tonumber(text.Text:gsub("%D", "")) or 0
-			end
-		end
-	end
-	return 0
-end
+        -- Bắt đầu theo dõi tower
+        PrecisionTowerTracker:start()
+    end
+}
 
--- Tạo thư mục nếu cần
-if makefolder then
-	pcall(function() makefolder("tdx") end)
-	pcall(function() makefolder("tdx/macros") end)
-end
+-- Bộ xử lý macro
+local MacroProcessor = {
+    process = function(self)
+        if not loadTowerClass() then return end
+        
+        while true do
+            if isfile(CONFIG.RECORD_FILE) then
+                local content = readfile(CONFIG.RECORD_FILE)
+                local output = {
+                    metadata = {
+                        version = CONFIG.VERSION,
+                        created = os.date("%Y-%m-%d %H:%M:%S"),
+                        map = workspace:GetAttribute("CurrentMap") or "unknown",
+                        precision = "full"
+                    },
+                    actions = {}
+                }
 
-print("📜 Đang chuyển đổi record.txt → x.json...")
+                for line in content:gmatch("[^\r\n]+") do
+                    if line:match("FireServer%(") then
+                        local eventPath = line:match("^(.-):FireServer%(")
+                        local argsStr = line:match("FireServer%((.-)%)$")
+                        
+                        if eventPath and argsStr then
+                            local eventName = eventPath:match("%.([%w_]+)$") or eventPath
+                            local success, args = pcall(function()
+                                return loadstring("return "..argsStr)()
+                            end)
+                            
+                            if success and type(args) == "table" then
+                                local action = {
+                                    type = eventName,
+                                    time = HighPrecisionTimer:getElapsed(),
+                                    raw_args = args
+                                }
 
-while true do
-	if isfile(txtFile) then
-		local macro = readfile(txtFile)
-		local logs = {}
+                                -- Xử lý đặc biệt cho từng loại event
+                                if eventName == "PlaceTower" and #args >= 5 then
+                                    action.action = "place"
+                                    action.tower_type = args[1]
+                                    action.position = {x = args[2], y = args[3], z = args[4]}
+                                    action.rotation = args[5]
+                                    
+                                elseif eventName == "TowerUpgradeRequest" and #args >= 2 then
+                                    local towerPos = PrecisionTowerTracker:getPosition(args[1])
+                                    if towerPos then
+                                        action.action = "upgrade"
+                                        action.tower_position = towerPos
+                                        action.path = args[2]
+                                    end
+                                    
+                                elseif eventName == "SellTower" and #args >= 1 then
+                                    local towerPos = PrecisionTowerTracker:getPosition(args[1])
+                                    if towerPos then
+                                        action.action = "sell"
+                                        action.tower_position = towerPos
+                                    end
+                                    
+                                elseif eventName == "ChangeQueryType" and #args >= 2 then
+                                    local towerPos = PrecisionTowerTracker:getPosition(args[1])
+                                    if towerPos then
+                                        action.action = "change_target"
+                                        action.tower_position = towerPos
+                                        action.target_type = args[2]
+                                    end
+                                end
 
-		for line in macro:gmatch("[^\r\n]+") do
-			-- PLACE
-			local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-			if a1 and name and x and y and z and rot then
-				name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
-				local vector = x .. ", " .. y .. ", " .. z
-				local cost = GetTowerPlaceCostByName(name)
-				table.insert(logs, {
-					TowerA1 = a1,
-					TowerPlaced = name,
-					TowerVector = vector,
-					Rotation = rot,
-					TowerPlaceCost = tonumber(cost)
-				})
-				print("[+] Place:", name, vector)
-			end
+                                table.insert(output.actions, action)
+                            end
+                        end
+                    end
+                end
 
-			-- UPGRADE
-			local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*(%d),')
-			if hash and path then
-				path = tonumber(path)
-				if IsUpgradeSuccess(hash, path) then
-					local pos = hash2pos[hash]
-					if pos then
-						table.insert(logs, {
-							UpgradeCost = 0,
-							UpgradePath = path,
-							TowerUpgraded = pos.x
-						})
-						print("[+] Upgrade:", hash, "→", pos.x)
-					end
-				else
-					print("[×] Upgrade thất bại:", hash)
-				end
-			end
+                -- Ghi file JSON với đầy đủ độ chính xác
+                writefile(CONFIG.OUTPUT_JSON, HttpService:JSONEncode(output))
+            end
+            wait(CONFIG.FILE_CHECK_INTERVAL)
+        end
+    end
+}
 
-			-- CHANGE TARGET
-			local hash, target = line:match('TDX:changeQueryType%(([^,]+),%s*(%d)%)')
-			if hash and target then
-				local pos = hash2pos[hash]
-				if pos then
-					table.insert(logs, {
-						ChangeTarget = pos.x,
-						TargetType = tonumber(target)
-					})
-					print("[+] Target:", pos.x, target)
-				end
-			end
+-- Khởi động hệ thống
+MacroRecorder:init()
+task.spawn(MacroProcessor.process)
 
-			-- SELL
-			local hash = line:match('TDX:sellTower%(([^%)]+)%)')
-			if hash then
-				local pos = hash2pos[hash]
-				if pos then
-					table.insert(logs, {
-						SellTower = pos.x
-					})
-					print("[+] Sell:", pos.x)
-				end
-			end
-		end
+print(([[
 
-		writefile(outJson, HttpService:JSONEncode(logs))
-	end
-	task.wait(0.22)
-end
+TDX Macro System (Precision Mode) v%s
+-------------------------------------------------
+• Độ chính xác: %d chữ số thập phân
+• File ghi: %s
+• File xuất: %s
+• Theo dõi vị trí: %s
+• Tần số cập nhật: %.0fHz
+]])).format(
+    CONFIG.VERSION,
+    CONFIG.PRECISION,
+    CONFIG.RECORD_FILE,
+    CONFIG.OUTPUT_JSON,
+    PrecisionTowerTracker._isRunning and "BẬT" or "TẮT",
+    1/CONFIG.TOWER_POSITION_UPDATE_INTERVAL
+))
