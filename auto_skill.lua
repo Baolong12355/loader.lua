@@ -47,6 +47,8 @@ local skipAirTowers = {
 local lastUsedTime = {}
 local mobsterUsedEnemies = {}
 local prevCooldown = {}
+local medicLastUsedTime = {}
+local medicDelay = 0.35 -- Delay tối thiểu giữa các lần dùng skill của mỗi Medic (giây)
 
 -- Enemy cache cập nhật mỗi 0.1s
 local enemyCache = {}
@@ -62,7 +64,7 @@ task.spawn(function()
 	end
 end)
 
--- ======== Chung các hàm vị trí, range, cooldown, DPS, kiểm tra buff ========
+-- ======== Hàm chung vị trí, range, cooldown, DPS, kiểm tra buff ========
 local function getTowerPos(tower)
 	local ok, pos = pcall(function() return tower:GetPosition() end)
 	if ok then return pos end
@@ -217,20 +219,19 @@ RunService.Heartbeat:Connect(function()
 	for hash, tower in pairs(ownedTowers) do
 		if not tower or not tower.AbilityHandler then continue end
 
-		-- Medic đặc biệt
+		-- Medic đặc biệt với delay riêng biệt
 		if tower.Type == "Medic" then
 			local _, p2 = GetCurrentUpgradeLevels(tower)
-			local delay = 0.2
-			if lastUsedTime[hash] and now - lastUsedTime[hash] < delay then continue end
-			lastUsedTime[hash] = now
-
 			if p2 >= 4 then
+				if medicLastUsedTime[hash] and now - medicLastUsedTime[hash] < medicDelay then continue end
 				for index = 1, 3 do
 					local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
 					if not isCooldownReady(hash, index, ability) then continue end
 					local targetHash = getBestMedicTarget(tower, ownedTowers)
 					if targetHash then
 						SendSkill(hash, index, nil, targetHash)
+						medicLastUsedTime[hash] = now
+						break -- chỉ dùng 1 lần cho mỗi Medic mỗi lần quét
 					end
 				end
 			end
