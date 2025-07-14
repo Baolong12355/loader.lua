@@ -9,7 +9,7 @@ local EnemyClass = require(PlayerScripts.Client.GameClass:WaitForChild("EnemyCla
 local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
 local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 
--- cấu hình tower
+-- Cấu hình tower đặc biệt
 local directionalTowerTypes = {
 	["Commander"] = { onlyAbilityIndex = 3 },
 	["Toxicnator"] = true,
@@ -46,9 +46,9 @@ local skipAirTowers = {
 
 local lastUsedTime = {}
 local mobsterUsedEnemies = {}
-local prevCooldown = {}  -- dùng để kiểm tra cooldown tăng
+local prevCooldown = {}
 
--- enemy cache cập nhật mỗi 0.1s
+-- Enemy cache cập nhật mỗi 0.1s
 local enemyCache = {}
 task.spawn(function()
 	while true do
@@ -62,14 +62,7 @@ task.spawn(function()
 	end
 end)
 
-local function SendSkill(hash, index, pos)
-	if useFireServer then
-		TowerUseAbilityRequest:FireServer(hash, index, pos)
-	else
-		TowerUseAbilityRequest:InvokeServer(hash, index, pos)
-	end
-end
-
+-- ======== Chung các hàm vị trí, range, cooldown, DPS, kiểm tra buff ========
 local function getTowerPos(tower)
 	local ok, pos = pcall(function() return tower:GetPosition() end)
 	if ok then return pos end
@@ -86,6 +79,54 @@ local function getRange(tower)
 	return 0
 end
 
+local function GetCurrentUpgradeLevels(tower)
+	local p1, p2 = 0, 0
+	pcall(function() p1 = tower.LevelHandler:GetLevelOnPath(1) or 0 end)
+	pcall(function() p2 = tower.LevelHandler:GetLevelOnPath(2) or 0 end)
+	return p1, p2
+end
+
+local function isCooldownReady(hash, index, ability)
+	if not ability then return false end
+	local lastCD = (prevCooldown[hash] and prevCooldown[hash][index]) or 0
+	local currentCD = ability.CooldownRemaining or 0
+	if currentCD > lastCD + 0.1 or currentCD > 0 then
+		prevCooldown[hash] = prevCooldown[hash] or {}
+		prevCooldown[hash][index] = currentCD
+		return false
+	end
+	prevCooldown[hash] = prevCooldown[hash] or {}
+	prevCooldown[hash][index] = currentCD
+	return true
+end
+
+local function getDPS(tower)
+	if not tower or not tower.LevelHandler then return 0 end
+	local levelStats = tower.LevelHandler:GetLevelStats()
+	local buffStats = tower.BuffHandler and tower.BuffHandler:GetStatMultipliers() or {}
+	local baseDmg = levelStats.Damage or 0
+	local dmgMultiplier = buffStats.DamageMultiplier or 0
+	local currentDmg = baseDmg * (1 + dmgMultiplier)
+	local reload = tower.GetCurrentReloadTime and tower:GetCurrentReloadTime() or levelStats.ReloadTime or 1
+	return (currentDmg / reload)
+end
+
+local function isBuffedByMedic(tower)
+	if not tower or not tower.BuffHandler or not tower.BuffHandler.ActiveBuffs then return false end
+	for _, buff in pairs(tower.BuffHandler.ActiveBuffs) do
+		local buffName = tostring(buff.Name or "")
+		if buffName:match("^MedicKritz") or buffName:match("^MedicGodMode") then
+			return true
+		end
+	end
+	return false
+end
+
+local function canReceiveBuff(tower)
+	return tower and not tower.NoBuffs
+end
+
+-- ======== Các hàm target đặc biệt ========
 local function getNearestEnemy(pos, range, towerType)
 	for _, enemy in ipairs(enemyCache) do
 		if enemy.Type ~= "Arrow" and enemy.GetPosition then
@@ -139,19 +180,63 @@ local function getCommanderTarget()
 	end
 end
 
-local function GetCurrentUpgradeLevels(tower)
-	local p1, p2 = 0, 0
-	pcall(function() p1 = tower.LevelHandler:GetLevelOnPath(1) or 0 end)
-	pcall(function() p2 = tower.LevelHandler:GetLevelOnPath(2) or 0 end)
-	return p1, p2
+local function getBestMedicTarget(medicTower, ownedTowers)
+	local medicPos = getTowerPos(medicTower)
+	local medicRange = getRange(medicTower)
+	local bestHash, bestDPS = nil, -1
+	for hash, tower in pairs(ownedTowers) do
+		if tower == medicTower then continue end
+		if canReceiveBuff(tower) and not isBuffedByMedic(tower) then
+			local towerPos = getTowerPos(tower)
+			if towerPos and (towerPos - medicPos).Magnitude <= medicRange then
+				local dps = getDPS(tower)
+				if dps > bestDPS then
+					bestDPS = dps
+					bestHash = hash
+				end
+			end
+		end
+	end
+	return bestHash
 end
 
+local function SendSkill(hash, index, pos, targetHash)
+	if useFireServer then
+		TowerUseAbilityRequest:FireServer(hash, index, pos, targetHash)
+	else
+		TowerUseAbilityRequest:InvokeServer(hash, index, pos, targetHash)
+	end
+end
+
+-- ======== MAIN LOOP ========
 RunService.Heartbeat:Connect(function()
 	local now = tick()
 	if #enemyCache == 0 then return end
+	local ownedTowers = TowerClass.GetTowers() or {}
 
-	for hash, tower in pairs(TowerClass.GetTowers() or {}) do
+	for hash, tower in pairs(ownedTowers) do
 		if not tower or not tower.AbilityHandler then continue end
+
+		-- Medic đặc biệt
+		if tower.Type == "Medic" then
+			local _, p2 = GetCurrentUpgradeLevels(tower)
+			local delay = 0.2
+			if lastUsedTime[hash] and now - lastUsedTime[hash] < delay then continue end
+			lastUsedTime[hash] = now
+
+			if p2 >= 4 then
+				for index = 1, 3 do
+					local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
+					if not isCooldownReady(hash, index, ability) then continue end
+					local targetHash = getBestMedicTarget(tower, ownedTowers)
+					if targetHash then
+						SendSkill(hash, index, nil, targetHash)
+					end
+				end
+			end
+			continue
+		end
+
 		if skipTowerTypes[tower.Type] then continue end
 
 		local delay = fastTowers[tower.Type] and 0.1 or 0.2
@@ -163,83 +248,65 @@ RunService.Heartbeat:Connect(function()
 		local range = getRange(tower)
 
 		for index = 1, 3 do
-			pcall(function()
-				local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-				if not ability then return end
+			local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
+			if not isCooldownReady(hash, index, ability) then continue end
 
-				-- kiểm tra cooldown thực tế
-				local lastCD = (prevCooldown[hash] and prevCooldown[hash][index]) or 0
-				local currentCD = ability.CooldownRemaining or 0
-				if currentCD > lastCD + 0.1 then
-					-- skill vừa được dùng gần đây
-					prevCooldown[hash] = prevCooldown[hash] or {}
-					prevCooldown[hash][index] = currentCD
-					return
-				end
+			local targetPos = nil
+			local allowUse = true
 
-				if currentCD > 0 then
-					prevCooldown[hash] = prevCooldown[hash] or {}
-					prevCooldown[hash][index] = currentCD
-					return
-				end
-
-				local targetPos = nil
-				local allowUse = true
-
-				if tower.Type == "Ghost" then
-					local maxHP, chosen = -1, nil
-					for _, e in ipairs(enemyCache) do
-						if e.Type ~= "Arrow" and e.HealthHandler then
-							local hp = e.HealthHandler:GetMaxHealth()
-							if hp > maxHP then
-								maxHP = hp
-								chosen = e
-							end
+			if tower.Type == "Ghost" then
+				local maxHP, chosen = -1, nil
+				for _, e in ipairs(enemyCache) do
+					if e.Type ~= "Arrow" and e.HealthHandler then
+						local hp = e.HealthHandler:GetMaxHealth()
+						if hp > maxHP then
+							maxHP = hp
+							chosen = e
 						end
 					end
-					if chosen then SendSkill(hash, index, chosen:GetPosition()) end
-					return
 				end
+				if chosen then SendSkill(hash, index, chosen:GetPosition()) end
+				break
+			end
 
-				if tower.Type == "Ice Breaker" then
-					allowUse = index == 1 or (index == 2 and getNearestEnemy(pos, 8, tower.Type))
-				elseif tower.Type == "Slammer" then
-					allowUse = getNearestEnemy(pos, range, tower.Type) ~= nil
-				elseif tower.Type == "John" then
-					allowUse = (p1 >= 5 and getNearestEnemy(pos, range, tower.Type)) or getNearestEnemy(pos, 4.5, tower.Type)
-				elseif tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
-					if p2 >= 3 and p2 <= 5 then
-						targetPos = getMobsterTarget(tower, hash, 2)
-						if not targetPos then return end
-					elseif p1 >= 4 and p1 <= 5 then
-						targetPos = getMobsterTarget(tower, hash, 1)
-						if not targetPos then return end
-					else
-						allowUse = false
-					end
+			if tower.Type == "Ice Breaker" then
+				allowUse = index == 1 or (index == 2 and getNearestEnemy(pos, 8, tower.Type))
+			elseif tower.Type == "Slammer" then
+				allowUse = getNearestEnemy(pos, range, tower.Type) ~= nil
+			elseif tower.Type == "John" then
+				allowUse = (p1 >= 5 and getNearestEnemy(pos, range, tower.Type)) or getNearestEnemy(pos, 4.5, tower.Type)
+			elseif tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
+				if p2 >= 3 and p2 <= 5 then
+					targetPos = getMobsterTarget(tower, hash, 2)
+					if not targetPos then break end
+				elseif p1 >= 4 and p1 <= 5 then
+					targetPos = getMobsterTarget(tower, hash, 1)
+					if not targetPos then break end
+				else
+					allowUse = false
 				end
+			end
 
-				if tower.Type == "Commander" and index == 3 then
-					targetPos = getCommanderTarget()
-					if not targetPos then return end
+			if tower.Type == "Commander" and index == 3 then
+				targetPos = getCommanderTarget()
+				if not targetPos then break end
+			end
+
+			local directional = directionalTowerTypes[tower.Type]
+			local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
+
+			if not targetPos and sendWithPos then
+				targetPos = getNearestEnemy(pos, range, tower.Type)
+				if not targetPos then break end
+			end
+
+			if allowUse then
+				if sendWithPos then
+					SendSkill(hash, index, targetPos)
+				else
+					SendSkill(hash, index)
 				end
-
-				local directional = directionalTowerTypes[tower.Type]
-				local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
-
-				if not targetPos and sendWithPos then
-					targetPos = getNearestEnemy(pos, range, tower.Type)
-					if not targetPos then return end
-				end
-
-				if allowUse then
-					if sendWithPos then
-						SendSkill(hash, index, targetPos)
-					else
-						SendSkill(hash, index)
-					end
-				end
-			end)
+			end
 		end
 	end
 end)
