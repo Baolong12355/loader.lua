@@ -148,7 +148,6 @@ print("📌 Đã bật ghi macro có xác nhận từ server.")
 
 
 -- Script chuyển đổi record.txt thành macro runner (dùng trục X), với thứ tự trường upgrade là: UpgradeCost, UpgradePath, TowerUpgraded
--- Đặt script này trong môi trường Roblox hoặc môi trường hỗ trợ các API Roblox tương ứng
 
 local txtFile = "record.txt"
 local outJson = "tdx/macros/x.json"
@@ -215,6 +214,7 @@ task.spawn(function()
     end
 end)
 
+-- tạo thư mục
 if makefolder then
     pcall(function() makefolder("tdx") end)
     pcall(function() makefolder("tdx/macros") end)
@@ -225,7 +225,7 @@ while true do
         local macro = readfile(txtFile)
         local logs = {}
 
-        -- giữ superfunction
+        -- giữ dòng SuperFunction
         local preservedSuper = {}
         if isfile(outJson) then
             for line in readfile(outJson):gmatch("[^\r\n]+") do
@@ -237,12 +237,12 @@ while true do
         end
 
         for line in macro:gmatch("[^\r\n]+") do
-            -- place tower
+            -- đặt tower
             local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
             if a1 and name and x and y and z and rot then
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
                 local cost = GetTowerPlaceCostByName(name)
-                local vector = tostring(x) .. ", " .. tostring(y) .. ", " .. tostring(z)
+                local vector = string.format("%s, %s, %s", tostring(tonumber(x) or x), tostring(tonumber(y) or y), tostring(tonumber(z) or z))
                 table.insert(logs, HttpService:JSONEncode({
                     TowerPlaceCost = tonumber(cost) or 0,
                     TowerPlaced = name,
@@ -251,14 +251,14 @@ while true do
                     TowerA1 = tostring(a1)
                 }))
             else
-                -- upgrade
+                -- nâng cấp
                 local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
                 if hash and path and upgradeCount then
                     local pos = hash2pos[tostring(hash)]
                     local pathNum = tonumber(path)
                     local count = tonumber(upgradeCount)
                     if pos and pathNum and count and count > 0 then
-                        for i = 1, count do
+                        for _ = 1, count do
                             table.insert(logs, HttpService:JSONEncode({
                                 UpgradeCost = 0,
                                 UpgradePath = pathNum,
@@ -267,7 +267,7 @@ while true do
                         end
                     end
                 else
-                    -- target
+                    -- đổi target
                     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
                     if hash and targetType then
                         local pos = hash2pos[tostring(hash)]
@@ -278,7 +278,7 @@ while true do
                             }))
                         end
                     else
-                        -- sell
+                        -- bán
                         local hash = line:match('TDX:sellTower%(([^%)]+)%)')
                         if hash then
                             local pos = hash2pos[tostring(hash)]
