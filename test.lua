@@ -147,9 +147,6 @@ print("📌 Đã bật ghi macro có xác nhận từ server.")
 
 
 
--- Script chuyển đổi record.txt thành macro runner (dùng trục X), với thứ tự trường upgrade là: UpgradeCost, UpgradePath, TowerUpgraded
--- Đặt script này trong môi trường Roblox hoặc môi trường hỗ trợ các API Roblox tương ứng
-
 local txtFile = "record.txt"
 local outJson = "tdx/macros/x.json"
 
@@ -220,27 +217,45 @@ if makefolder then
     pcall(function() makefolder("tdx/macros") end)
 end
 
+-- inject superfunction
+if not getgenv then getgenv = function() return _G end end
+local env = getgenv()
+local logs = {}
+
+local function InsertSuper(cmd, skipList)
+    if type(skipList) ~= "table" then skipList = {} end
+    local line = HttpService:JSONEncode({
+        SuperFunction = cmd,
+        Skip = skipList
+    })
+    table.insert(logs, line)
+    warn("✅ SuperFunction:", cmd, "→", table.concat(skipList, ", "))
+end
+
+env.rebuild = function(skip) InsertSuper("rebuild", skip) end
+env.SellAll = function(skip) InsertSuper("SellAll", skip) end
+
 while true do
     if isfile(txtFile) then
         local macro = readfile(txtFile)
-        local logs = {}
+        logs = {}
 
         for line in macro:gmatch("[^\r\n]+") do
-            -- Đặt tower: a1, name, x, y, z, rot
+            -- Đặt tower
             local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
             if a1 and name and x and y and z and rot then
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
                 local cost = GetTowerPlaceCostByName(name)
                 local vector = x .. ", " .. y .. ", " .. z
-                table.insert(logs, {
+                table.insert(logs, HttpService:JSONEncode({
                     TowerPlaceCost = tonumber(cost) or 0,
                     TowerPlaced = name,
                     TowerVector = vector,
                     Rotation = rot,
                     TowerA1 = tostring(a1)
-                })
+                }))
             else
-                -- Nâng cấp tower: UpgradeCost = 0 vì macro runner tự xử lý
+                -- Upgrade tower
                 local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
                 if hash and path and upgradeCount then
                     local pos = hash2pos[tostring(hash)]
@@ -248,33 +263,33 @@ while true do
                     local count = tonumber(upgradeCount)
                     if pos and pathNum and count and count > 0 then
                         for i = 1, count do
-                            table.insert(logs, {
+                            table.insert(logs, HttpService:JSONEncode({
                                 UpgradeCost = 0,
                                 UpgradePath = pathNum,
                                 TowerUpgraded = pos.x
-                            })
+                            }))
                         end
                     end
                 else
-                    -- Đổi target
+                    -- Change target
                     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
                     if hash and targetType then
                         local pos = hash2pos[tostring(hash)]
                         if pos then
-                            table.insert(logs, {
+                            table.insert(logs, HttpService:JSONEncode({
                                 ChangeTarget = pos.x,
                                 TargetType = tonumber(targetType)
-                            })
+                            }))
                         end
                     else
-                        -- Bán tower
+                        -- Sell tower
                         local hash = line:match('TDX:sellTower%(([^%)]+)%)')
                         if hash then
                             local pos = hash2pos[tostring(hash)]
                             if pos then
-                                table.insert(logs, {
+                                table.insert(logs, HttpService:JSONEncode({
                                     SellTower = pos.x
-                                })
+                                }))
                             end
                         end
                     end
@@ -282,7 +297,7 @@ while true do
             end
         end
 
-        writefile(outJson, HttpService:JSONEncode(logs))
+        writefile(outJson, table.concat(logs, "\n"))
     end
     wait(0.22)
 end
