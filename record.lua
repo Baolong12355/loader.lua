@@ -1,76 +1,124 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local fileName = "record.txt"
 local startTime = time()
 local offset = 0
-local fileName = "record.txt"
 
--- Xóa file cũ nếu có
-if isfile(fileName) then
-    delfile(fileName)
-end
+-- Xoá file cũ
+if isfile(fileName) then delfile(fileName) end
 writefile(fileName, "")
 
+-- Pending xác nhận
+local pending = nil
+local timeout = 2
+
 -- Serialize giá trị
-local function serialize(value)
-    if type(value) == "table" then
-        local result = "{"
-        for k, v in pairs(value) do
-            result ..= "[" .. serialize(k) .. "]=" .. serialize(v) .. ", "
+local function serialize(v)
+    if typeof(v) == "Vector3" then
+        return "Vector3.new(" .. v.X .. "," .. v.Y .. "," .. v.Z .. ")"
+    elseif typeof(v) == "Vector2int16" then
+        return "Vector2int16.new(" .. v.X .. "," .. v.Y .. ")"
+    elseif type(v) == "table" then
+        local out = {}
+        for k, val in pairs(v) do
+            out[#out + 1] = "[" .. tostring(k) .. "]=" .. serialize(val)
         end
-        if result ~= "{" then
-            result = result:sub(1, -3)
-        end
-        return result .. "}"
+        return "{" .. table.concat(out, ",") .. "}"
     else
-        return tostring(value)
+        return tostring(v)
     end
 end
 
--- Serialize toàn bộ argument
+-- Serialize args
 local function serializeArgs(...)
     local args = {...}
-    local output = {}
+    local out = {}
     for i, v in ipairs(args) do
-        output[i] = serialize(v)
+        out[i] = serialize(v)
     end
-    return table.concat(output, ", ")
+    return table.concat(out, ", ")
 end
 
--- Ghi log vào file
-local function log(method, self, serializedArgs)
-    local name = tostring(self.Name)
+-- Xác nhận và ghi
+local function confirmAndWrite()
+    if not pending then return end
+    appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+    appendfile(fileName, pending.code .. "\n")
+    startTime = time() - offset
+    pending = nil
+end
 
-    if name == "PlaceTower" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
-
-    elseif name == "SellTower" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
-
-    elseif name == "TowerUpgradeRequest" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:upgradeTower(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
-
-    elseif name == "ChangeQueryType" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
+-- Ghi nếu server phản hồi đúng loại
+local function tryConfirm(typeStr)
+    if pending and pending.type == typeStr then
+        confirmAndWrite()
     end
 end
+
+-- Ghi log
+local function setPending(typeStr, code)
+    pending = {
+        type = typeStr,
+        code = code,
+        created = tick()
+    }
+end
+
+-- Lắng nghe Remote xác thực
+ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
+    local d = data[1]
+    if not d then return end
+    if d.Creation then
+        tryConfirm("Place")
+    else
+        tryConfirm("Sell")
+    end
+end)
+
+ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
+    if data[1] then
+        tryConfirm("Upgrade")
+    end
+end)
+
+ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
+    if data[1] then
+        tryConfirm("Target")
+    end
+end)
+
+-- Timeout check
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if pending and tick() - pending.created > timeout then
+            warn("❌ Không xác thực được: " .. pending.type)
+            pending = nil
+        end
+    end
+end)
 
 -- Hook FireServer
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
     local args = serializeArgs(...)
-    log("FireServer", self, args)
+    local name = self.Name
+
+    if name == "PlaceTower" then
+        setPending("Place", "TDX:placeTower(" .. args .. ")")
+    elseif name == "SellTower" then
+        setPending("Sell", "TDX:sellTower(" .. args .. ")")
+    elseif name == "TowerUpgradeRequest" then
+        setPending("Upgrade", "TDX:upgradeTower(" .. args .. ")")
+    elseif name == "ChangeQueryType" then
+        setPending("Target", "TDX:changeQueryType(" .. args .. ")")
+    end
+
     return oldFireServer(self, ...)
 end)
 
 -- Hook InvokeServer
 local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
     local args = serializeArgs(...)
-    log("InvokeServer", self, args)
     return oldInvokeServer(self, ...)
 end)
 
@@ -80,15 +128,26 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     local method = getnamecallmethod()
     if method == "FireServer" or method == "InvokeServer" then
         local args = serializeArgs(...)
-        log(method, self, args)
+        local name = self.Name
+
+        if name == "PlaceTower" then
+            setPending("Place", "TDX:placeTower(" .. args .. ")")
+        elseif name == "SellTower" then
+            setPending("Sell", "TDX:sellTower(" .. args .. ")")
+        elseif name == "TowerUpgradeRequest" then
+            setPending("Upgrade", "TDX:upgradeTower(" .. args .. ")")
+        elseif name == "ChangeQueryType" then
+            setPending("Target", "TDX:changeQueryType(" .. args .. ")")
+        end
     end
     return oldNamecall(self, ...)
 end)
 
-print("✅ Ghi macro TDX đã bắt đầu (luôn dùng tên record.txt).")
+print("📌 Đã bật ghi macro có xác nhận từ server.")
+
+
 
 -- Script chuyển đổi record.txt thành macro runner (dùng trục X), với thứ tự trường upgrade là: UpgradeCost, UpgradePath, TowerUpgraded
--- Đặt script này trong môi trường Roblox hoặc môi trường hỗ trợ các API Roblox tương ứng
 
 local txtFile = "record.txt"
 local outJson = "tdx/macros/x.json"
@@ -141,24 +200,7 @@ local function GetTowerPlaceCostByName(name)
     return 0
 end
 
-local function ParseUpgradeCost(costStr)
-    local num = tostring(costStr):gsub("[^%d]", "")
-    return tonumber(num) or 0
-end
-
-local function GetUpgradeCost(tower, path)
-    if not tower or not tower.LevelHandler then return 0 end
-    local lvl = tower.LevelHandler:GetLevelOnPath(path)
-    local ok, cost = pcall(function()
-        return tower.LevelHandler:GetLevelUpgradeCost(path, lvl+1)
-    end)
-    if ok and cost then
-        return ParseUpgradeCost(cost)
-    end
-    return 0
-end
-
--- Ánh xạ hash -> pos liên tục
+-- ánh xạ hash -> pos liên tục
 local hash2pos = {}
 task.spawn(function()
     while true do
@@ -182,54 +224,67 @@ while true do
         local macro = readfile(txtFile)
         local logs = {}
 
+        -- giữ dòng SuperFunction
+        local preservedSuper = {}
+        if isfile(outJson) then
+            for line in readfile(outJson):gmatch("[^\r\n]+") do
+                local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
+                if ok and decoded and decoded.SuperFunction then
+                    table.insert(preservedSuper, line)
+                end
+            end
+        end
+
         for line in macro:gmatch("[^\r\n]+") do
-            -- Đặt tower: a1, name, x, y, z, rot
-            local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+            -- parser mới cho placeTower với Vector3.new(...)
+            local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
             if a1 and name and x and y and z and rot then
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
                 local cost = GetTowerPlaceCostByName(name)
-                local vector = x .. ", " .. y .. ", " .. z
-                table.insert(logs, {
+                local vector = string.format("%s, %s, %s", tostring(tonumber(x) or x), tostring(tonumber(y) or y), tostring(tonumber(z) or z))
+                table.insert(logs, HttpService:JSONEncode({
                     TowerPlaceCost = tonumber(cost) or 0,
                     TowerPlaced = name,
                     TowerVector = vector,
                     Rotation = rot,
                     TowerA1 = tostring(a1)
-                })
+                }))
             else
-                -- Nâng cấp tower: chuyển đổi đúng thứ tự UpgradeCost, UpgradePath, TowerUpgraded (X)
-                local hash, path = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*[^%)]+%)')
-                if hash and path then
+                -- nâng cấp
+                local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+                if hash and path and upgradeCount then
                     local pos = hash2pos[tostring(hash)]
-                    local tower = TowerClass and TowerClass.GetTowers()[hash]
-                    local upgradeCost = GetUpgradeCost(tower, tonumber(path))
-                    if pos then
-                        table.insert(logs, {
-                            UpgradeCost = upgradeCost,
-                            UpgradePath = tonumber(path),
-                            TowerUpgraded = pos.x
-                        })
+                    local pathNum = tonumber(path)
+                    local count = tonumber(upgradeCount)
+                    if pos and pathNum and count and count > 0 then
+                        for _ = 1, count do
+                            table.insert(logs, HttpService:JSONEncode({
+                                UpgradeCost = 0,
+                                UpgradePath = pathNum,
+                                TowerUpgraded = pos.x
+                            }))
+                        end
                     end
                 else
-                    -- Đổi target
+                    -- đổi target
                     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
                     if hash and targetType then
                         local pos = hash2pos[tostring(hash)]
                         if pos then
-                            table.insert(logs, {
+                            table.insert(logs, HttpService:JSONEncode({
                                 ChangeTarget = pos.x,
                                 TargetType = tonumber(targetType)
-                            })
+                            }))
                         end
                     else
-                        -- Bán tower
+                        -- bán
                         local hash = line:match('TDX:sellTower%(([^%)]+)%)')
                         if hash then
                             local pos = hash2pos[tostring(hash)]
                             if pos then
-                                table.insert(logs, {
+                                table.insert(logs, HttpService:JSONEncode({
                                     SellTower = pos.x
-                                })
+                                }))
                             end
                         end
                     end
@@ -237,7 +292,11 @@ while true do
             end
         end
 
-        writefile(outJson, HttpService:JSONEncode(logs))
+        for _, line in ipairs(preservedSuper) do
+            table.insert(logs, line)
+        end
+
+        writefile(outJson, table.concat(logs, "\n"))
     end
     wait(0.22)
 end
