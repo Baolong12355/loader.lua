@@ -1,110 +1,376 @@
--- rebuild_layout.lua
-local Players            = game:GetService("Players")
-local ReplicatedStorage   = game:GetService("ReplicatedStorage")
-local HttpService         = game:GetService("HttpService")
-local player              = Players.LocalPlayer
-local PlayerScripts       = player:WaitForChild("PlayerScripts")
+-- Formation Manager Script - Tự động lưu và rebuild đội hình
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
-local LIVE_FILE = "live_rebuild.txt"
+-- File paths
+local formationFile = "tdx/formation.json"
+local tempFile = "tdx/temp_formation.json"
 
--- Safe require TowerClass ------------------------------------------------------------
-local TowerClass
-do
-    local ok,mod = pcall(require, PlayerScripts
-                                :WaitForChild("Client")
-                                :WaitForChild("GameClass")
-                                :WaitForChild("TowerClass"))
-    if ok then TowerClass = mod end
+-- Tạo thư mục nếu chưa có
+if makefolder then
+    pcall(function() makefolder("tdx") end)
 end
 
--- Lấy giá đặt tower (GUI live) -------------------------------------------------------
-local function GetRealPlacementCost(towerName)
-    local gui   = player:FindFirstChild("PlayerGui")
-    if not gui then return 0 end
+-- Safe Require
+local function SafeRequire(path, timeout)
+    timeout = timeout or 5
+    local t0 = os.clock()
+    while os.clock() - t0 < timeout do
+        local success, result = pcall(function()
+            return require(path)
+        end)
+        if success then return result end
+        task.wait()
+    end
+    return nil
+end
 
-    local bottom = gui:FindFirstChildOfClass("ScreenGui")
-        and gui:FindFirstChildOfClass("ScreenGui"):FindFirstChild("BottomBar")
-    if not bottom then return 0 end
+-- Load TowerClass
+local function LoadTowerClass()
+    local ps = player:WaitForChild("PlayerScripts")
+    local client = ps:WaitForChild("Client")
+    local gameClass = client:WaitForChild("GameClass")
+    local towerModule = gameClass:WaitForChild("TowerClass")
+    return SafeRequire(towerModule)
+end
 
-    local towersSpam = bottom:FindFirstChild("TowersBar")
-    if not towersSpam then return 0 end
+local TowerClass = LoadTowerClass()
+if not TowerClass then error("Không thể tải TowerClass") end
 
-    for _,btn in pairs(towersSpam:GetChildren()) do
-        if btn.Name == towerName then
-            local costOb = btn:FindFirstChild("CostFrame") and btn.CostFrame:FindFirstChild("CostText")
-            if costOb then
-                local cleaned = tostring(costOb.Text):gsub("[^%d]", "")
-                return tonumber(cleaned) or 0
+-- Lấy thông tin tower từ GUI
+local function GetTowerPlaceCostByName(name)
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if not playerGui then return 0 end
+    local interface = playerGui:FindFirstChild("Interface")
+    if not interface then return 0 end
+    local bottomBar = interface:FindFirstChild("BottomBar")
+    if not bottomBar then return 0 end
+    local towersBar = bottomBar:FindFirstChild("TowersBar")
+    if not towersBar then return 0 end
+    
+    for _, tower in ipairs(towersBar:GetChildren()) do
+        if tower.Name == name then
+            local costFrame = tower:FindFirstChild("CostFrame")
+            local costText = costFrame and costFrame:FindFirstChild("CostText")
+            if costText then
+                local raw = tostring(costText.Text):gsub("%D", "")
+                return tonumber(raw) or 0
             end
         end
     end
     return 0
 end
 
--- Lấy vị trí/quay của tower ----------------------------------------------------------
-local function GetTowerData(t)
-    local m   = t.Character                      and t.Character:GetCharacterModel()
-    local rp  = m                              and (m.PrimaryPart or m:FindFirstChild("HumanoidRootPart"))
-    local pos = rp                             and rp.Position
-    if not pos then return nil end
-
-    local look = t.CFrame.LookVector
-    local rot = 180 - math.deg(math.atan2(look.X, look.Z))
-
-    return {
-        pos  = {x = pos.X, y = pos.Y, z = pos.Z},
-        rot  = rot,
-        hash = t.Hash,
-        name = tostring(t.Type)
-    }
+-- Lấy thông tin đầy đủ của tower
+local function GetTowerInfo(hash, tower)
+    local success, result = pcall(function()
+        local model = tower.Character:GetCharacterModel()
+        local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+        if not root then return nil end
+        
+        local pos = root.Position
+        local hp = tower.HealthHandler and tower.HealthHandler:GetHealth() or 0
+        if hp <= 0 then return nil end
+        
+        -- Lấy thông tin level
+        local levels = {}
+        if tower.LevelHandler then
+            for path = 1, 3 do
+                levels[path] = tower.LevelHandler:GetLevelOnPath(path) or 0
+            end
+        end
+        
+        -- Lấy target type
+        local targetType = 1
+        if tower.TargetHandler then
+            targetType = tower.TargetHandler:GetQueryType() or 1
+        end
+        
+        return {
+            hash = hash,
+            name = tower.Name,
+            position = {x = pos.X, y = pos.Y, z = pos.Z},
+            levels = levels,
+            targetType = targetType,
+            placeCost = GetTowerPlaceCostByName(tower.Name)
+        }
+    end)
+    
+    return success and result or nil
 end
 
--- Save đội hình hiện tại + giá đặt thật + nâng cấp đúng level -----------------------
-local function SaveLayout()
-    if not TowerClass then return end
+-- Lưu đội hình hiện tại
+local function SaveCurrentFormation()
+    local formation = {}
+    
+    for hash, tower in pairs(TowerClass.GetTowers()) do
+        local info = GetTowerInfo(hash, tower)
+        if info then
+            table.insert(formation, info)
+        end
+    end
+    
+    -- Sắp xếp theo vị trí X để dễ đọc
+    table.sort(formation, function(a, b)
+        return a.position.x < b.position.x
+    end)
+    
+    local jsonData = HttpService:JSONEncode(formation)
+    writefile(formationFile, jsonData)
+    
+    print("✅ Đã lưu đội hình với " .. #formation .. " tower(s)")
+    return formation
+end
 
-    local lines = {}
-    local towers = TowerClass.GetTowers()
-
-    for _,t in pairs(towers) do
-        local info = GetTowerData(t)
-        if info and t.HealthHandler and t.HealthHandler:Alive() then
-            -- Place
-            local cost = GetRealPlacementCost(info.name)
-            lines[#lines+1] = HttpService:JSONEncode({
-                SuperFunction = false,
-                TowerPlaceCost = cost,
-                TowerPlaced   = info.name,
-                TowerVector   = table.concat({info.pos.x, info.pos.y, info.pos.z}, ", "),
-                Rotation      = info.rot,
-                TowerA1       = info.hash
-            })
-
-            -- Nâng cấp hiện tại
-            local lv1 = t.LevelHandler:GetLevelOnPath(1)
-            for i = 1, lv1 - 1 do
-                lines[#lines+1] = HttpService:JSONEncode({
-                    UpgradeCost = 0,
-                    UpgradePath = 1,
-                    TowerUpgraded = info.pos.x
-                })
+-- Cập nhật thông tin tower trong file
+local function UpdateTowerInFormation(hash, updateData)
+    if not isfile(formationFile) then return end
+    
+    local success, formation = pcall(function()
+        return HttpService:JSONDecode(readfile(formationFile))
+    end)
+    
+    if not success then return end
+    
+    for i, towerData in ipairs(formation) do
+        if towerData.hash == hash then
+            -- Cập nhật thông tin
+            for key, value in pairs(updateData) do
+                towerData[key] = value
             end
+            
+            -- Lưu lại file
+            local jsonData = HttpService:JSONEncode(formation)
+            writefile(formationFile, jsonData)
+            print("🔄 Cập nhật tower:", towerData.name, "tại X =", towerData.position.x)
+            return
+        end
+    end
+end
 
-            local lv2 = t.LevelHandler:GetLevelOnPath(2)
-            for i = 1, lv2 - 1 do
-                lines[#lines+1] = HttpService:JSONEncode({
-                    UpgradeCost = 0,
-                    UpgradePath = 2,
-                    TowerUpgraded = info.pos.x
-                })
+-- Xóa tower khỏi file
+local function RemoveTowerFromFormation(hash)
+    if not isfile(formationFile) then return end
+    
+    local success, formation = pcall(function()
+        return HttpService:JSONDecode(readfile(formationFile))
+    end)
+    
+    if not success then return end
+    
+    for i = #formation, 1, -1 do
+        if formation[i].hash == hash then
+            local towerName = formation[i].name
+            local towerX = formation[i].position.x
+            table.remove(formation, i)
+            
+            -- Lưu lại file
+            local jsonData = HttpService:JSONEncode(formation)
+            writefile(formationFile, jsonData)
+            print("🗑️ Xóa tower:", towerName, "tại X =", towerX)
+            return
+        end
+    end
+end
+
+-- Tìm tower theo X
+local function GetTowerByAxis(axisX)
+    for hash, tower in pairs(TowerClass.GetTowers()) do
+        local success, pos = pcall(function()
+            local model = tower.Character:GetCharacterModel()
+            local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+            return root and root.Position
+        end)
+        if success and pos and math.abs(pos.X - axisX) <= 1 then
+            local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+            if hp and hp > 0 then
+                return hash, tower
             end
         end
     end
-
-    writefile(LIVE_FILE, table.concat(lines, "\n"))
-    print("✅ rebuild saved to", LIVE_FILE)
+    return nil, nil
 end
 
--- Cách gọi --------------------------------------------------------------------------
-getgenv().rebuild = SaveLayout
-print(">>> Gõ `rebuild()` trong console để snapshot bất cứ lúc nào.")
+-- Chờ đủ tiền
+local function WaitForCash(amount)
+    while cashStat.Value < amount do task.wait() end
+end
+
+-- Đặt tower
+local function PlaceTowerRetry(name, pos, rotation)
+    local placeCost = GetTowerPlaceCostByName(name)
+    WaitForCash(placeCost)
+    
+    local args = {1, name, pos, rotation or 0}
+    
+    while true do
+        Remotes.PlaceTower:InvokeServer(unpack(args))
+        local t0 = tick()
+        repeat
+            task.wait(0.1)
+            local hash = GetTowerByAxis(pos.X)
+            if hash then 
+                print("✅ Đã đặt:", name, "tại X =", pos.X)
+                return hash
+            end
+        until tick() - t0 > 2
+        warn("[RETRY] Đặt tower thất bại, thử lại:", name, "X =", pos.X)
+    end
+end
+
+-- Nâng cấp tower
+local function UpgradeTowerToLevel(axisX, targetLevels)
+    local hash, tower = GetTowerByAxis(axisX)
+    if not hash or not tower then return end
+    
+    for path = 1, 3 do
+        local targetLevel = targetLevels[path] or 0
+        if targetLevel > 0 then
+            local currentLevel = tower.LevelHandler:GetLevelOnPath(path)
+            
+            for level = currentLevel + 1, targetLevel do
+                local cost = tower.LevelHandler:GetLevelUpgradeCost(path, 1)
+                if cost then
+                    WaitForCash(cost)
+                    Remotes.TowerUpgradeRequest:FireServer(hash, path, 1)
+                    
+                    -- Chờ nâng cấp hoàn thành
+                    local upgraded = false
+                    local t0 = tick()
+                    repeat
+                        task.wait(0.1)
+                        local _, t = GetTowerByAxis(axisX)
+                        if t and t.LevelHandler then
+                            local after = t.LevelHandler:GetLevelOnPath(path)
+                            if after >= level then 
+                                upgraded = true 
+                                break 
+                            end
+                        end
+                    until tick() - t0 > 3
+                    
+                    if not upgraded then
+                        warn("❌ Nâng cấp thất bại:", path, "level", level)
+                        break
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Đổi target
+local function ChangeTarget(axisX, targetType)
+    local hash = GetTowerByAxis(axisX)
+    if hash then
+        Remotes.ChangeQueryType:FireServer(hash, targetType)
+    end
+end
+
+-- Rebuild đội hình
+local function RebuildFormation()
+    if not isfile(formationFile) then
+        warn("❌ Không tìm thấy file đội hình!")
+        return
+    end
+    
+    local success, formation = pcall(function()
+        return HttpService:JSONDecode(readfile(formationFile))
+    end)
+    
+    if not success then
+        warn("❌ Lỗi khi đọc file đội hình!")
+        return
+    end
+    
+    print("🔄 Bắt đầu rebuild đội hình với " .. #formation .. " tower(s)")
+    
+    -- Đặt towers
+    for _, towerData in ipairs(formation) do
+        local pos = Vector3.new(towerData.position.x, towerData.position.y, towerData.position.z)
+        local hash = PlaceTowerRetry(towerData.name, pos, 0)
+        
+        if hash then
+            -- Cập nhật hash mới
+            towerData.hash = hash
+            
+            -- Nâng cấp
+            if towerData.levels then
+                UpgradeTowerToLevel(pos.X, towerData.levels)
+            end
+            
+            -- Đổi target
+            if towerData.targetType and towerData.targetType ~= 1 then
+                ChangeTarget(pos.X, towerData.targetType)
+            end
+        end
+    end
+    
+    -- Lưu lại với hash mới
+    local jsonData = HttpService:JSONEncode(formation)
+    writefile(formationFile, jsonData)
+    
+    print("✅ Hoàn thành rebuild đội hình!")
+end
+
+-- Lắng nghe các Remote events để cập nhật file
+Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
+    local d = data[1]
+    if not d then return end
+    
+    if d.Creation then
+        -- Tower được đặt - tự động lưu vào formation
+        task.wait(0.5) -- Chờ tower hoàn thành
+        SaveCurrentFormation()
+    else
+        -- Tower bị bán - xóa khỏi formation
+        task.wait(0.1)
+        SaveCurrentFormation() -- Lưu lại toàn bộ để đảm bảo đồng bộ
+    end
+end)
+
+Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
+    if data[1] then
+        -- Tower được nâng cấp - cập nhật formation
+        task.wait(0.5)
+        SaveCurrentFormation()
+    end
+end)
+
+Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
+    if data[1] then
+        -- Target type thay đổi - cập nhật formation
+        task.wait(0.1)
+        SaveCurrentFormation()
+    end
+end)
+
+-- Console commands
+_G.rebuild = function()
+    RebuildFormation()
+end
+
+_G.save = function()
+    SaveCurrentFormation()
+end
+
+_G.clear = function()
+    if isfile(formationFile) then
+        delfile(formationFile)
+        print("🗑️ Đã xóa file đội hình")
+    end
+end
+
+-- Lưu đội hình ban đầu
+task.wait(2)
+SaveCurrentFormation()
+
+print("🎯 Formation Manager đã khởi động!")
+print("📋 Commands:")
+print("  • rebuild() - Rebuild đội hình từ file")
+print("  • save() - Lưu đội hình hiện tại")
+print("  • clear() - Xóa file đội hình")
