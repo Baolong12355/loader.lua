@@ -1,4 +1,4 @@
--- TDX Macro Runner - Replay Per Tower Death (Optimized by Axis X)
+-- TDX Macro Runner - Full Version with SuperFunction Integration + Fix for Upgrade Behavior
 
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -89,27 +89,42 @@ local function PlaceTowerRetry(args, axisValue, towerName)
 end
 
 local function UpgradeTowerRetry(axisValue, upgradePath)
+    local mode = globalPlaceMode
+    local maxTries = mode == "rewrite" and math.huge or 3
     local tries = 0
-    while tries < 5 do
+    
+    while tries < maxTries do
         local hash, tower = GetTowerByAxis(axisValue)
         if not hash or not tower then
-            tries += 1
-            task.wait()
-            continue
+            if mode == "rewrite" then
+                tries += 1
+                task.wait()
+                continue
+            end
+            warn("[SKIP] Không thấy tower tại X =", axisValue)
+            return
         end
+        
         local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
         if not hp or hp <= 0 then
-            tries += 1
-            task.wait()
-            continue
+            if mode == "rewrite" then
+                tries += 1
+                task.wait()
+                continue
+            end
+            warn("[SKIP] Tower đã chết tại X =", axisValue)
+            return
         end
+        
         local before = tower.LevelHandler:GetLevelOnPath(upgradePath)
         local cost = GetCurrentUpgradeCost(tower, upgradePath)
         if not cost then
             return
         end
+        
         WaitForCash(cost)
         Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
+        
         local upgraded = false
         local t0 = tick()
         repeat
@@ -123,6 +138,7 @@ local function UpgradeTowerRetry(axisValue, upgradePath)
                 end
             end
         until tick() - t0 > 2
+        
         if upgraded then
             return
         end
@@ -156,10 +172,18 @@ local function SellTowerRetry(axisValue)
     end
 end
 
--- Load macro
+-- Load macro + config
 local config = getgenv().TDX_Config or {}
-local macroName = config["Macro Name"] or "event"
+local macroName = config["Macro Name"] or "x"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
+globalPlaceMode = config["PlaceMode"] or "normal"
+
+if globalPlaceMode == "unsure" then
+    globalPlaceMode = "rewrite"
+elseif globalPlaceMode == "normal" then
+    globalPlaceMode = "ashed"
+end
+
 if not isfile(macroPath) then
     error("Không tìm thấy macro: " .. macroPath)
 end
@@ -171,54 +195,113 @@ if not success then
     error("Lỗi khi đọc macro")
 end
 
--- Build cache + run
-local macroHistory = {}
-local activeTowers = {}
+-- SuperFunction logic
+local team, skipNames, skipOnlyBefore, trackedX = {}, {}, false, {}
 
-local function ReplayEntriesAtX(x)
-    for _, entry in ipairs(macroHistory) do
-        if entry.TowerPlaced and entry.TowerVector then
-            local vec = entry.TowerVector:split(", ")
-            if math.abs(tonumber(vec[1]) - x) <= 0.1 then
-                local args = {
-                    tonumber(entry.TowerA1),
-                    entry.TowerPlaced,
-                    Vector3.new(unpack(vec)),
-                    tonumber(entry.Rotation or 0)
-                }
-                WaitForCash(entry.TowerPlaceCost or 0)
-                PlaceTowerRetry(args, x, entry.TowerPlaced)
-            end
-        elseif entry.TowerUpgraded and math.abs(entry.TowerUpgraded - x) <= 0.1 then
-            UpgradeTowerRetry(x, entry.UpgradePath)
-        elseif entry.ChangeTarget and math.abs(entry.ChangeTarget - x) <= 0.1 then
-            ChangeTargetRetry(x, entry.TargetType)
-        elseif entry.SellTower and math.abs(entry.SellTower - x) <= 0.1 then
-            SellTowerRetry(x)
+local function SaveTeam()
+    team = {}
+    for hash, tower in pairs(TowerClass.GetTowers()) do
+        local model = tower.Character:GetCharacterModel()
+        local root = model and model.PrimaryPart
+        if root then
+            table.insert(team, {
+                name = model.Name,
+                x = root.Position.X,
+                vec = {root.Position.X, root.Position.Y, root.Position.Z},
+                a1 = math.random(9999999),
+                rot = 0,
+                cost = 0,
+                upgrades = {}
+            })
         end
     end
 end
 
-local function TrackDeaths()
+local function RebuildTeam()
+    local priority = {
+        Medic = 1,
+        ["Golden Mobster"] = 2,
+        Mobster = 2,
+        DJ = 3,
+        Commander = 4
+    }
+    
+    table.sort(team, function(a, b)
+        return (priority[a.name] or 5) < (priority[b.name] or 5)
+    end)
+    
+    for _, t in ipairs(team) do
+        if not trackedX[t.x] and not skipNames[t.name] then
+            local args = {t.a1, t.name, Vector3.new(unpack(t.vec)), t.rot or 0}
+            local placed = false
+            
+            for i = 1, 20 do
+                Remotes.PlaceTower:InvokeServer(unpack(args))
+                task.wait(0.1)
+                local _, tw = GetTowerByAxis(t.x)
+                if tw then
+                    placed = true
+                    break
+                end
+            end
+            
+            if not placed then
+                warn("[REBUILD FAIL] Không đặt được tower:", t.name, " tại X =", t.x)
+                continue
+            end
+            
+            for _, u in ipairs(t.upgrades or {}) do
+                UpgradeTowerRetry(t.x, u)
+                task.wait(0.1)
+            end
+            
+            trackedX[t.x] = true
+            task.wait(2)
+        end
+    end
+end
+
+local function TrackDead()
     while true do
-        for x, _ in pairs(activeTowers) do
-            local _, t = GetTowerByAxis(x)
-            if not t then
-                print("[REBUILD] Tower chết tại X =", x)
-                ReplayEntriesAtX(x)
-                activeTowers[x] = nil
+        for _, t in ipairs(team) do
+            if not trackedX[t.x] then
+                local _, tower = GetTowerByAxis(t.x)
+                if not tower then
+                    RebuildTeam()
+                    return
+                end
             end
         end
         task.wait(1)
     end
 end
 
-task.spawn(TrackDeaths)
-
+-- Main execution loop
 for _, entry in ipairs(macro) do
-    table.insert(macroHistory, entry)
-    
-    if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
+    if entry.SuperFunction == "SellAll" then
+        local skipSet = {}
+        for _, v in ipairs(entry.Skip or {}) do
+            skipSet[v] = true
+        end
+        
+        for hash, tower in pairs(TowerClass.GetTowers()) do
+            local model = tower.Character:GetCharacterModel()
+            if model and not skipSet[model.Name] then
+                Remotes.SellTower:FireServer(hash)
+                trackedX[model.PrimaryPart.Position.X] = true
+                task.wait(0.1)
+            end
+        end
+        
+    elseif entry.SuperFunction == "rebuild" then
+        for _, name in ipairs(entry.Skip or {}) do
+            skipNames[name] = true
+        end
+        skipOnlyBefore = entry.Be == true
+        SaveTeam()
+        task.spawn(TrackDead)
+        
+    elseif entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
         local vecTab = entry.TowerVector:split(", ")
         local pos = Vector3.new(unpack(vecTab))
         local args = {
@@ -229,15 +312,25 @@ for _, entry in ipairs(macro) do
         }
         WaitForCash(entry.TowerPlaceCost)
         PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
-        activeTowers[pos.X] = true
-    
+        
     elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
-        UpgradeTowerRetry(entry.TowerUpgraded, entry.UpgradePath)
-    
+        local axisValue = tonumber(entry.TowerUpgraded)
+        UpgradeTowerRetry(axisValue, entry.UpgradePath)
+        
+        if team then
+            for _, t in ipairs(team) do
+                if t.x == axisValue then
+                    t.upgrades = t.upgrades or {}
+                    table.insert(t.upgrades, entry.UpgradePath)
+                end
+            end
+        end
+        
     elseif entry.ChangeTarget and entry.TargetType then
-        ChangeTargetRetry(entry.ChangeTarget, entry.TargetType)
-    
+        ChangeTargetRetry(tonumber(entry.ChangeTarget), entry.TargetType)
+        
     elseif entry.SellTower then
+        trackedX[tonumber(entry.SellTower)] = true
         SellTowerRetry(entry.SellTower)
     end
 end
