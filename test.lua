@@ -33,32 +33,39 @@ local function serializeArgs(...)
     return table.concat(output, ", ")
 end
 
--- Ghi log vào file
-local function log(method, self, serializedArgs, upgradeSuccess)
+-- Ghi log vào file (record chắc chắn: xác nhận thành công với 4 thao tác chính)
+local function log(method, self, serializedArgs, result)
     local name = tostring(self.Name)
 
-    if name == "PlaceTower" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
+    -- Chỉ ghi khi thành công (result == true hoặc không phải các thao tác chính)
+    local function isSuccess()
+        if name == "PlaceTower" or name == "SellTower" or name == "TowerUpgradeRequest" or name == "ChangeQueryType" then
+            return result == true
+        end
+        return true -- Các thao tác khác luôn ghi
+    end
 
-    elseif name == "SellTower" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
+    if isSuccess() then
+        if name == "PlaceTower" then
+            appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+            appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
+            startTime = time() - offset
 
-    elseif name == "TowerUpgradeRequest" then
-        -- Chỉ ghi lại nâng cấp nếu upgradeSuccess là true
-        if upgradeSuccess then
+        elseif name == "SellTower" then
+            appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+            appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
+            startTime = time() - offset
+
+        elseif name == "TowerUpgradeRequest" then
             appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
             appendfile(fileName, "TDX:upgradeTower(" .. serializedArgs .. ")\n")
             startTime = time() - offset
-        end
 
-    elseif name == "ChangeQueryType" then
-        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-        appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
-        startTime = time() - offset
+        elseif name == "ChangeQueryType" then
+            appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+            appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
+            startTime = time() - offset
+        end
     end
 end
 
@@ -66,29 +73,18 @@ end
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
     local args = {...}
     local serialized = serializeArgs(...)
-    -- Nếu là upgrade thì kiểm tra kết quả trả về (giả sử trả về true nếu thành công)
-    if tostring(self.Name) == "TowerUpgradeRequest" then
-        local upgradeSuccess = oldFireServer(self, unpack(args))
-        log("FireServer", self, serialized, upgradeSuccess)
-        return upgradeSuccess
-    else
-        log("FireServer", self, serialized)
-        return oldFireServer(self, unpack(args))
-    end
+    local result = oldFireServer(self, unpack(args))
+    log("FireServer", self, serialized, result)
+    return result
 end)
 
 -- Hook InvokeServer
 local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
     local args = {...}
     local serialized = serializeArgs(...)
-    if tostring(self.Name) == "TowerUpgradeRequest" then
-        local upgradeSuccess = oldInvokeServer(self, unpack(args))
-        log("InvokeServer", self, serialized, upgradeSuccess)
-        return upgradeSuccess
-    else
-        log("InvokeServer", self, serialized)
-        return oldInvokeServer(self, unpack(args))
-    end
+    local result = oldInvokeServer(self, unpack(args))
+    log("InvokeServer", self, serialized, result)
+    return result
 end)
 
 -- Hook __namecall
@@ -97,21 +93,15 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     local method = getnamecallmethod()
     local args = {...}
     local serialized = serializeArgs(...)
-    if method == "FireServer" or method == "InvokeServer" then
-        if tostring(self.Name) == "TowerUpgradeRequest" then
-            local upgradeSuccess = oldNamecall(self, unpack(args))
-            log(method, self, serialized, upgradeSuccess)
-            return upgradeSuccess
-        else
-            log(method, self, serialized)
-            return oldNamecall(self, unpack(args))
-        end
-    end
-    return oldNamecall(self, unpack(args))
+    local result = oldNamecall(self, unpack(args))
+    log(method, self, serialized, result)
+    return result
 end)
 
-print("✅ Ghi macro TDX đã bắt đầu (chỉ ghi nâng cấp thành công vào record.txt).")
+print("✅ Ghi macro TDX đã bắt đầu (chỉ ghi các thao tác thành công vào record.txt).")
 
+-- Phần chuyển đổi sang macro runner giữ nguyên như cũ
+-- ... (phần chuyển đổi macro sang JSON)
 -- Phần chuyển đổi sang macro runner giữ nguyên như cũ
 -- ... (phần chuyển đổi macro sang JSON)
 -- Script chuyển đổi record.txt thành macro runner (dùng trục X), với thứ tự trường upgrade là: UpgradeCost, UpgradePath, TowerUpgraded
