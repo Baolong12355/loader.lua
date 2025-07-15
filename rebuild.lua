@@ -102,7 +102,7 @@ local function SellRetry(x)
 -------------------------------------------------
 -- Metric: globalPlaceMode (đồng bộ với gốc)
 local cfg = getgenv().TDX_Config or {}
-local macroName = cfg["Macro Name"] or "o"
+local macroName = cfg["Macro Name"] or "ooooo"
 local macroDir  = "tdx/macros/"
 globalPlaceMode = cfg["PlaceMode"] or "normal"
 if globalPlaceMode=="unsure" then globalPlaceMode="rewrite" elseif globalPlaceMode=="normal" then globalPlaceMode="ashed" end
