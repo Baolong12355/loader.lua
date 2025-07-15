@@ -147,6 +147,9 @@ print("📌 Đã bật ghi macro có xác nhận từ server.")
 
 
 
+-- Script chuyển đổi record.txt thành macro runner (dùng trục X), với thứ tự trường upgrade là: UpgradeCost, UpgradePath, TowerUpgraded
+-- Đặt script này trong môi trường Roblox hoặc môi trường hỗ trợ các API Roblox tương ứng
+
 local txtFile = "record.txt"
 local outJson = "tdx/macros/x.json"
 
@@ -212,33 +215,32 @@ task.spawn(function()
     end
 end)
 
+-- Tạo thư mục
 if makefolder then
     pcall(function() makefolder("tdx") end)
     pcall(function() makefolder("tdx/macros") end)
 end
 
--- inject superfunction
-if not getgenv then getgenv = function() return _G end end
-local env = getgenv()
-local logs = {}
-
+-- Ghi SuperFunction khi gọi từ console
 local function InsertSuper(cmd, skipList)
     if type(skipList) ~= "table" then skipList = {} end
     local line = HttpService:JSONEncode({
         SuperFunction = cmd,
         Skip = skipList
     })
-    table.insert(logs, line)
-    warn("✅ SuperFunction:", cmd, "→", table.concat(skipList, ", "))
+    appendfile(outJson, line .. "\n")
+    warn("✅ SuperFunction ghi vào macros:", cmd, "→", table.concat(skipList, ", "))
 end
 
-env.rebuild = function(skip) InsertSuper("rebuild", skip) end
-env.SellAll = function(skip) InsertSuper("SellAll", skip) end
+getgenv().rebuild = function(skip) InsertSuper("rebuild", skip) end
+getgenv().SellAll = function(skip) InsertSuper("SellAll", skip) end
 
+-- Vòng lặp chuyển đổi record.txt → x.json
 while true do
     if isfile(txtFile) then
+        delfile(outJson)
         local macro = readfile(txtFile)
-        logs = {}
+        local logs = {}
 
         for line in macro:gmatch("[^\r\n]+") do
             -- Đặt tower
@@ -297,6 +299,7 @@ while true do
             end
         end
 
+        -- Ghi tất cả thao tác ra file
         writefile(outJson, table.concat(logs, "\n"))
     end
     wait(0.22)
