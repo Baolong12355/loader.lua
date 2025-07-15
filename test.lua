@@ -201,7 +201,7 @@ local function GetTowerPlaceCostByName(name)
     return 0
 end
 
--- Ánh xạ hash -> pos liên tục
+-- ánh xạ hash -> pos liên tục
 local hash2pos = {}
 task.spawn(function()
     while true do
@@ -225,7 +225,7 @@ while true do
         local macro = readfile(txtFile)
         local logs = {}
 
-        -- Giữ lại các dòng SuperFunction cũ (nếu có)
+        -- giữ superfunction
         local preservedSuper = {}
         if isfile(outJson) then
             for line in readfile(outJson):gmatch("[^\r\n]+") do
@@ -237,12 +237,12 @@ while true do
         end
 
         for line in macro:gmatch("[^\r\n]+") do
-            -- Đặt tower
+            -- place tower
             local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^,]+),%s*([^%)]+)%)')
             if a1 and name and x and y and z and rot then
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
                 local cost = GetTowerPlaceCostByName(name)
-                local vector = x .. ", " .. y .. ", " .. z
+                local vector = tostring(x) .. ", " .. tostring(y) .. ", " .. tostring(z)
                 table.insert(logs, HttpService:JSONEncode({
                     TowerPlaceCost = tonumber(cost) or 0,
                     TowerPlaced = name,
@@ -251,7 +251,7 @@ while true do
                     TowerA1 = tostring(a1)
                 }))
             else
-                -- Nâng cấp tower
+                -- upgrade
                 local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
                 if hash and path and upgradeCount then
                     local pos = hash2pos[tostring(hash)]
@@ -267,7 +267,7 @@ while true do
                         end
                     end
                 else
-                    -- Đổi target
+                    -- target
                     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
                     if hash and targetType then
                         local pos = hash2pos[tostring(hash)]
@@ -278,7 +278,7 @@ while true do
                             }))
                         end
                     else
-                        -- Bán tower
+                        -- sell
                         local hash = line:match('TDX:sellTower%(([^%)]+)%)')
                         if hash then
                             local pos = hash2pos[tostring(hash)]
@@ -293,12 +293,10 @@ while true do
             end
         end
 
-        -- Gắn lại các dòng SuperFunction
         for _, line in ipairs(preservedSuper) do
             table.insert(logs, line)
         end
 
-        -- Ghi file từng dòng xuống hàng
         writefile(outJson, table.concat(logs, "\n"))
     end
     wait(0.22)
