@@ -1,302 +1,219 @@
+-- final ready-to-flow (đã xuống hàng đầy đủ)
+local HttpService   = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players        = game:GetService("Players")
+local player         = Players.LocalPlayer
+local cashStat       = player:WaitForChild("leaderstats"):WaitForChild("Cash")
+local Remotes        = ReplicatedStorage:WaitForChild("Remotes")
 
-local fileName = "record.txt"
-local startTime = time()
-local offset = 0
-
--- Xoá file cũ
-if isfile(fileName) then delfile(fileName) end
-writefile(fileName, "")
-
--- Pending xác nhận
-local pending = nil
-local timeout = 2
-
--- Serialize giá trị
-local function serialize(v)
-    if typeof(v) == "Vector3" then
-        return "Vector3.new(" .. v.X .. "," .. v.Y .. "," .. v.Z .. ")"
-    elseif typeof(v) == "Vector2int16" then
-        return "Vector2int16.new(" .. v.X .. "," .. v.Y .. ")"
-    elseif type(v) == "table" then
-        local out = {}
-        for k, val in pairs(v) do
-            out[#out + 1] = "[" .. tostring(k) .. "]=" .. serialize(val)
-        end
-        return "{" .. table.concat(out, ",") .. "}"
-    else
-        return tostring(v)
-    end
+------------------------------------------------------------------------
+-- Safe Require
+local function SafeRequire(path, timeout)
+	timeout = timeout or 5
+	local t0 = os.clock()
+	while os.clock() - t0 < timeout do
+		local success, result = pcall(function()
+			return require(path)
+		end)
+		if success then return result end
+		task.wait()
+	end
+	return nil
 end
 
--- Serialize args
-local function serializeArgs(...)
-    local args = {...}
-    local out = {}
-    for i, v in ipairs(args) do
-        out[i] = serialize(v)
-    end
-    return table.concat(out, ", ")
+local function LoadTowerModule()
+	local ps   = player:WaitForChild("PlayerScripts")
+	local cli  = ps:WaitForChild("Client")
+	local gc   = cli:WaitForChild("GameClass")
+	local tm   = gc:WaitForChild("TowerClass")
+	return SafeRequire(tm)
+end
+local TowerClass = LoadTowerModule()
+if not TowerClass then error("Không thể tải TowerClass") end
+
+---------------------------------------------------------------------- UTILS
+local function GetTowerByAxis(axisX)
+	for hash, tower in pairs(TowerClass.GetTowers()) do
+		local success, pos = pcall(function()
+			local model = tower.Character:GetCharacterModel()
+			local root  = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+			return root and root.Position
+		end)
+		if success and pos and math.abs(pos.X - axisX) <= 1 then
+			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+			if hp and hp > 0 then return hash, tower end
+		end
+	end
+	return nil, nil
 end
 
--- Xác nhận và ghi
-local function confirmAndWrite()
-    if not pending then return end
-    appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-    appendfile(fileName, pending.code .. "\n")
-    startTime = time() - offset
-    pending = nil
+local function GetCurrentUpgradeCost(tower, path)
+	if not tower or not tower.LevelHandler then return nil end
+	local maxLvl = tower.LevelHandler:GetMaxLevel()
+	local curLvl = tower.LevelHandler:GetLevelOnPath(path)
+	if curLvl >= maxLvl then return nil end
+	local ok, cost = pcall(function()
+		return tower.LevelHandler:GetLevelUpgradeCost(path, 1)
+	end)
+	return ok and cost or nil
 end
 
--- Ghi nếu server phản hồi đúng loại
-local function tryConfirm(typeStr)
-    if pending and pending.type == typeStr then
-        confirmAndWrite()
-    end
+local function WaitForCash(amount)
+	while cashStat.Value < amount do task.wait() end
 end
 
--- Ghi log
-local function setPending(typeStr, code)
-    pending = {
-        type = typeStr,
-        code = code,
-        created = tick()
-    }
+---------------------------------------------------------------------- ROBUST PLACE / UP / TARGET / SELL
+local function PlaceTowerRetry(args, axisValue, towerName)
+	while true do
+		Remotes.PlaceTower:InvokeServer(unpack(args))
+		local t0 = tick()
+		repeat
+			task.wait(0.1)
+			if GetTowerByAxis(axisValue) then return end
+		until tick() - t0 > 2
+		warn("[RETRY] Đặt tower thất bại:", towerName, "X =", axisValue)
+	end
 end
 
--- Lắng nghe Remote xác thực
-ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
-    local d = data[1]
-    if not d then return end
-    if d.Creation then
-        tryConfirm("Place")
-    else
-        tryConfirm("Sell")
-    end
-end)
+local function UpgradeTowerRetry(axisValue, upgradePath)
+	local tries = 0
+	while true do
+		local hash, tower = GetTowerByAxis(axisValue)
+		if not hash or not tower then warn("[SKIP] Không thấy tower X =", axisValue) return end
+		local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
+		if not hp or hp <= 0 then warn("[SKIP] Tower chết X =", axisValue) return end
 
-ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
-    if data[1] then
-        tryConfirm("Upgrade")
-    end
-end)
-
-ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
-    if data[1] then
-        tryConfirm("Target")
-    end
-end)
-
--- Timeout check
-task.spawn(function()
-    while true do
-        task.wait(0.3)
-        if pending and tick() - pending.created > timeout then
-            warn("❌ Không xác thực được: " .. pending.type)
-            pending = nil
-        end
-    end
-end)
-
--- Hook FireServer
-local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-    local args = serializeArgs(...)
-    local name = self.Name
-
-    if name == "PlaceTower" then
-        setPending("Place", "TDX:placeTower(" .. args .. ")")
-    elseif name == "SellTower" then
-        setPending("Sell", "TDX:sellTower(" .. args .. ")")
-    elseif name == "TowerUpgradeRequest" then
-        setPending("Upgrade", "TDX:upgradeTower(" .. args .. ")")
-    elseif name == "ChangeQueryType" then
-        setPending("Target", "TDX:changeQueryType(" .. args .. ")")
-    end
-
-    return oldFireServer(self, ...)
-end)
-
--- Hook InvokeServer
-local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-    local args = serializeArgs(...)
-    return oldInvokeServer(self, ...)
-end)
-
--- Hook __namecall
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    local method = getnamecallmethod()
-    if method == "FireServer" or method == "InvokeServer" then
-        local args = serializeArgs(...)
-        local name = self.Name
-
-        if name == "PlaceTower" then
-            setPending("Place", "TDX:placeTower(" .. args .. ")")
-        elseif name == "SellTower" then
-            setPending("Sell", "TDX:sellTower(" .. args .. ")")
-        elseif name == "TowerUpgradeRequest" then
-            setPending("Upgrade", "TDX:upgradeTower(" .. args .. ")")
-        elseif name == "ChangeQueryType" then
-            setPending("Target", "TDX:changeQueryType(" .. args .. ")")
-        end
-    end
-    return oldNamecall(self, ...)
-end)
-
-print("📌 Đã bật ghi macro có xác nhận từ server.")
-
-
-
--- Script chuyển đổi record.txt thành macro runner (dùng trục X), với thứ tự trường upgrade là: UpgradeCost, UpgradePath, TowerUpgraded
-
-local txtFile = "record.txt"
-local outJson = "tdx/macros/x.json"
-
-local Players = game:GetService("Players")
-local player = Players.LocalPlayer
-local HttpService = game:GetService("HttpService")
-local PlayerScripts = player:WaitForChild("PlayerScripts")
-
--- Safe require tower module
-local function SafeRequire(module)
-    local success, result = pcall(require, module)
-    return success and result or nil
+		local cost = GetCurrentUpgradeCost(tower, upgradePath)
+		if not cost then return end
+		WaitForCash(cost)
+		Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
+		local big = tick()
+		repeat
+			task.wait(0.1)
+			if tick()-big > 2 then break end
+		until false
+		return
+	end
 end
 
-local TowerClass
-do
-    local client = PlayerScripts:WaitForChild("Client")
-    local gameClass = client:WaitForChild("GameClass")
-    local towerModule = gameClass:WaitForChild("TowerClass")
-    TowerClass = SafeRequire(towerModule)
+local function ChangeTargetRetry(axisValue, targetType)
+	Remotes.ChangeQueryType:FireServer(GetTowerByAxis(axisValue), targetType)
 end
 
-local function GetTowerPosition(tower)
-    if not tower or not tower.Character then return nil end
-    local model = tower.Character:GetCharacterModel()
-    local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
-    return root and root.Position or nil
+local function SellTowerRetry(axisValue)
+	Remotes.SellTower:FireServer(GetTowerByAxis(axisValue))
 end
 
-local function GetTowerPlaceCostByName(name)
-    local playerGui = player:FindFirstChild("PlayerGui")
-    if not playerGui then return 0 end
-    local interface = playerGui:FindFirstChild("Interface")
-    if not interface then return 0 end
-    local bottomBar = interface:FindFirstChild("BottomBar")
-    if not bottomBar then return 0 end
-    local towersBar = bottomBar:FindFirstChild("TowersBar")
-    if not towersBar then return 0 end
-    for _, tower in ipairs(towersBar:GetChildren()) do
-        if tower.Name == name then
-            local costFrame = tower:FindFirstChild("CostFrame")
-            local costText = costFrame and costFrame:FindFirstChild("CostText")
-            if costText then
-                local raw = tostring(costText.Text):gsub("%D", "")
-                return tonumber(raw) or 0
-            end
-        end
-    end
-    return 0
+---------------------------------------------------------------------- SUPERFUNCTION REBUILD
+local function doRebuild(jsonLine)
+	local js
+	local ok, err = pcall(function()
+		js = HttpService:JSONDecode(jsonLine)
+	end)
+	if not ok or not js or js.SuperFunction~="rebuild" then return end
+
+	local skipList   = js.Skip or {}
+	local exactOnly  = js.Be or false
+
+	local cls = LoadTowerModule()
+	if not cls then return end
+
+	local build = {}
+	-- đóng nóng đội hình hiện tại
+	for hash,tower in pairs(cls.GetTowers()) do
+		local pos
+		pcall(function()
+			pos = (tower.Character:GetCharacterModel().PrimaryPart or
+			       tower.Character:GetCharacterModel():FindFirstChild("HumanoidRootPart")).Position
+		end)
+		if not exactOnly or (exactOnly and not table.find(skipList, tower.Type)) then
+			if not table.find(skipList, tower.Type) then
+				local rec = {
+					[1] = hash,
+					[2] = tower.Type,
+					[3] = pos,
+					[4] = 0,
+					[5] = 0,
+					[6] = tower.QueryTypeIndex,
+					[7] = 1,          -- fake
+					[8] = {},
+					[9] = 0,
+					[10]= 0,
+					[11]= {},
+					[12]= {},
+					[13]= 0
+				}
+				build[#build+1] = rec
+			end
+		end
+	end
+
+	-- flush thành macro mới
+	local function vec(v)
+		return string.format("Vector3.new(%.2f,%.2f,%.2f)", v.X, v.Y, v.Z)
+	end
+	local macro = {
+		{ SuperFunction  = "rebuild", Skip = skipList },
+		ite = function() end   -- dummy
+	}
+	for _, info in ipairs(build) do
+		macro[#macro+1] = {
+			TowerPlaced = info[2],
+			TowerVector  = vec(info[3]),
+			TowerPlaceCost = 0,          -- rebuild chỉ ràng buộc
+			Rotation     = 0,
+			TowerA1      = 0
+		}
+	end
+
+	-- overwrite macro hiện tại
+	local json = HttpService:JSONEncode(macro)
+	writefile("tdx/macros/rebuild.json", json)
+	warn("🔁 rebuild() store:"..json)
 end
 
--- ánh xạ hash -> pos liên tục
-local hash2pos = {}
-task.spawn(function()
-    while true do
-        for hash, tower in pairs(TowerClass and TowerClass.GetTowers() or {}) do
-            local pos = GetTowerPosition(tower)
-            if pos then
-                hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
-            end
-        end
-        task.wait(0.1)
-    end
-end)
+---------------------------------------------------------------------- MAIN MACRO DRIVER
+local function runSanMacro()
+	local cfg  = getgenv().TDX_Config or {}
+	local name = cfg["Macro Name"] or "event"
+	local path = "tdx/macros/"..name..".json"
 
-if makefolder then
-    pcall(function() makefolder("tdx") end)
-    pcall(function() makefolder("tdx/macros") end)
+	if not isfile(path) then error("Không có "..path) end
+	local macroTbl = HttpService:JSONDecode(readfile(path))
+
+	for _,entry in ipairs(macroTbl) do
+		-------------------------------------------------- case super
+		if entry.SuperFunction then    -- ["rebuild"]
+			doRebuild(HttpService:JSONEncode(entry))
+			continue
+		end
+
+		-------------------------------------------------- case normal
+		if entry.TowerPlaced and entry.TowerVector then
+			local vecTab = entry.TowerVector:split(", ")
+			local pos    = Vector3.new(tonumber(vecTab[1]), tonumber(vecTab[2]), tonumber(vecTab[3]))
+			local args   = {
+				tonumber(entry.TowerA1) or 0,
+				entry.TowerPlaced,
+				pos,
+				tonumber(entry.Rotation or 0)
+			}
+			WaitForCash(entry.TowerPlaceCost)
+			PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
+
+		elseif entry.TowerUpgraded then
+			UpgradeTowerRetry(entry.TowerUpgraded, entry.UpgradePath)
+
+		elseif entry.ChangeTarget then
+			ChangeTargetRetry(entry.ChangeTarget, entry.TargetType)
+
+		elseif entry.SellTower then
+			SellTowerRetry(entry.SellTower)
+		end
+	end
 end
 
-while true do
-    if isfile(txtFile) then
-        local macro = readfile(txtFile)
-        local logs = {}
-
-        -- giữ dòng SuperFunction
-        local preservedSuper = {}
-        if isfile(outJson) then
-            for line in readfile(outJson):gmatch("[^\r\n]+") do
-                local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
-                if ok and decoded and decoded.SuperFunction then
-                    table.insert(preservedSuper, line)
-                end
-            end
-        end
-
-        for line in macro:gmatch("[^\r\n]+") do
-            -- parser mới cho placeTower với Vector3.new(...)
-            local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
-            if a1 and name and x and y and z and rot then
-                name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
-                local cost = GetTowerPlaceCostByName(name)
-                local vector = string.format("%s, %s, %s", tostring(tonumber(x) or x), tostring(tonumber(y) or y), tostring(tonumber(z) or z))
-                table.insert(logs, HttpService:JSONEncode({
-                    TowerPlaceCost = tonumber(cost) or 0,
-                    TowerPlaced = name,
-                    TowerVector = vector,
-                    Rotation = rot,
-                    TowerA1 = tostring(a1)
-                }))
-            else
-                -- nâng cấp
-                local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-                if hash and path and upgradeCount then
-                    local pos = hash2pos[tostring(hash)]
-                    local pathNum = tonumber(path)
-                    local count = tonumber(upgradeCount)
-                    if pos and pathNum and count and count > 0 then
-                        for _ = 1, count do
-                            table.insert(logs, HttpService:JSONEncode({
-                                UpgradeCost = 0,
-                                UpgradePath = pathNum,
-                                TowerUpgraded = pos.x
-                            }))
-                        end
-                    end
-                else
-                    -- đổi target
-                    local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
-                    if hash and targetType then
-                        local pos = hash2pos[tostring(hash)]
-                        if pos then
-                            table.insert(logs, HttpService:JSONEncode({
-                                ChangeTarget = pos.x,
-                                TargetType = tonumber(targetType)
-                            }))
-                        end
-                    else
-                        -- bán
-                        local hash = line:match('TDX:sellTower%(([^%)]+)%)')
-                        if hash then
-                            local pos = hash2pos[tostring(hash)]
-                            if pos then
-                                table.insert(logs, HttpService:JSONEncode({
-                                    SellTower = pos.x
-                                }))
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        for _, line in ipairs(preservedSuper) do
-            table.insert(logs, line)
-        end
-
-        writefile(outJson, table.concat(logs, "\n"))
-    end
-    wait(0.22)
-end
+--------------------------------------------------------------------------------
+local initDelay = 2
+task.wait(initDelay)
+runSanMacro()
