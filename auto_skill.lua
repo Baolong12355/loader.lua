@@ -48,21 +48,7 @@ local lastUsedTime = {}
 local mobsterUsedEnemies = {}
 local prevCooldown = {}
 local medicLastUsedTime = {}
-local medicDelay = 0.35 -- Delay tối thiểu giữa các lần dùng skill của mỗi Medic (giây)
-
--- Enemy cache cập nhật mỗi 0.1s
-local enemyCache = {}
-task.spawn(function()
-	while true do
-		enemyCache = {}
-		for _, e in pairs(EnemyClass.GetEnemies()) do
-			if e and e.IsAlive and not e.IsFakeEnemy then
-				table.insert(enemyCache, e)
-			end
-		end
-		task.wait()
-	end
-end)
+local medicDelay = 0.5 -- Delay tối thiểu giữa các lần dùng skill của mỗi Medic (giây)
 
 -- ======== Hàm chung vị trí, range, cooldown, DPS, kiểm tra buff ========
 local function getTowerPos(tower)
@@ -129,8 +115,19 @@ local function canReceiveBuff(tower)
 end
 
 -- ======== Các hàm target đặc biệt ========
+local function getEnemies()
+	-- Lấy luôn danh sách enemy mỗi lần gọi, KHÔNG DÙNG CACHE
+	local result = {}
+	for _, e in pairs(EnemyClass.GetEnemies()) do
+		if e and e.IsAlive and not e.IsFakeEnemy then
+			table.insert(result, e)
+		end
+	end
+	return result
+end
+
 local function getNearestEnemy(pos, range, towerType)
-	for _, enemy in ipairs(enemyCache) do
+	for _, enemy in ipairs(getEnemies()) do
 		if enemy.Type ~= "Arrow" and enemy.GetPosition then
 			if skipAirTowers[towerType] and enemy.IsAirUnit then continue end
 			local ePos = enemy:GetPosition()
@@ -146,7 +143,7 @@ local function getMobsterTarget(tower, hash, path)
 	local pos = getTowerPos(tower)
 	local range = getRange(tower)
 	local maxHP, chosen = -1, nil
-	for _, enemy in ipairs(enemyCache) do
+	for _, enemy in ipairs(getEnemies()) do
 		if enemy.IsAirUnit then continue end
 		local id = tostring(enemy)
 		if path == 2 and mobsterUsedEnemies[hash] and mobsterUsedEnemies[hash][id] then continue end
@@ -168,7 +165,7 @@ end
 
 local function getCommanderTarget()
 	local list = {}
-	for _, e in ipairs(enemyCache) do
+	for _, e in ipairs(getEnemies()) do
 		if not e.IsAirUnit and e.Type ~= "Arrow" then table.insert(list, e) end
 	end
 	if #list == 0 then return nil end
@@ -213,7 +210,6 @@ end
 -- ======== MAIN LOOP ========
 RunService.Heartbeat:Connect(function()
 	local now = tick()
-	if #enemyCache == 0 then return end
 	local ownedTowers = TowerClass.GetTowers() or {}
 
 	for hash, tower in pairs(ownedTowers) do
@@ -257,7 +253,7 @@ RunService.Heartbeat:Connect(function()
 
 			if tower.Type == "Ghost" then
 				local maxHP, chosen = -1, nil
-				for _, e in ipairs(enemyCache) do
+				for _, e in ipairs(getEnemies()) do
 					if e.Type ~= "Arrow" and e.HealthHandler then
 						local hp = e.HealthHandler:GetMaxHealth()
 						if hp > maxHP then
