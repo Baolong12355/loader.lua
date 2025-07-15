@@ -13,7 +13,7 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 -- Constants
 local CONSTANTS = {
     SAFE_REQUIRE_TIMEOUT = 5,
-    TOWER_SEARCH_TOLERANCE = 1,
+    TOWER_SEARCH_TOLERANCE = 0.1,
     UPGRADE_TIMEOUT = 3,
     PLACEMENT_TIMEOUT = 3,
     RETRY_DELAY = 0.1,
