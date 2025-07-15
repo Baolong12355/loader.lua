@@ -1,4 +1,4 @@
--- TDX Macro Runner - Full Version with SuperFunction Integration + Fix for Upgrade Behavior
+-- TDX Macro Runner - Full Version with SuperFunction Integration + Fix for Upgrade Behavior (Retry Until Success)
 
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -42,7 +42,7 @@ local function GetTowerByAxis(axisX)
             local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
             return root and root.Position
         end)
-        if success and pos and math.abs(pos.X - axisX) <= 0.1 then
+        if success and pos and math.abs(pos.X - axisX) <= 1 then
             local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
             if hp and hp > 0 then
                 return hash, tower
@@ -89,31 +89,24 @@ local function PlaceTowerRetry(args, axisValue, towerName)
 end
 
 local function UpgradeTowerRetry(axisValue, upgradePath)
-    local mode = globalPlaceMode
-    local maxTries = mode == "rewrite" and math.huge or 3
+    local maxTries = 10
     local tries = 0
     
     while tries < maxTries do
         local hash, tower = GetTowerByAxis(axisValue)
         if not hash or not tower then
-            if mode == "rewrite" then
-                tries += 1
-                task.wait()
-                continue
-            end
-            warn("[SKIP] Không thấy tower tại X =", axisValue)
-            return
+            tries += 1
+            warn("[RETRY] Không thấy tower tại X:", axisValue)
+            task.wait(0.1)
+            continue
         end
         
         local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
         if not hp or hp <= 0 then
-            if mode == "rewrite" then
-                tries += 1
-                task.wait()
-                continue
-            end
-            warn("[SKIP] Tower đã chết tại X =", axisValue)
-            return
+            tries += 1
+            warn("[RETRY] Tower chết tại X:", axisValue)
+            task.wait(0.1)
+            continue
         end
         
         local before = tower.LevelHandler:GetLevelOnPath(upgradePath)
@@ -125,7 +118,6 @@ local function UpgradeTowerRetry(axisValue, upgradePath)
         WaitForCash(cost)
         Remotes.TowerUpgradeRequest:FireServer(hash, upgradePath, 1)
         
-        local upgraded = false
         local t0 = tick()
         repeat
             task.wait(0.25)
@@ -133,17 +125,13 @@ local function UpgradeTowerRetry(axisValue, upgradePath)
             if t and t.LevelHandler then
                 local after = t.LevelHandler:GetLevelOnPath(upgradePath)
                 if after > before then
-                    upgraded = true
-                    break
+                    return
                 end
             end
         until tick() - t0 > 2
         
-        if upgraded then
-            return
-        end
         tries += 1
-        task.wait()
+        warn("[RETRY] Nâng cấp thất bại lần:", tries, "X:", axisValue, "Path:", upgradePath)
     end
 end
 
@@ -174,7 +162,7 @@ end
 
 -- Load macro + config
 local config = getgenv().TDX_Config or {}
-local macroName = config["Macro Name"] or "event"
+local macroName = config["Macro Name"] or "x"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
 globalPlaceMode = config["PlaceMode"] or "normal"
 
@@ -231,32 +219,21 @@ local function RebuildTeam()
     end)
     
     for _, t in ipairs(team) do
-        if not trackedX[t.x] and not skipNames[t.name] then
-            local args = {t.a1, t.name, Vector3.new(unpack(t.vec)), t.rot or 0}
-            local placed = false
-            
-            for i = 1, 20 do
-                Remotes.PlaceTower:InvokeServer(unpack(args))
+        if not trackedX[t.x] then
+            if not skipNames[t.name] then
+                WaitForCash(t.cost or 0)
+                local args = {t.a1, t.name, Vector3.new(unpack(t.vec)), t.rot or 0}
+                PlaceTowerRetry(args, t.x, t.name)
                 task.wait(0.1)
-                local _, tw = GetTowerByAxis(t.x)
-                if tw then
-                    placed = true
-                    break
+                
+                for _, u in ipairs(t.upgrades or {}) do
+                    UpgradeTowerRetry(t.x, u)
+                    task.wait(0.1)
                 end
+                
+                trackedX[t.x] = true
+                task.wait(2)
             end
-            
-            if not placed then
-                warn("[REBUILD FAIL] Không đặt được tower:", t.name, " tại X =", t.x)
-                continue
-            end
-            
-            for _, u in ipairs(t.upgrades or {}) do
-                UpgradeTowerRetry(t.x, u)
-                task.wait(0.1)
-            end
-            
-            trackedX[t.x] = true
-            task.wait(2)
         end
     end
 end
@@ -292,7 +269,7 @@ for _, entry in ipairs(macro) do
                 task.wait(0.1)
             end
         end
-        
+
     elseif entry.SuperFunction == "rebuild" then
         for _, name in ipairs(entry.Skip or {}) do
             skipNames[name] = true
@@ -300,7 +277,7 @@ for _, entry in ipairs(macro) do
         skipOnlyBefore = entry.Be == true
         SaveTeam()
         task.spawn(TrackDead)
-        
+
     elseif entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
         local vecTab = entry.TowerVector:split(", ")
         local pos = Vector3.new(unpack(vecTab))
@@ -312,7 +289,7 @@ for _, entry in ipairs(macro) do
         }
         WaitForCash(entry.TowerPlaceCost)
         PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
-        
+
     elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
         local axisValue = tonumber(entry.TowerUpgraded)
         UpgradeTowerRetry(axisValue, entry.UpgradePath)
@@ -325,10 +302,10 @@ for _, entry in ipairs(macro) do
                 end
             end
         end
-        
+
     elseif entry.ChangeTarget and entry.TargetType then
         ChangeTargetRetry(tonumber(entry.ChangeTarget), entry.TargetType)
-        
+
     elseif entry.SellTower then
         trackedX[tonumber(entry.SellTower)] = true
         SellTowerRetry(entry.SellTower)
