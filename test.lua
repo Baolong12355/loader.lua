@@ -215,32 +215,26 @@ task.spawn(function()
     end
 end)
 
--- Tạo thư mục
 if makefolder then
     pcall(function() makefolder("tdx") end)
     pcall(function() makefolder("tdx/macros") end)
 end
 
--- Ghi SuperFunction khi gọi từ console
-local function InsertSuper(cmd, skipList)
-    if type(skipList) ~= "table" then skipList = {} end
-    local line = HttpService:JSONEncode({
-        SuperFunction = cmd,
-        Skip = skipList
-    })
-    appendfile(outJson, line .. "\n")
-    warn("✅ SuperFunction ghi vào macros:", cmd, "→", table.concat(skipList, ", "))
-end
-
-getgenv().rebuild = function(skip) InsertSuper("rebuild", skip) end
-getgenv().SellAll = function(skip) InsertSuper("SellAll", skip) end
-
--- Vòng lặp chuyển đổi record.txt → x.json
 while true do
     if isfile(txtFile) then
-        delfile(outJson)
         local macro = readfile(txtFile)
         local logs = {}
+
+        -- Giữ lại các dòng SuperFunction cũ (nếu có)
+        local preservedSuper = {}
+        if isfile(outJson) then
+            for line in readfile(outJson):gmatch("[^\r\n]+") do
+                local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
+                if ok and decoded and decoded.SuperFunction then
+                    table.insert(preservedSuper, line)
+                end
+            end
+        end
 
         for line in macro:gmatch("[^\r\n]+") do
             -- Đặt tower
@@ -257,7 +251,7 @@ while true do
                     TowerA1 = tostring(a1)
                 }))
             else
-                -- Upgrade tower
+                -- Nâng cấp tower
                 local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
                 if hash and path and upgradeCount then
                     local pos = hash2pos[tostring(hash)]
@@ -273,7 +267,7 @@ while true do
                         end
                     end
                 else
-                    -- Change target
+                    -- Đổi target
                     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
                     if hash and targetType then
                         local pos = hash2pos[tostring(hash)]
@@ -284,7 +278,7 @@ while true do
                             }))
                         end
                     else
-                        -- Sell tower
+                        -- Bán tower
                         local hash = line:match('TDX:sellTower%(([^%)]+)%)')
                         if hash then
                             local pos = hash2pos[tostring(hash)]
@@ -299,7 +293,12 @@ while true do
             end
         end
 
-        -- Ghi tất cả thao tác ra file
+        -- Gắn lại các dòng SuperFunction
+        for _, line in ipairs(preservedSuper) do
+            table.insert(logs, line)
+        end
+
+        -- Ghi file từng dòng xuống hàng
         writefile(outJson, table.concat(logs, "\n"))
     end
     wait(0.22)
