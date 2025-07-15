@@ -3,17 +3,11 @@ local fileName = "record.txt"
 local offset = 0
 local startTime = time()
 
--- Reset file
 if isfile(fileName) then
     delfile(fileName)
 end
 writefile(fileName, "")
 
-local function debugPrint(...)
-    print("[RECORD DEBUG]", ...)
-end
-
--- Serialize giá trị
 local function serialize(value)
     if type(value) == "table" then
         local result = "{"
@@ -37,7 +31,7 @@ local function serializeArgs(args)
     return table.concat(output, ", ")
 end
 
--- Tạm lưu thao tác chờ xác nhận
+-- Lưu thao tác pending theo tên remote client
 local pending = {
     PlaceTower = {},
     SellTower = {},
@@ -45,42 +39,31 @@ local pending = {
     ChangeQueryType = {}
 }
 
-debugPrint("Khởi động macro recorder. Đang hook FireServer/InvokeServer...")
+local function savePending(name, ...)
+    if pending[name] then
+        table.insert(pending[name], {
+            time = time(),
+            args = {...}
+        })
+        print("[DEBUG] Pending thao tác:", name, "#pending =", #pending[name])
+    end
+end
 
--- Hook FireServer để lưu thao tác chờ xác nhận
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-    local args = {...}
     local name = tostring(self.Name)
-    debugPrint("FireServer gọi remote:", name, "args:", serializeArgs(args))
-    if pending[name] then
-        table.insert(pending[name], {
-            time = time(),
-            args = args
-        })
-        debugPrint("Đã lưu thao tác pending:", name, "#pending =", #pending[name])
-    end
-    return oldFireServer(self, unpack(args))
+    savePending(name, ...)
+    return oldFireServer(self, ...)
 end)
 
--- Hook InvokeServer để lưu thao tác chờ xác nhận
 local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-    local args = {...}
     local name = tostring(self.Name)
-    debugPrint("InvokeServer gọi remote:", name, "args:", serializeArgs(args))
-    if pending[name] then
-        table.insert(pending[name], {
-            time = time(),
-            args = args
-        })
-        debugPrint("Đã lưu thao tác pending:", name, "#pending =", #pending[name])
-    end
-    return oldInvokeServer(self, unpack(args))
+    savePending(name, ...)
+    return oldInvokeServer(self, ...)
 end)
 
--- Xác nhận từ server: Place & Sell
+-- Khi server xác nhận thao tác (ví dụ Place/Sell)
 local TowerFactoryQueueUpdated = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerFactoryQueueUpdated")
 TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
-    debugPrint("TowerFactoryQueueUpdated xác nhận, data:", serialize(data))
     for _, v in ipairs(data) do
         local info = v.Data[1]
         if typeof(info) == "table" then
@@ -97,9 +80,6 @@ TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
                 local waitTime = (entry.time - offset) - startTime
                 appendfile(fileName, ("task.wait(%s)\nTDX:placeTower(%s)\n"):format(waitTime, serializeArgs(entry.args)))
                 startTime = entry.time - offset
-                debugPrint("Ghi thao tác PLACE thành công, waitTime:", waitTime, "args:", serializeArgs(entry.args))
-            else
-                debugPrint("Không có thao tác PLACE pending hoặc không có Vector3.")
             end
         else
             -- SELL (không có Vector3)
@@ -108,42 +88,31 @@ TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
                 local waitTime = (entry.time - offset) - startTime
                 appendfile(fileName, ("task.wait(%s)\nTDX:sellTower(%s)\n"):format(waitTime, serializeArgs(entry.args)))
                 startTime = entry.time - offset
-                debugPrint("Ghi thao tác SELL thành công, waitTime:", waitTime, "args:", serializeArgs(entry.args))
-            else
-                debugPrint("Không có thao tác SELL pending.")
             end
         end
     end
 end)
 
--- Xác nhận từ server: Upgrade
+-- Xác nhận upgrade
 local TowerUpgradeQueueUpdated = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUpgradeQueueUpdated")
 TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
-    debugPrint("TowerUpgradeQueueUpdated xác nhận, data:", serialize(data))
     if #pending.TowerUpgradeRequest > 0 then
         local entry = table.remove(pending.TowerUpgradeRequest, 1)
         local waitTime = (entry.time - offset) - startTime
         appendfile(fileName, ("task.wait(%s)\nTDX:upgradeTower(%s)\n"):format(waitTime, serializeArgs(entry.args)))
         startTime = entry.time - offset
-        debugPrint("Ghi thao tác UPGRADE thành công, waitTime:", waitTime, "args:", serializeArgs(entry.args))
-    else
-        debugPrint("Không có thao tác UPGRADE pending.")
     end
 end)
 
--- Xác nhận từ server: Change target/query
+-- Xác nhận change query/target
 local TowerQueryTypeIndexChanged = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerQueryTypeIndexChanged")
 TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
-    debugPrint("TowerQueryTypeIndexChanged xác nhận, data:", serialize(data))
     if #pending.ChangeQueryType > 0 then
         local entry = table.remove(pending.ChangeQueryType, 1)
         local waitTime = (entry.time - offset) - startTime
         appendfile(fileName, ("task.wait(%s)\nTDX:changeQueryType(%s)\n"):format(waitTime, serializeArgs(entry.args)))
         startTime = entry.time - offset
-        debugPrint("Ghi thao tác CHANGE TARGET thành công, waitTime:", waitTime, "args:", serializeArgs(entry.args))
-    else
-        debugPrint("Không có thao tác CHANGE QUERY pending.")
     end
 end)
 
-debugPrint("✅ Macro recorder TDX đã bắt đầu (chỉ ghi thao tác xác nhận thành công vào record.txt!)")
+print("✅ Macro recorder TDX đã bắt đầu (chỉ ghi khi server xác nhận thành công vào record.txt!)")
