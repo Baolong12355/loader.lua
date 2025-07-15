@@ -281,7 +281,7 @@ local TowerManager = {
 -- Configuration management
 local function LoadConfig()
     local config = getgenv().TDX_Config or {}
-    local macroName = config["Macro Name"] or "x"
+    local macroName = config["Macro Name"] or "ooooo"
     local macroPath = "tdx/macros/" .. macroName .. ".json"
     
     -- Normalize place mode
