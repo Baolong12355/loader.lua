@@ -305,7 +305,7 @@ task.spawn(MonitorTowers)
 
 -- Load macro
 local config = getgenv().TDX_Config or {}
-local macroName = config["Macro Name"] or "event"
+local macroName = config["Macro Name"] or "ooooo"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
 globalPlaceMode = config["PlaceMode"] or "normal"
 
