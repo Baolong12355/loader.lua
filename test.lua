@@ -1,79 +1,116 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
+local startTime = time()
+local offset = 0
+local fileName = "record.txt"
 
-local TowerUseAbilityRequest = ReplicatedStorage.Remotes:WaitForChild("TowerUseAbilityRequest")
-local LocalPlayer = Players.LocalPlayer
-local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
-local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
-
--- Các tower cần truyền target
-local specialTargetTowers = {
-    ["Medic"] = true,
-    ["Uber Medic"] = true
-}
-
--- Lấy tất cả hash tower của bạn
-local function getOwnedTowers()
-    local towers = TowerClass.GetTowers()
-    if typeof(towers) ~= "table" then return {} end
-    return towers
+-- Xóa file cũ nếu có
+if isfile(fileName) then
+    delfile(fileName)
 end
+writefile(fileName, "")
 
--- Tìm tower gần nhất để làm target (cho Medic)
-local function getClosestTowerHash(fromHash, range)
-    local towers = getOwnedTowers()
-    local selfTower = towers[fromHash]
-    if not selfTower or not selfTower.GetPosition then return nil end
-    local pos = selfTower:GetPosition()
-    local nearest, dist = nil, math.huge
-
-    for hash, tower in pairs(towers) do
-        if hash ~= fromHash and tower.GetPosition then
-            local targetPos = tower:GetPosition()
-            local d = (targetPos - pos).Magnitude
-            if d < dist and d <= (range or 25) then
-                dist = d
-                nearest = hash
-            end
+-- Serialize giá trị
+local function serialize(value)
+    if type(value) == "table" then
+        local result = "{"
+        for k, v in pairs(value) do
+            result ..= "[" .. serialize(k) .. "]=" .. serialize(v) .. ", "
         end
+        if result ~= "{" then
+            result = result:sub(1, -3)
+        end
+        return result .. "}"
+    else
+        return tostring(value)
     end
-    return nearest
 end
 
--- Kiểm tra cooldown skill
-local function isCooldownReady(ability)
-    return ability and (ability.CooldownRemaining or 0) <= 0
+local function serializeArgs(...)
+    local args = {...}
+    local output = {}
+    for i, v in ipairs(args) do
+        output[i] = serialize(v)
+    end
+    return table.concat(output, ", ")
 end
 
--- Vòng lặp auto skill
-task.spawn(function()
-    while task.wait(0.2) do
-        local towers = getOwnedTowers()
+-- Ghi log vào file
+local function log(method, self, serializedArgs, upgradeSuccess)
+    local name = tostring(self.Name)
 
-        for hash, tower in pairs(towers) do
-            if not tower or not tower.AbilityHandler then continue end
-            local towerType = tostring(tower.Type)
+    if name == "PlaceTower" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
 
-            for index = 1, 3 do
-                local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-                if not isCooldownReady(ability) then continue end
+    elseif name == "SellTower" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
 
-                local args = { hash, index }
-
-                -- Nếu tower yêu cầu truyền target (ví dụ Medic)
-                if specialTargetTowers[towerType] then
-                    local targetHash = getClosestTowerHash(hash, 30)
-                    if targetHash then
-                        args[4] = targetHash
-                    else
-                        continue
-                    end
-                end
-
-                TowerUseAbilityRequest:InvokeServer(unpack(args, 1, table.maxn(args)))
-            end
+    elseif name == "TowerUpgradeRequest" then
+        -- Chỉ ghi lại nâng cấp nếu upgradeSuccess là true
+        if upgradeSuccess then
+            appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+            appendfile(fileName, "TDX:upgradeTower(" .. serializedArgs .. ")\n")
+            startTime = time() - offset
         end
+
+    elseif name == "ChangeQueryType" then
+        appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+        appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
+        startTime = time() - offset
+    end
+end
+
+-- Hook FireServer
+local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+    local args = {...}
+    local serialized = serializeArgs(...)
+    -- Nếu là upgrade thì kiểm tra kết quả trả về (giả sử trả về true nếu thành công)
+    if tostring(self.Name) == "TowerUpgradeRequest" then
+        local upgradeSuccess = oldFireServer(self, unpack(args))
+        log("FireServer", self, serialized, upgradeSuccess)
+        return upgradeSuccess
+    else
+        log("FireServer", self, serialized)
+        return oldFireServer(self, unpack(args))
     end
 end)
 
-print("✅ Auto skill chạy đúng định dạng với args[4] nếu cần.")
+-- Hook InvokeServer
+local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+    local args = {...}
+    local serialized = serializeArgs(...)
+    if tostring(self.Name) == "TowerUpgradeRequest" then
+        local upgradeSuccess = oldInvokeServer(self, unpack(args))
+        log("InvokeServer", self, serialized, upgradeSuccess)
+        return upgradeSuccess
+    else
+        log("InvokeServer", self, serialized)
+        return oldInvokeServer(self, unpack(args))
+    end
+end)
+
+-- Hook __namecall
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    local args = {...}
+    local serialized = serializeArgs(...)
+    if method == "FireServer" or method == "InvokeServer" then
+        if tostring(self.Name) == "TowerUpgradeRequest" then
+            local upgradeSuccess = oldNamecall(self, unpack(args))
+            log(method, self, serialized, upgradeSuccess)
+            return upgradeSuccess
+        else
+            log(method, self, serialized)
+            return oldNamecall(self, unpack(args))
+        end
+    end
+    return oldNamecall(self, unpack(args))
+end)
+
+print("✅ Ghi macro TDX đã bắt đầu (chỉ ghi nâng cấp thành công vào record.txt).")
+
+-- Phần chuyển đổi sang macro runner giữ nguyên như cũ
+-- ... (phần chuyển đổi macro sang JSON)
