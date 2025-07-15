@@ -8,7 +8,7 @@ local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
 local config = getgenv().TDX_Config or {}
-local macroName = config["Macro Name"] or "event"
+local macroName = config["Macro Name"] or "ooooo"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
 local placeMode = config["PlaceMode"] or "ashed"
 
