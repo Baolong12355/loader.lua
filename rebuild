@@ -1,65 +1,105 @@
--- Formation Manager - Optimized for weak executors
+-- Formation Manager - GitHub/Loadstring Compatible
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local formationFile = "formation.json"
 
--- Basic tower data storage
-local towerData = {}
-local isRecording = false
+-- Ensure required services are available
+if not player or not ReplicatedStorage or not HttpService then
+    warn("Required services not available")
+    return
+end
 
--- Simple tower info getter
-local function GetBasicTowerInfo()
-    local towers = {}
-    local playerScripts = player:WaitForChild("PlayerScripts", 5)
-    if not playerScripts then return towers end
-    
-    local success, towerClass = pcall(function()
-        return require(playerScripts.Client.GameClass.TowerClass)
+-- Tower data storage
+local towerCache = {}
+local isActive = false
+
+-- Safe service getter
+local function GetService(serviceName)
+    local success, service = pcall(function()
+        return game:GetService(serviceName)
     end)
+    return success and service or nil
+end
+
+-- Get tower class safely
+local function GetTowerClass()
+    local playerScripts = player:FindFirstChild("PlayerScripts")
+    if not playerScripts then return nil end
     
-    if not success then return towers end
+    local client = playerScripts:FindFirstChild("Client")
+    if not client then return nil end
     
-    for hash, tower in pairs(towerClass.GetTowers()) do
-        local ok, info = pcall(function()
+    local gameClass = client:FindFirstChild("GameClass")
+    if not gameClass then return nil end
+    
+    local towerModule = gameClass:FindFirstChild("TowerClass")
+    if not towerModule then return nil end
+    
+    local success, towerClass = pcall(require, towerModule)
+    return success and towerClass or nil
+end
+
+-- Get current tower information
+local function GetCurrentTowers()
+    local towers = {}
+    local TowerClass = GetTowerClass()
+    
+    if not TowerClass then return towers end
+    
+    local allTowers = TowerClass.GetTowers()
+    if not allTowers then return towers end
+    
+    for hash, tower in pairs(allTowers) do
+        local success, towerInfo = pcall(function()
+            if not tower.Character then return nil end
+            
             local model = tower.Character:GetCharacterModel()
+            if not model then return nil end
+            
             local root = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
             if not root then return nil end
             
             local pos = root.Position
             local name = tower.Name
-            local health = tower.HealthHandler:GetHealth()
             
-            if health <= 0 then return nil end
+            -- Check if tower is alive
+            if tower.HealthHandler then
+                local health = tower.HealthHandler:GetHealth()
+                if health <= 0 then return nil end
+            end
             
             -- Get upgrade levels
             local levels = {0, 0, 0}
             if tower.LevelHandler then
                 for i = 1, 3 do
-                    levels[i] = tower.LevelHandler:GetLevelOnPath(i)
+                    local level = tower.LevelHandler:GetLevelOnPath(i)
+                    levels[i] = level or 0
                 end
             end
             
             -- Get target type
-            local target = 1
+            local targetType = 1
             if tower.TargetHandler then
-                target = tower.TargetHandler:GetQueryType() or 1
+                targetType = tower.TargetHandler:GetQueryType() or 1
             end
             
             return {
-                x = math.floor(pos.X * 100) / 100,
-                y = math.floor(pos.Y * 100) / 100,
-                z = math.floor(pos.Z * 100) / 100,
+                x = math.floor(pos.X * 10) / 10,
+                y = math.floor(pos.Y * 10) / 10,
+                z = math.floor(pos.Z * 10) / 10,
                 name = name,
                 levels = levels,
-                target = target
+                target = targetType,
+                hash = tostring(hash)
             }
         end)
         
-        if ok and info then
-            towers[#towers + 1] = info
+        if success and towerInfo then
+            table.insert(towers, towerInfo)
         end
     end
     
@@ -68,87 +108,110 @@ end
 
 -- Save formation to file
 local function SaveFormation()
-    local towers = GetBasicTowerInfo()
-    if #towers == 0 then return end
+    local towers = GetCurrentTowers()
+    if not towers or #towers == 0 then 
+        return false
+    end
     
     local success = pcall(function()
-        writefile(formationFile, HttpService:JSONEncode(towers))
+        local jsonData = HttpService:JSONEncode(towers)
+        writefile(formationFile, jsonData)
     end)
     
     if success then
-        print("Saved " .. #towers .. " towers")
+        print("Formation saved: " .. #towers .. " towers")
+        return true
+    else
+        warn("Failed to save formation")
+        return false
     end
 end
 
 -- Load formation from file
 local function LoadFormation()
-    if not isfile(formationFile) then return {} end
+    if not isfile(formationFile) then 
+        return {}
+    end
     
     local success, data = pcall(function()
-        return HttpService:JSONDecode(readfile(formationFile))
+        local content = readfile(formationFile)
+        return HttpService:JSONDecode(content)
     end)
     
-    return success and data or {}
+    if success and data then
+        return data
+    else
+        warn("Failed to load formation")
+        return {}
+    end
 end
 
--- Simple tower placement
-local function PlaceTower(name, pos)
-    local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+-- Place tower with retry
+local function PlaceTower(towerName, position)
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     if not remotes then return false end
     
     local placeTower = remotes:FindFirstChild("PlaceTower")
     if not placeTower then return false end
     
-    local success = pcall(function()
-        placeTower:InvokeServer(1, name, Vector3.new(pos.x, pos.y, pos.z), 0)
-    end)
+    local pos = Vector3.new(position.x, position.y, position.z)
     
-    return success
+    for attempt = 1, 3 do
+        local success = pcall(function()
+            placeTower:InvokeServer(1, towerName, pos, 0)
+        end)
+        
+        if success then
+            wait(0.5)
+            -- Verify tower was placed
+            local towers = GetCurrentTowers()
+            for _, tower in pairs(towers) do
+                if math.abs(tower.x - position.x) < 0.5 and tower.name == towerName then
+                    return true
+                end
+            end
+        end
+        
+        wait(0.2)
+    end
+    
+    return false
 end
 
--- Simple tower upgrade
-local function UpgradeTower(x, path, count)
-    local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+-- Upgrade tower
+local function UpgradeTowerPath(xPos, path, targetLevel)
+    local TowerClass = GetTowerClass()
+    if not TowerClass then return end
+    
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     if not remotes then return end
     
     local upgradeRemote = remotes:FindFirstChild("TowerUpgradeRequest")
     if not upgradeRemote then return end
     
-    local towers = GetBasicTowerInfo()
-    local targetTower = nil
+    local allTowers = TowerClass.GetTowers()
+    if not allTowers then return end
     
-    for _, tower in pairs(towers) do
-        if math.abs(tower.x - x) < 0.5 then
-            targetTower = tower
-            break
-        end
-    end
-    
-    if not targetTower then return end
-    
-    -- Find tower hash
-    local playerScripts = player:WaitForChild("PlayerScripts", 5)
-    if not playerScripts then return end
-    
-    local success, towerClass = pcall(function()
-        return require(playerScripts.Client.GameClass.TowerClass)
-    end)
-    
-    if not success then return end
-    
-    for hash, tower in pairs(towerClass.GetTowers()) do
-        local ok, pos = pcall(function()
+    for hash, tower in pairs(allTowers) do
+        local success, pos = pcall(function()
             local model = tower.Character:GetCharacterModel()
             local root = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
             return root and root.Position
         end)
         
-        if ok and pos and math.abs(pos.X - x) < 0.5 then
-            for i = 1, count do
-                pcall(function()
-                    upgradeRemote:FireServer(hash, path, 1)
-                end)
-                wait(0.1)
+        if success and pos and math.abs(pos.X - xPos) < 0.5 then
+            if tower.LevelHandler then
+                local currentLevel = tower.LevelHandler:GetLevelOnPath(path) or 0
+                
+                for level = currentLevel + 1, targetLevel do
+                    local upgradeSuccess = pcall(function()
+                        upgradeRemote:FireServer(hash, path, 1)
+                    end)
+                    
+                    if upgradeSuccess then
+                        wait(0.3)
+                    end
+                end
             end
             break
         end
@@ -156,30 +219,27 @@ local function UpgradeTower(x, path, count)
 end
 
 -- Change tower target
-local function ChangeTarget(x, targetType)
-    local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+local function ChangeTowerTarget(xPos, targetType)
+    local TowerClass = GetTowerClass()
+    if not TowerClass then return end
+    
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     if not remotes then return end
     
     local changeQuery = remotes:FindFirstChild("ChangeQueryType")
     if not changeQuery then return end
     
-    local playerScripts = player:WaitForChild("PlayerScripts", 5)
-    if not playerScripts then return end
+    local allTowers = TowerClass.GetTowers()
+    if not allTowers then return end
     
-    local success, towerClass = pcall(function()
-        return require(playerScripts.Client.GameClass.TowerClass)
-    end)
-    
-    if not success then return end
-    
-    for hash, tower in pairs(towerClass.GetTowers()) do
-        local ok, pos = pcall(function()
+    for hash, tower in pairs(allTowers) do
+        local success, pos = pcall(function()
             local model = tower.Character:GetCharacterModel()
             local root = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
             return root and root.Position
         end)
         
-        if ok and pos and math.abs(pos.X - x) < 0.5 then
+        if success and pos and math.abs(pos.X - xPos) < 0.5 then
             pcall(function()
                 changeQuery:FireServer(hash, targetType)
             end)
@@ -191,99 +251,112 @@ end
 -- Rebuild formation
 local function RebuildFormation()
     local formation = LoadFormation()
-    if #formation == 0 then
+    if not formation or #formation == 0 then
         print("No formation data found")
         return
     end
     
-    print("Rebuilding " .. #formation .. " towers")
+    print("Rebuilding formation with " .. #formation .. " towers")
     
-    for _, tower in pairs(formation) do
+    for i, towerData in ipairs(formation) do
+        print("Placing tower " .. i .. "/" .. #formation .. ": " .. towerData.name)
+        
         -- Place tower
-        local placed = PlaceTower(tower.name, {x = tower.x, y = tower.y, z = tower.z})
+        local placed = PlaceTower(towerData.name, {
+            x = towerData.x, 
+            y = towerData.y, 
+            z = towerData.z
+        })
         
         if placed then
             wait(0.5)
             
-            -- Upgrade tower
+            -- Upgrade paths
             for path = 1, 3 do
-                local targetLevel = tower.levels[path] or 0
+                local targetLevel = towerData.levels[path] or 0
                 if targetLevel > 0 then
-                    UpgradeTower(tower.x, path, targetLevel)
-                    wait(0.2)
+                    UpgradeTowerPath(towerData.x, path, targetLevel)
                 end
             end
             
-            -- Change target
-            if tower.target and tower.target ~= 1 then
-                ChangeTarget(tower.x, tower.target)
-                wait(0.1)
+            -- Change target if needed
+            if towerData.target and towerData.target ~= 1 then
+                ChangeTowerTarget(towerData.x, towerData.target)
             end
+        else
+            warn("Failed to place tower: " .. towerData.name)
         end
         
-        wait(0.1)
+        wait(0.2)
     end
     
-    print("Formation rebuilt")
+    print("Formation rebuild completed")
 end
 
--- Auto-save on changes
-local function StartAutoSave()
-    if isRecording then return end
-    isRecording = true
+-- Auto-save system
+local function InitializeAutoSave()
+    if isActive then return end
+    isActive = true
     
-    local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     if not remotes then return end
     
-    -- Listen for tower changes
-    local connections = {}
-    
+    -- Tower placement/selling
     local factoryUpdate = remotes:FindFirstChild("TowerFactoryQueueUpdated")
     if factoryUpdate then
-        connections[#connections + 1] = factoryUpdate.OnClientEvent:Connect(function()
-            wait(0.1)
+        factoryUpdate.OnClientEvent:Connect(function()
+            wait(0.5)
             SaveFormation()
         end)
     end
     
+    -- Tower upgrades
     local upgradeUpdate = remotes:FindFirstChild("TowerUpgradeQueueUpdated")
     if upgradeUpdate then
-        connections[#connections + 1] = upgradeUpdate.OnClientEvent:Connect(function()
-            wait(0.1)
+        upgradeUpdate.OnClientEvent:Connect(function()
+            wait(0.5)
             SaveFormation()
         end)
     end
     
+    -- Target changes
     local queryUpdate = remotes:FindFirstChild("TowerQueryTypeIndexChanged")
     if queryUpdate then
-        connections[#connections + 1] = queryUpdate.OnClientEvent:Connect(function()
-            wait(0.1)
+        queryUpdate.OnClientEvent:Connect(function()
+            wait(0.2)
             SaveFormation()
         end)
     end
-    
-    -- Cleanup on player leaving
-    connections[#connections + 1] = Players.PlayerRemoving:Connect(function(plr)
-        if plr == player then
-            for _, conn in pairs(connections) do
-                conn:Disconnect()
-            end
-        end
-    end)
 end
 
 -- Global functions
-_G.rebuild = RebuildFormation
-_G.save = SaveFormation
-_G.clear = function()
+getgenv().rebuild = function()
+    spawn(RebuildFormation)
+end
+
+getgenv().save = function()
+    SaveFormation()
+end
+
+getgenv().clear = function()
     if isfile(formationFile) then
         delfile(formationFile)
-        print("Formation cleared")
+        print("Formation data cleared")
+    else
+        print("No formation data to clear")
     end
 end
 
--- Initialize
-wait(1)
-StartAutoSave()
-SaveFormation()
-print("Formation Manager loaded. Use rebuild(), save(), or clear()")
+-- Initialize script
+local function Initialize()
+    wait(2)
+    
+    InitializeAutoSave()
+    SaveFormation()
+    
+    print("Formation Manager loaded successfully")
+    print("Commands: rebuild(), save(), clear()")
+end
+
+-- Start initialization
+spawn(Initialize)
