@@ -1,118 +1,120 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local fileName = "record.txt"
-local offset = 0
-local startTime = time()
+-- Dành cho môi trường exploit (Synapse, Fluxus, etc.)
 
-if isfile(fileName) then
-    delfile(fileName)
-end
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- File record
+local fileName = "record.txt"
+if isfile(fileName) then delfile(fileName) end
 writefile(fileName, "")
 
-local function serialize(value)
-    if type(value) == "table" then
+-- Timing
+local startTime = time()
+local offset = 0
+
+-- Pending xác nhận
+local pendingAction = nil -- {type="Place"/"Sell"/"Upgrade"/"Target", code=function()}
+local timeoutDuration = 2
+
+-- ✅ Ghi vào record.txt
+local function confirmAndWrite(code)
+    appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+    appendfile(fileName, code .. "\n")
+    startTime = time() - offset
+end
+
+-- 🕒 Đặt hành động chờ xác thực
+local function setPending(typeStr, codeStr)
+    pendingAction = {
+        type = typeStr,
+        code = codeStr,
+        created = tick()
+    }
+end
+
+-- Helper serialize
+local function serialize(v)
+    if typeof(v) == "Vector3" then
+        return "Vector3.new(" .. v.X .. "," .. v.Y .. "," .. v.Z .. ")"
+    elseif typeof(v) == "Vector2int16" then
+        return "Vector2int16.new(" .. v.X .. "," .. v.Y .. ")"
+    elseif type(v) == "table" then
         local result = "{"
-        for k, v in pairs(value) do
-            result ..= "[" .. serialize(k) .. "]=" .. serialize(v) .. ", "
-        end
-        if result ~= "{" then
-            result = result:sub(1, -3)
+        for k, val in pairs(v) do
+            result = result .. "[" .. tostring(k) .. "]=" .. serialize(val) .. ","
         end
         return result .. "}"
     else
-        return tostring(value)
+        return tostring(v)
     end
 end
 
-local function serializeArgs(args)
-    local output = {}
-    for i, v in ipairs(args) do
-        output[i] = serialize(v)
-    end
-    return table.concat(output, ", ")
-end
-
--- Lưu thao tác pending theo tên remote client
-local pending = {
-    PlaceTower = {},
-    SellTower = {},
-    TowerUpgradeRequest = {},
-    ChangeQueryType = {}
-}
-
-local function savePending(name, ...)
-    if pending[name] then
-        table.insert(pending[name], {
-            time = time(),
-            args = {...}
-        })
-        print("[DEBUG] Pending thao tác:", name, "#pending =", #pending[name])
+-- 🎯 Ghi khi server xác thực
+local function tryConfirm(typeCheck)
+    if pendingAction and pendingAction.type == typeCheck then
+        confirmAndWrite(pendingAction.code)
+        pendingAction = nil
     end
 end
 
-local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-    local name = tostring(self.Name)
-    savePending(name, ...)
-    return oldFireServer(self, ...)
+-- 1. Upgrade Tower
+ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
+    if data[1] then
+        tryConfirm("Upgrade")
+    end
 end)
 
-local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-    local name = tostring(self.Name)
-    savePending(name, ...)
-    return oldInvokeServer(self, ...)
+-- 2. Sell / Place Tower
+ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
+    local v = data[1]
+    if not v then return end
+    if v.Creation then
+        tryConfirm("Place")
+    else
+        tryConfirm("Sell")
+    end
 end)
 
--- Khi server xác nhận thao tác (ví dụ Place/Sell)
-local TowerFactoryQueueUpdated = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerFactoryQueueUpdated")
-TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
-    for _, v in ipairs(data) do
-        local info = v.Data[1]
-        if typeof(info) == "table" then
-            -- PLACE (có Vector3)
-            local foundVector = false
-            for _, field in pairs(info) do
-                if typeof(field) == "Vector3" then
-                    foundVector = true
-                    break
-                end
-            end
-            if foundVector and #pending.PlaceTower > 0 then
-                local entry = table.remove(pending.PlaceTower, 1)
-                local waitTime = (entry.time - offset) - startTime
-                appendfile(fileName, ("task.wait(%s)\nTDX:placeTower(%s)\n"):format(waitTime, serializeArgs(entry.args)))
-                startTime = entry.time - offset
-            end
-        else
-            -- SELL (không có Vector3)
-            if #pending.SellTower > 0 then
-                local entry = table.remove(pending.SellTower, 1)
-                local waitTime = (entry.time - offset) - startTime
-                appendfile(fileName, ("task.wait(%s)\nTDX:sellTower(%s)\n"):format(waitTime, serializeArgs(entry.args)))
-                startTime = entry.time - offset
-            end
+-- 3. Change Target
+ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
+    if data[1] then
+        tryConfirm("Target")
+    end
+end)
+
+-- Hook __namecall
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local args = {...}
+    local method = getnamecallmethod()
+    if (method == "FireServer" or method == "InvokeServer") and typeof(self) == "Instance" then
+        local name = self.Name
+        local serialized = table.concat(args, ", ")
+        if name == "PlaceTower" then
+            local code = "TDX:placeTower(" .. serialized .. ")"
+            setPending("Place", code)
+        elseif name == "SellTower" then
+            local code = "TDX:sellTower(" .. serialized .. ")"
+            setPending("Sell", code)
+        elseif name == "TowerUpgradeRequest" then
+            local code = "TDX:upgradeTower(" .. serialized .. ")"
+            setPending("Upgrade", code)
+        elseif name == "ChangeQueryType" then
+            local code = "TDX:changeQueryType(" .. serialized .. ")"
+            setPending("Target", code)
+        end
+    end
+    return oldNamecall(self, ...)
+end)
+
+-- Timeout kiểm tra
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if pendingAction and tick() - pendingAction.created > timeoutDuration then
+            warn("❌ Không xác thực được hành động: " .. pendingAction.type)
+            pendingAction = nil
         end
     end
 end)
 
--- Xác nhận upgrade
-local TowerUpgradeQueueUpdated = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUpgradeQueueUpdated")
-TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
-    if #pending.TowerUpgradeRequest > 0 then
-        local entry = table.remove(pending.TowerUpgradeRequest, 1)
-        local waitTime = (entry.time - offset) - startTime
-        appendfile(fileName, ("task.wait(%s)\nTDX:upgradeTower(%s)\n"):format(waitTime, serializeArgs(entry.args)))
-        startTime = entry.time - offset
-    end
-end)
-
--- Xác nhận change query/target
-local TowerQueryTypeIndexChanged = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerQueryTypeIndexChanged")
-TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
-    if #pending.ChangeQueryType > 0 then
-        local entry = table.remove(pending.ChangeQueryType, 1)
-        local waitTime = (entry.time - offset) - startTime
-        appendfile(fileName, ("task.wait(%s)\nTDX:changeQueryType(%s)\n"):format(waitTime, serializeArgs(entry.args)))
-        startTime = entry.time - offset
-    end
-end)
-
-print("✅ Macro recorder TDX đã bắt đầu (chỉ ghi khi server xác nhận thành công vào record.txt!)")
+print("📦 Ghi macro đang chạy (sử dụng xác nhận từ server trước khi ghi).")
