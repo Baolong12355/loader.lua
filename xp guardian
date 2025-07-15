@@ -1,229 +1,110 @@
--- ========== KIỂM TRA GAME ==========
-if game.PlaceId ~= 9503261072 then
-    warn("❌ Không phải Tower Defense X, dừng script.")
-    return
+-- rebuild_layout.lua
+local Players             = game:GetService("Players")
+local ReplicatedStorage   = game:GetService("ReplicatedStorage")
+local HttpService         = game:GetService("HttpService")
+local player              = Players.LocalPlayer
+local PlayerScripts       = player:WaitForChild("PlayerScripts")
+
+local LIVE_FILE = "live_rebuild.txt"
+
+-- Safe require TowerClass ------------------------------------------------------------
+local TowerClass
+do
+    local ok,mod = pcall(require, PlayerScripts
+                                :WaitForChild("Client")
+                                :WaitForChild("GameClass")
+                                :WaitForChild("TowerClass"))
+    if ok then TowerClass = mod end
 end
 
--- ========== CẤU HÌNH ==========
-local WEBHOOK_URL = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
-local XP_LIMIT = 10000
-local SAVE_FILE = "BattlePassProgress.txt"
+-- Lấy giá đặt tower (GUI live) -------------------------------------------------------
+local function GetRealPlacementCost(towerName)
+    local gui   = player:FindFirstChild("PlayerGui")
+    if not gui then return 0 end
 
-local BATTLE_PASSES = {
-    {remote = "TB", display = "TOWER BATTLES"},
-    {remote = "HW24", display = "HALLOWEEN 2024"},
-    {remote = "XMAS24", display = "CHRISTMAS 2024"},
-}
+    local bottom = gui:FindFirstChildOfClass("ScreenGui")
+        and gui:FindFirstChildOfClass("ScreenGui"):FindFirstChild("BottomBar")
+    if not bottom then return 0 end
 
--- ========== DỊCH VỤ ==========
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local HttpService = game:GetService("HttpService")
+    local towersSpam = bottom:FindFirstChild("TowersBar")
+    if not towersSpam then return 0 end
 
--- ========== HÀM GỬI DISCORD ==========
-local function sendToDiscord(message)
-    local data = {
-        content = message,
-        username = "BP Tracker",
-        avatar_url = "https://i.imgur.com/Lyq5mJO.png"
+    for _,btn in pairs(towersSpam:GetChildren()) do
+        if btn.Name == towerName then
+            local costOb = btn:FindFirstChild("CostFrame") and btn.CostFrame:FindFirstChild("CostText")
+            if costOb then
+                local cleaned = tostring(costOb.Text):gsub("[^%d]", "")
+                return tonumber(cleaned) or 0
+            end
+        end
+    end
+    return 0
+end
+
+-- Lấy vị trí/quay của tower ----------------------------------------------------------
+local function GetTowerData(t)
+    local m   = t.Character                      and t.Character:GetCharacterModel()
+    local rp  = m                              and (m.PrimaryPart or m:FindFirstChild("HumanoidRootPart"))
+    local pos = rp                             and rp.Position
+    if not pos then return nil end
+
+    local look = t.CFrame.LookVector
+    local rot = 180 - math.deg(math.atan2(look.X, look.Z))
+
+    return {
+        pos  = {x = pos.X, y = pos.Y, z = pos.Z},
+        rot  = rot,
+        hash = t.Hash,
+        name = tostring(t.Type)
     }
+end
 
-    local encoded = HttpService:JSONEncode(data)
-    local request = (syn and syn.request) or (http and http.request) or (request) or http_request
+-- Save đội hình hiện tại + giá đặt thật + nâng cấp đúng level -----------------------
+local function SaveLayout()
+    if not TowerClass then return end
 
-    if request then
-        local ok, res = pcall(function()
-            return request({
-                Url = WEBHOOK_URL,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = encoded
+    local lines = {}
+    local towers = TowerClass.GetTowers()
+
+    for _,t in pairs(towers) do
+        local info = GetTowerData(t)
+        if info and t.HealthHandler and t.HealthHandler:Alive() then
+            -- Place
+            local cost = GetRealPlacementCost(info.name)
+            lines[#lines+1] = HttpService:JSONEncode({
+                SuperFunction = false,
+                TowerPlaceCost = cost,
+                TowerPlaced   = info.name,
+                TowerVector   = table.concat({info.pos.x, info.pos.y, info.pos.z}, ", "),
+                Rotation      = info.rot,
+                TowerA1       = info.hash
             })
-        end)
-        if ok and res and res.StatusCode < 300 then return true end
-    end
-    warn("❌ Không gửi được Discord.")
-    return false
-end
 
--- ========== BIẾN ==========
-local progress = {}
-local lastXP = 0
-local lastLevel = 0
-local isFirstCheck = true
-
--- ========== LƯU/ĐỌC FILE ==========
-local function saveProgress()
-    local data = {}
-    for _, bp in ipairs(BATTLE_PASSES) do
-        data[bp.remote] = progress[bp.remote] or 0
-    end
-    writefile(SAVE_FILE, HttpService:JSONEncode(data))
-end
-
-local function loadProgress()
-    if isfile(SAVE_FILE) then
-        local ok, data = pcall(function()
-            return HttpService:JSONDecode(readfile(SAVE_FILE))
-        end)
-        if ok then
-            for _, bp in ipairs(BATTLE_PASSES) do
-                progress[bp.remote] = data[bp.remote] or 0
+            -- Nâng cấp hiện tại
+            local lv1 = t.LevelHandler:GetLevelOnPath(1)
+            for i = 1, lv1 - 1 do
+                lines[#lines+1] = HttpService:JSONEncode({
+                    UpgradeCost = 0,
+                    UpgradePath = 1,
+                    TowerUpgraded = info.pos.x
+                })
             end
-            return
-        end
-    end
-    for _, bp in ipairs(BATTLE_PASSES) do
-        progress[bp.remote] = 0
-    end
-end
 
--- ========== LẤY THÔNG TIN GUI ==========
-local function getCurrentXP()
-    local ok, xpText = pcall(function()
-        return LocalPlayer.PlayerGui.GUI.BattlePass.BattlePassDetails.LevelInfo.XP.TextLabel.Text
-    end)
-    if ok and xpText then
-        local xp = tonumber(xpText:match("%d+"))
-        return xp or 0
-    end
-    return 0
-end
-
-local function getCurrentLevel()
-    local ok, lvlText = pcall(function()
-        return LocalPlayer.PlayerGui.Model.GUI.BattlePass.BattlePassDetails.LevelInfo.Current.TextLabel.Text
-    end)
-    if ok and lvlText then
-        local lvl = tonumber(lvlText:match("%d+"))
-        return lvl or 0
-    end
-    return 0
-end
-
-local function getCurrentBattlePass()
-    local ok, name = pcall(function()
-        return LocalPlayer.PlayerGui.GUI.BattlePass.BattlePassDetails.PreviewInfo.DisplayName.Text
-    end)
-    if ok and name then
-        for _, bp in ipairs(BATTLE_PASSES) do
-            if bp.display:lower() == name:lower() then
-                return bp.remote, bp.display
-            end
-        end
-    end
-    return nil, nil
-end
-
--- ========== KÍCH HOẠT BATTLEPASS ==========
-local function activateBattlePass(bpName)
-    local net = ReplicatedStorage:FindFirstChild("Network")
-    if not net then return false end
-    local remote = net:FindFirstChild("BattlePassRequestActivate")
-    if not remote then return false end
-    local ok, result = pcall(function()
-        return remote:InvokeServer(bpName)
-    end)
-    return ok and result or false
-end
-
--- ========== TIỆN ÍCH ==========
-local function getNextBattlePass()
-    for _, bp in ipairs(BATTLE_PASSES) do
-        if (progress[bp.remote] or 0) < XP_LIMIT then
-            return bp.remote, bp.display
-        end
-    end
-    return nil, nil
-end
-
-local function allMaxed()
-    for _, bp in ipairs(BATTLE_PASSES) do
-        if (progress[bp.remote] or 0) < XP_LIMIT then
-            return false
-        end
-    end
-    return true
-end
-
--- ========== THEO DÕI TIẾN TRÌNH ==========
-local function checkProgress()
-    local currentXP = getCurrentXP()
-    local currentLevel = getCurrentLevel()
-    local bpRemote, bpDisplay = getCurrentBattlePass()
-
-    if not bpRemote then
-        warn("Không xác định được BattlePass.")
-        return
-    end
-
-    progress[bpRemote] = progress[bpRemote] or 0
-
-    if isFirstCheck then
-        lastXP = currentXP
-        lastLevel = currentLevel
-        isFirstCheck = false
-        return
-    end
-
-    local xpGained = currentXP - lastXP
-    if xpGained > 0 then
-        progress[bpRemote] = math.min(progress[bpRemote] + xpGained, XP_LIMIT)
-        saveProgress()
-
-        sendToDiscord(string.format(
-            "🎯 %s: +%d XP (Tổng: %d/%d)\nLevel: %d",
-            bpDisplay, xpGained, progress[bpRemote], XP_LIMIT, currentLevel
-        ))
-
-        if progress[bpRemote] >= XP_LIMIT then
-            sendToDiscord(string.format("✅ Đã hoàn thành %s!", bpDisplay))
-            local nextBP, nextName = getNextBattlePass()
-            if nextBP then
-                if activateBattlePass(nextBP) then
-                    sendToDiscord("🔄 Đã chuyển sang: " .. nextName)
-                    isFirstCheck = true
-                end
-            else
-                sendToDiscord("🏁 ĐÃ HOÀN THÀNH TẤT CẢ BATTLEPASS!")
-                LocalPlayer:Kick("Bạn đã hoàn thành toàn bộ BattlePass.")
+            local lv2 = t.LevelHandler:GetLevelOnPath(2)
+            for i = 1, lv2 - 1 do
+                lines[#lines+1] = HttpService:JSONEncode({
+                    UpgradeCost = 0,
+                    UpgradePath = 2,
+                    TowerUpgraded = info.pos.x
+                })
             end
         end
     end
 
-    lastXP = currentXP
-    lastLevel = currentLevel
+    writefile(LIVE_FILE, table.concat(lines, "\n"))
+    print("✅ rebuild saved to", LIVE_FILE)
 end
 
--- ========== KHỞI CHẠY ==========
-local function main()
-    sendToDiscord("🟢 Script BattlePass Tracker đã khởi động!")
-    loadProgress()
-
-    local nextBP, name = getNextBattlePass()
-    if nextBP and activateBattlePass(nextBP) then
-        local msg = "🚀 THEO DÕI BATTLEPASS:\n"
-        for _, bp in ipairs(BATTLE_PASSES) do
-            msg = msg .. string.format("%s: %d/%d\n", bp.display, progress[bp.remote] or 0, XP_LIMIT)
-        end
-        msg = msg .. "🔛 ĐANG KÍCH HOẠT: " .. name
-        sendToDiscord(msg)
-        isFirstCheck = true
-    else
-        sendToDiscord("🎖️ TẤT CẢ BATTLEPASS ĐÃ HOÀN THÀNH!")
-        return
-    end
-
-    while task.wait(5) do
-        if allMaxed() then break end
-        checkProgress()
-    end
-end
-
--- ========== CHẠY SCRIPT ==========
-local ok, err = pcall(main)
-if not ok then
-    warn("LỖI:", err)
-    sendToDiscord("❌ Lỗi nghiêm trọng: " .. tostring(err))
-end
+-- Cách gọi --------------------------------------------------------------------------
+getgenv().rebuild = SaveLayout
+print(">>> Gõ `rebuild()` trong console để snapshot bất cứ lúc nào.")
