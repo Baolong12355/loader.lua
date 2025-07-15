@@ -1,120 +1,146 @@
--- Dành cho môi trường exploit (Synapse, Fluxus, etc.)
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- File record
 local fileName = "record.txt"
-if isfile(fileName) then delfile(fileName) end
-writefile(fileName, "")
-
--- Timing
 local startTime = time()
 local offset = 0
 
+-- Xoá file cũ
+if isfile(fileName) then delfile(fileName) end
+writefile(fileName, "")
+
 -- Pending xác nhận
-local pendingAction = nil -- {type="Place"/"Sell"/"Upgrade"/"Target", code=function()}
-local timeoutDuration = 2
+local pending = nil
+local timeout = 2
 
--- ✅ Ghi vào record.txt
-local function confirmAndWrite(code)
-    appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-    appendfile(fileName, code .. "\n")
-    startTime = time() - offset
-end
-
--- 🕒 Đặt hành động chờ xác thực
-local function setPending(typeStr, codeStr)
-    pendingAction = {
-        type = typeStr,
-        code = codeStr,
-        created = tick()
-    }
-end
-
--- Helper serialize
+-- Serialize giá trị
 local function serialize(v)
     if typeof(v) == "Vector3" then
         return "Vector3.new(" .. v.X .. "," .. v.Y .. "," .. v.Z .. ")"
     elseif typeof(v) == "Vector2int16" then
         return "Vector2int16.new(" .. v.X .. "," .. v.Y .. ")"
     elseif type(v) == "table" then
-        local result = "{"
+        local out = {}
         for k, val in pairs(v) do
-            result = result .. "[" .. tostring(k) .. "]=" .. serialize(val) .. ","
+            out[#out + 1] = "[" .. tostring(k) .. "]=" .. serialize(val)
         end
-        return result .. "}"
+        return "{" .. table.concat(out, ",") .. "}"
     else
         return tostring(v)
     end
 end
 
--- 🎯 Ghi khi server xác thực
-local function tryConfirm(typeCheck)
-    if pendingAction and pendingAction.type == typeCheck then
-        confirmAndWrite(pendingAction.code)
-        pendingAction = nil
+-- Serialize args
+local function serializeArgs(...)
+    local args = {...}
+    local out = {}
+    for i, v in ipairs(args) do
+        out[i] = serialize(v)
+    end
+    return table.concat(out, ", ")
+end
+
+-- Xác nhận và ghi
+local function confirmAndWrite()
+    if not pending then return end
+    appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
+    appendfile(fileName, pending.code .. "\n")
+    startTime = time() - offset
+    pending = nil
+end
+
+-- Ghi nếu server phản hồi đúng loại
+local function tryConfirm(typeStr)
+    if pending and pending.type == typeStr then
+        confirmAndWrite()
     end
 end
 
--- 1. Upgrade Tower
-ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
-    if data[1] then
-        tryConfirm("Upgrade")
-    end
-end)
+-- Ghi log
+local function setPending(typeStr, code)
+    pending = {
+        type = typeStr,
+        code = code,
+        created = tick()
+    }
+end
 
--- 2. Sell / Place Tower
+-- Lắng nghe Remote xác thực
 ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
-    local v = data[1]
-    if not v then return end
-    if v.Creation then
+    local d = data[1]
+    if not d then return end
+    if d.Creation then
         tryConfirm("Place")
     else
         tryConfirm("Sell")
     end
 end)
 
--- 3. Change Target
+ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
+    if data[1] then
+        tryConfirm("Upgrade")
+    end
+end)
+
 ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
     if data[1] then
         tryConfirm("Target")
     end
 end)
 
+-- Timeout check
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if pending and tick() - pending.created > timeout then
+            warn("❌ Không xác thực được: " .. pending.type)
+            pending = nil
+        end
+    end
+end)
+
+-- Hook FireServer
+local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+    local args = serializeArgs(...)
+    local name = self.Name
+
+    if name == "PlaceTower" then
+        setPending("Place", "TDX:placeTower(" .. args .. ")")
+    elseif name == "SellTower" then
+        setPending("Sell", "TDX:sellTower(" .. args .. ")")
+    elseif name == "TowerUpgradeRequest" then
+        setPending("Upgrade", "TDX:upgradeTower(" .. args .. ")")
+    elseif name == "ChangeQueryType" then
+        setPending("Target", "TDX:changeQueryType(" .. args .. ")")
+    end
+
+    return oldFireServer(self, ...)
+end)
+
+-- Hook InvokeServer
+local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+    local args = serializeArgs(...)
+    return oldInvokeServer(self, ...)
+end)
+
 -- Hook __namecall
 local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    local args = {...}
     local method = getnamecallmethod()
-    if (method == "FireServer" or method == "InvokeServer") and typeof(self) == "Instance" then
+    if method == "FireServer" or method == "InvokeServer" then
+        local args = serializeArgs(...)
         local name = self.Name
-        local serialized = table.concat(args, ", ")
+
         if name == "PlaceTower" then
-            local code = "TDX:placeTower(" .. serialized .. ")"
-            setPending("Place", code)
+            setPending("Place", "TDX:placeTower(" .. args .. ")")
         elseif name == "SellTower" then
-            local code = "TDX:sellTower(" .. serialized .. ")"
-            setPending("Sell", code)
+            setPending("Sell", "TDX:sellTower(" .. args .. ")")
         elseif name == "TowerUpgradeRequest" then
-            local code = "TDX:upgradeTower(" .. serialized .. ")"
-            setPending("Upgrade", code)
+            setPending("Upgrade", "TDX:upgradeTower(" .. args .. ")")
         elseif name == "ChangeQueryType" then
-            local code = "TDX:changeQueryType(" .. serialized .. ")"
-            setPending("Target", code)
+            setPending("Target", "TDX:changeQueryType(" .. args .. ")")
         end
     end
     return oldNamecall(self, ...)
 end)
 
--- Timeout kiểm tra
-task.spawn(function()
-    while true do
-        task.wait(0.5)
-        if pendingAction and tick() - pendingAction.created > timeoutDuration then
-            warn("❌ Không xác thực được hành động: " .. pendingAction.type)
-            pendingAction = nil
-        end
-    end
-end)
-
-print("📦 Ghi macro đang chạy (sử dụng xác nhận từ server trước khi ghi).")
+print("📌 Đã bật ghi macro có xác nhận từ server.")
