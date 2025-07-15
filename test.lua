@@ -1,8 +1,9 @@
-local startTime = time()
-local offset = 0
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local fileName = "record.txt"
+local offset = 0
+local startTime = time()
 
--- Xóa file cũ nếu có
+-- Reset file
 if isfile(fileName) then
     delfile(fileName)
 end
@@ -24,8 +25,7 @@ local function serialize(value)
     end
 end
 
-local function serializeArgs(...)
-    local args = {...}
+local function serializeArgs(args)
     local output = {}
     for i, v in ipairs(args) do
         output[i] = serialize(v)
@@ -33,80 +33,98 @@ local function serializeArgs(...)
     return table.concat(output, ", ")
 end
 
--- Ghi log vào file (record chắc chắn: xác nhận thành công với 4 thao tác chính)
-local function log(method, self, serializedArgs, result)
-    local name = tostring(self.Name)
+-- Tạm lưu thao tác chờ xác nhận
+local pending = {
+    PlaceTower = {},
+    SellTower = {},
+    TowerUpgradeRequest = {},
+    ChangeQueryType = {}
+}
 
-    -- Chỉ ghi khi thành công (result == true hoặc không phải các thao tác chính)
-    local function isSuccess()
-        if name == "PlaceTower" or name == "SellTower" or name == "TowerUpgradeRequest" or name == "ChangeQueryType" then
-            return result == true
-        end
-        return true -- Các thao tác khác luôn ghi
-    end
-
-    if isSuccess() then
-        if name == "PlaceTower" then
-            appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-            appendfile(fileName, "TDX:placeTower(" .. serializedArgs .. ")\n")
-            startTime = time() - offset
-
-        elseif name == "SellTower" then
-            appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-            appendfile(fileName, "TDX:sellTower(" .. serializedArgs .. ")\n")
-            startTime = time() - offset
-
-        elseif name == "TowerUpgradeRequest" then
-            appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-            appendfile(fileName, "TDX:upgradeTower(" .. serializedArgs .. ")\n")
-            startTime = time() - offset
-
-        elseif name == "ChangeQueryType" then
-            appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-            appendfile(fileName, "TDX:changeQueryType(" .. serializedArgs .. ")\n")
-            startTime = time() - offset
-        end
-    end
-end
-
--- Hook FireServer
+-- Hook FireServer để lưu thao tác chờ xác nhận
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
     local args = {...}
-    local serialized = serializeArgs(...)
-    local result = oldFireServer(self, unpack(args))
-    log("FireServer", self, serialized, result)
-    return result
+    local name = tostring(self.Name)
+    if pending[name] then
+        table.insert(pending[name], {
+            time = time(),
+            args = args
+        })
+    end
+    return oldFireServer(self, unpack(args))
 end)
 
--- Hook InvokeServer
+-- Hook InvokeServer để lưu thao tác chờ xác nhận
 local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
     local args = {...}
-    local serialized = serializeArgs(...)
-    local result = oldInvokeServer(self, unpack(args))
-    log("InvokeServer", self, serialized, result)
-    return result
+    local name = tostring(self.Name)
+    if pending[name] then
+        table.insert(pending[name], {
+            time = time(),
+            args = args
+        })
+    end
+    return oldInvokeServer(self, unpack(args))
 end)
 
--- Hook __namecall
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    local method = getnamecallmethod()
-    local args = {...}
-    local serialized = serializeArgs(...)
-    local result = oldNamecall(self, unpack(args))
-    log(method, self, serialized, result)
-    return result
+-- Xác nhận từ server: Place & Sell
+local TowerFactoryQueueUpdated = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerFactoryQueueUpdated")
+TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
+    for _, v in ipairs(data) do
+        local info = v.Data[1]
+        if typeof(info) == "table" then
+            -- PLACE (có Vector3)
+            local foundVector = false
+            for _, field in pairs(info) do
+                if typeof(field) == "Vector3" then
+                    foundVector = true
+                    break
+                end
+            end
+            if foundVector and #pending.PlaceTower > 0 then
+                -- Ghi thao tác Place (lấy thao tác gần nhất)
+                local entry = table.remove(pending.PlaceTower, 1)
+                local waitTime = (entry.time - offset) - startTime
+                appendfile(fileName, ("task.wait(%s)\nTDX:placeTower(%s)\n"):format(waitTime, serializeArgs(entry.args)))
+                startTime = entry.time - offset
+            end
+        else
+            -- SELL (không có Vector3)
+            if #pending.SellTower > 0 then
+                local entry = table.remove(pending.SellTower, 1)
+                local waitTime = (entry.time - offset) - startTime
+                appendfile(fileName, ("task.wait(%s)\nTDX:sellTower(%s)\n"):format(waitTime, serializeArgs(entry.args)))
+                startTime = entry.time - offset
+            end
+        end
+    end
 end)
 
-print("✅ Ghi macro TDX đã bắt đầu (chỉ ghi các thao tác thành công vào record.txt).")
+-- Xác nhận từ server: Upgrade
+local TowerUpgradeQueueUpdated = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUpgradeQueueUpdated")
+TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
+    if #pending.TowerUpgradeRequest > 0 then
+        local entry = table.remove(pending.TowerUpgradeRequest, 1)
+        local waitTime = (entry.time - offset) - startTime
+        appendfile(fileName, ("task.wait(%s)\nTDX:upgradeTower(%s)\n"):format(waitTime, serializeArgs(entry.args)))
+        startTime = entry.time - offset
+    end
+end)
 
--- Phần chuyển đổi sang macro runner giữ nguyên như cũ
--- ... (phần chuyển đổi macro sang JSON)
--- Phần chuyển đổi sang macro runner giữ nguyên như cũ
--- ... (phần chuyển đổi macro sang JSON)
--- Script chuyển đổi record.txt thành macro runner (dùng trục X), với thứ tự trường upgrade là: UpgradeCost, UpgradePath, TowerUpgraded
--- Đặt script này trong môi trường Roblox hoặc môi trường hỗ trợ các API Roblox tương ứng
+-- Xác nhận từ server: Change target/query
+local TowerQueryTypeIndexChanged = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerQueryTypeIndexChanged")
+TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
+    if #pending.ChangeQueryType > 0 then
+        local entry = table.remove(pending.ChangeQueryType, 1)
+        local waitTime = (entry.time - offset) - startTime
+        appendfile(fileName, ("task.wait(%s)\nTDX:changeQueryType(%s)\n"):format(waitTime, serializeArgs(entry.args)))
+        startTime = entry.time - offset
+    end
+end)
 
+print("✅ Macro recorder TDX chỉ ghi thao tác thành công vào record.txt!")
+
+-- Nếu muốn chuyển đổi sang macro runner/JSON thì giữ nguyên phần sau
 local txtFile = "record.txt"
 local outJson = "tdx/macros/x.json"
 
