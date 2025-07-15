@@ -42,7 +42,7 @@ local function GetTowerByAxis(axisX)
             local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
             return root and root.Position
         end)
-        if success and pos and math.abs(pos.X - axisX) <= 1 then
+        if success and pos and math.abs(pos.X - axisX) <= 0.1 then
             local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
             if hp and hp > 0 then
                 return hash, tower
