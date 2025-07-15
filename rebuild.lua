@@ -28,6 +28,7 @@ local function GetTowerPosition(tower)
     return root and root.Position or nil
 end
 
+-- Lưu đội hình: chỉ giữ thông tin cốt lõi
 local function SaveTeam()
     local towers = TowerClass and TowerClass.GetTowers()
     if not towers then return end
@@ -39,7 +40,9 @@ local function SaveTeam()
             team[tostring(hash)] = {
                 Name = tower.Name,
                 Level = tower.LevelHandler and tower.LevelHandler:GetLevel() or 1,
-                Position = {X = pos.X, Y = pos.Y, Z = pos.Z}
+                X = pos.X,
+                Y = pos.Y,
+                Z = pos.Z,
             }
         end
     end
@@ -69,7 +72,9 @@ local function AddTower(hash, name, pos, level)
     teamData[tostring(hash)] = {
         Name = name,
         Level = level or 1,
-        Position = {X = pos.X, Y = pos.Y, Z = pos.Z}
+        X = pos.X,
+        Y = pos.Y,
+        Z = pos.Z,
     }
     writefile(teamFile, HttpService:JSONEncode(teamData))
     print("➕ Đã thêm tower " .. name .. " vào đội hình")
@@ -84,7 +89,7 @@ local function UpgradeTower(hash, newLevel)
     end
 end
 
--- Lắng nghe thao tác xác nhận từ server để cập nhật đội hình
+-- Xác nhận từ server để cập nhật đội hình
 ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
     for _, v in ipairs(data) do
         local info = v.Data[1]
@@ -110,7 +115,5 @@ ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(functio
         UpgradeTower(hash, newLevel)
     end
 end)
-
--- Bạn có thể mở rộng cho ChangeQueryType nếu muốn
 
 print("📌 Script lưu đội hình đã bật. Dùng chat 'rebuild()' để lưu lại đội hình hiện tại.")
