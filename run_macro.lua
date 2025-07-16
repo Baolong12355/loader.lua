@@ -49,16 +49,31 @@ local function GetTowerByAxis(axisX)
 	return nil, nil
 end
 
--- Lấy giá nâng cấp
+-- Lấy giá nâng cấp đã tính giảm giá
 local function GetCurrentUpgradeCost(tower, path)
 	if not tower or not tower.LevelHandler then return nil end
 	local maxLvl = tower.LevelHandler:GetMaxLevel()
 	local curLvl = tower.LevelHandler:GetLevelOnPath(path)
 	if curLvl >= maxLvl then return nil end
-	local ok, cost = pcall(function()
+
+	-- Lấy giá gốc
+	local ok, baseCost = pcall(function()
 		return tower.LevelHandler:GetLevelUpgradeCost(path, 1)
 	end)
-	return ok and cost or nil
+	if not ok or not baseCost then return nil end
+
+	-- Lấy discount
+	local discount = 0
+	local ok2, disc = pcall(function()
+		return tower.BuffHandler and tower.BuffHandler:GetDiscount() or 0
+	end)
+	if ok2 and typeof(disc) == "number" then
+		discount = disc
+	end
+
+	-- Tính giá sau giảm
+	local finalCost = math.floor(baseCost * (1 - discount))
+	return finalCost
 end
 
 -- Chờ đủ tiền
