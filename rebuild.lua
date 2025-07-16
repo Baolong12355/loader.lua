@@ -134,6 +134,7 @@ local macro = HttpService:JSONDecode(readfile(macroPath))
 local rebuildActive = false
 local skipSet, rebuildTime = {}, 0
 local macroRun = {}
+local placedTowers = {} -- Track towers đã đặt thành công
 
 -- Main macro execution loop
 for i, line in ipairs(macro) do
@@ -165,14 +166,13 @@ for i, line in ipairs(macro) do
         -- Start rebuild monitoring task
         task.spawn(function()
             while rebuildActive do
-                for _, old in ipairs(macroRun) do
-                    if old.TowerVector then
-                        local vec = old.TowerVector:split(", ")
-                        local x = tonumber(vec[1])
-                        local _, t = GetTowerByAxis(x)
-                        
-                        if not t then
-                            print("[DETECT] Tower mất tại X:", x)
+                -- Chỉ check những tower đã được đặt thành công
+                for x, _ in pairs(placedTowers) do
+                    local _, t = GetTowerByAxis(x)
+                    
+                    if not t then
+                        print("[DETECT] Tower mất tại X:", x)
+                        placedTowers[x] = nil -- Remove from placed list
                             
                             -- FIXED: Rebuild tower và apply tất cả actions liên quan
                             local actionsToApply = {}
@@ -227,6 +227,7 @@ for i, line in ipairs(macro) do
                                     
                                     WaitForCash(step.TowerPlaceCost or 0)
                                     PlaceTowerRetry(args, action.x, step.TowerPlaced)
+                                    placedTowers[action.x] = true -- Mark as placed
                                     
                                 elseif action.type == "upgrade" then
                                     UpgradeTowerRetry(action.x, action.data.UpgradePath)
@@ -259,6 +260,7 @@ for i, line in ipairs(macro) do
             
             WaitForCash(line.TowerPlaceCost or 0)
             PlaceTowerRetry(args, pos.X, line.TowerPlaced)
+            placedTowers[pos.X] = true -- Mark tower as placed
             
         elseif line.TowerUpgraded then
             -- Upgrade tower
