@@ -161,7 +161,7 @@ end
 
 -- Load macro + config
 local config = getgenv().TDX_Config or {}
-local macroName = config["Macro Name"] or "x"
+local macroName = config["Macro Name"] or "ooooo"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
 globalPlaceMode = config["PlaceMode"] or "normal"
 
