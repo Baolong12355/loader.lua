@@ -31,7 +31,7 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
--- Tìm tower theo X
+-- Tìm tower theo X (đã bỏ kiểm tra sai số)
 local function GetTowerByAxis(axisX)
 	for hash, tower in pairs(TowerClass.GetTowers()) do
 		local success, pos = pcall(function()
@@ -39,7 +39,7 @@ local function GetTowerByAxis(axisX)
 			local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
 			return root and root.Position
 		end)
-		if success and pos and math.abs(pos.X - axisX) <= 1 then
+		if success and pos and pos.X == axisX then
 			local hp = tower.HealthHandler and tower.HealthHandler:GetHealth()
 			if hp and hp > 0 then
 				return hash, tower
@@ -170,7 +170,7 @@ end
 
 local success, macro = pcall(function()
 	return HttpService:JSONDecode(readfile(macroPath))
-end)
+end
 if not success then
 	error("Lỗi khi đọc macro")
 end
