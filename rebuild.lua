@@ -1,4 +1,5 @@
 -- TDX Macro Runner - Rebuild (X-only Tracking, Retry & Priority)
+-- Load with loadstring so it runs directly from GitHub raw
 
 local HttpService       = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -55,7 +56,7 @@ local function WaitForCash(amount)
 end
 
 -- try placing a tower until it appears at X
-local function PlaceTower)
+local function PlaceTowerRetry(args, x, name)
     while true do
         Remotes.PlaceTower:InvokeServer(unpack(args))
         task.wait(0.1)
@@ -122,19 +123,19 @@ local macroPath = "tdx/macros/" .. (cfg["Macro Name"] or "event") .. ".json"
 local macro     = HttpService:JSONDecode(readfile(macroPath))
 
 -- state
-local rebuildActive = false
-local skipSet       = {}    -- tower names to skip on rebuild
-local rebuildTime   = 0     -- index in macro to rebuild up to
-local placedPositions = {}  -- key = X (number), value = true
+local rebuildActive    = false
+local skipSet          = {}      -- tower names to skip on rebuild
+local rebuildTime      = 0       -- index in macro to rebuild up to
+local placedPositions  = {}      -- key = X (number), value = true
 
 -- priority map for sorting place actions
 local typePriority = {
-    Medic            = 1,
+    Medic              = 1,
     ["Golden Mobster"] = 2,
-    Mobster          = 2,
-    DJ               = 3,
-    Commander        = 4,
-    default          = 5,
+    Mobster            = 2,
+    DJ                 = 3,
+    Commander          = 4,
+    default            = 5,
 }
 
 local function getPriority(name)
@@ -146,6 +147,7 @@ local function rebuildTowerAtX(x)
     local actions = {}
     for i = 1, rebuildTime do
         local step = macro[i]
+
         -- place
         if step.TowerVector then
             local v = step.TowerVector:split(", ")
@@ -231,10 +233,10 @@ for idx, line in ipairs(macro) do
             end
         end)
 
-    -- normal macro actions
-    else
+    -- normal else
         -- place
-        if line.TowerPlaced and line.TowerVector local vec = line.TowerVector:split(", ")
+        if line.TowerPlaced and line.TowerVector then
+            local vec = line.TowerVector:split(", ")
             local pos = Vector3.new(unpack(vec))
             local args = {
                 tonumber(line.TowerA1),
@@ -242,7 +244,6 @@ for idx, line in ipairs(macro) do
                 pos,
                 tonumber(line.Rotation or 0),
             }
-
             WaitForCash(line.TowerPlaceCost or 0)
             if PlaceTowerRetry(args, pos.X, line.TowerPlaced) then
                 placedPositions[pos.X] = true
