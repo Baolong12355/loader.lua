@@ -1,4 +1,4 @@
--- TDX Macro Runner - Rebuild (New Logic with Exact X Matching, Retry, and Skip)
+-- TDX Macro Runner - Rebuild (FIXED VERSION)
 
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -174,7 +174,10 @@ for i, line in ipairs(macro) do
                         if not t then
                             print("[DETECT] Tower mất tại X:", x)
                             
-                            -- Rebuild tower and apply all related actions
+                            -- FIXED: Rebuild tower và apply tất cả actions liên quan
+                            local actionsToApply = {}
+                            
+                            -- Collect all actions for this X position
                             for j = 1, rebuildTime do
                                 local step = macro[j]
                                 
@@ -183,22 +186,53 @@ for i, line in ipairs(macro) do
                                     local vx = tonumber(v[1])
                                     
                                     if vx == x and not skipSet[step.TowerPlaced] then
-                                        local args = {
-                                            tonumber(step.TowerA1),
-                                            step.TowerPlaced,
-                                            Vector3.new(unpack(v)),
-                                            tonumber(step.Rotation or 0)
-                                        }
-                                        
-                                        WaitForCash(step.TowerPlaceCost or 0)
-                                        PlaceTowerRetry(args, vx, step.TowerPlaced)
-                                        
-                                    elseif step.TowerUpgraded and step.TowerUpgraded == x then
-                                        UpgradeTowerRetry(x, step.UpgradePath)
-                                        
-                                    elseif step.ChangeTarget and step.ChangeTarget == x then
-                                        ChangeTargetRetry(x, step.TargetType)
+                                        table.insert(actionsToApply, {
+                                            type = "place",
+                                            data = step,
+                                            x = vx
+                                        })
                                     end
+                                elseif step.TowerUpgraded then
+                                    local upgradeX = tonumber(step.TowerUpgraded) -- FIX: Convert to number
+                                    if upgradeX == x then
+                                        table.insert(actionsToApply, {
+                                            type = "upgrade",
+                                            data = step,
+                                            x = upgradeX
+                                        })
+                                    end
+                                elseif step.ChangeTarget then
+                                    local targetX = tonumber(step.ChangeTarget) -- FIX: Convert to number
+                                    if targetX == x then
+                                        table.insert(actionsToApply, {
+                                            type = "target",
+                                            data = step,
+                                            x = targetX
+                                        })
+                                    end
+                                end
+                            end
+                            
+                            -- Execute actions in order
+                            for _, action in ipairs(actionsToApply) do
+                                if action.type == "place" then
+                                    local step = action.data
+                                    local v = step.TowerVector:split(", ")
+                                    local args = {
+                                        tonumber(step.TowerA1),
+                                        step.TowerPlaced,
+                                        Vector3.new(unpack(v)),
+                                        tonumber(step.Rotation or 0)
+                                    }
+                                    
+                                    WaitForCash(step.TowerPlaceCost or 0)
+                                    PlaceTowerRetry(args, action.x, step.TowerPlaced)
+                                    
+                                elseif action.type == "upgrade" then
+                                    UpgradeTowerRetry(action.x, action.data.UpgradePath)
+                                    
+                                elseif action.type == "target" then
+                                    ChangeTargetRetry(action.x, action.data.TargetType)
                                 end
                             end
                         end
