@@ -1,3 +1,5 @@
+-- TDX Macro Runner - Full Version with SuperFunction Integration + Fix for Upgrade Behavior (Retry Until Success) + Debug
+
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
