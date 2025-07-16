@@ -111,7 +111,7 @@ local cfg = _G.TDX_Config or {}
 local macroPath = "tdx/macros/" .. (cfg["Macro Name"] or "event") .. ".json" 
 local macro = HttpService:JSONDecode(readfile(macroPath))
 
-local rebuildActive = false 
+local rebuildActive = true 
 local skipSet, rebuildTime = {}, 0 
 local macroRun = {} 
 local placedTowers = {}
