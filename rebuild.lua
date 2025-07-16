@@ -195,7 +195,7 @@ end
 
 -- Configuration
 local config = getgenv().TDX_Config or {}
-local macroName = config["Macro Name"] or "x"
+local macroName = config["Macro Name"] or "event"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
 globalPlaceMode = config["PlaceMode"] or "normal"
 
