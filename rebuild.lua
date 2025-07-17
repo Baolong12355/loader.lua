@@ -1,4 +1,4 @@
--- TDX Macro Runner - Full with Rebuild + Debug Log
+-- TDX Macro Runner - Rebuild Optimized (No Live Tower Logging)
 
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,7 +8,7 @@ local player = Players.LocalPlayer
 local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
--- Safe require
+-- Require TowerClass
 local function SafeRequire(path, timeout)
 	timeout = timeout or 5
 	local t0 = os.clock()
@@ -31,7 +31,43 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể tải TowerClass") end
 
--- Get tower by X
+-- Check if no tower exists at X
+local function IsTowerMissing(axisX)
+	for _, tower in pairs(TowerClass.GetTowers()) do
+		local ok, pos = pcall(function()
+			local model = tower.Character:GetCharacterModel()
+			local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
+			return root and root.Position
+		end)
+		if ok and pos and pos.X == axisX then
+			return false
+		end
+	end
+	return true
+end
+
+-- Retry Helpers
+local function WaitForCash(amount)
+	while cashStat.Value < amount do task.wait() end
+end
+
+local function GetCurrentUpgradeCost(tower, path)
+	if not tower or not tower.LevelHandler then return nil end
+	local maxLvl = tower.LevelHandler:GetMaxLevel()
+	local curLvl = tower.LevelHandler:GetLevelOnPath(path)
+	if curLvl >= maxLvl then return nil end
+	local ok, baseCost = pcall(function()
+		return tower.LevelHandler:GetLevelUpgradeCost(path, 1)
+	end)
+	if not ok then return nil end
+	local discount = 0
+	local ok2, disc = pcall(function()
+		return tower.BuffHandler and tower.BuffHandler:GetDiscount() or 0
+	end)
+	if ok2 and typeof(disc) == "number" then discount = disc end
+	return math.floor(baseCost * (1 - discount))
+end
+
 local function GetTowerByAxis(axisX)
 	for hash, tower in pairs(TowerClass.GetTowers()) do
 		local ok, pos = pcall(function()
@@ -47,36 +83,13 @@ local function GetTowerByAxis(axisX)
 	return nil, nil
 end
 
--- Helpers
-local function WaitForCash(amount)
-	while cashStat.Value < amount do task.wait() end
-end
-
-local function GetCurrentUpgradeCost(tower, path)
-	if not tower or not tower.LevelHandler then return nil end
-	local maxLvl = tower.LevelHandler:GetMaxLevel()
-	local curLvl = tower.LevelHandler:GetLevelOnPath(path)
-	if curLvl >= maxLvl then return nil end
-	local ok, baseCost = pcall(function()
-		return tower.LevelHandler:GetLevelUpgradeCost(path, 1)
-	end)
-	if not ok or not baseCost then return nil end
-	local discount = 0
-	local ok2, disc = pcall(function()
-		return tower.BuffHandler and tower.BuffHandler:GetDiscount() or 0
-	end)
-	if ok2 and typeof(disc) == "number" then discount = disc end
-	return math.floor(baseCost * (1 - discount))
-end
-
--- Retry Actions
 local function PlaceTowerRetry(args, axisX, towerName)
 	while true do
 		Remotes.PlaceTower:InvokeServer(unpack(args))
 		task.wait(0.1)
 		local hash = GetTowerByAxis(axisX)
 		if hash then
-			print("[REBUILD] ✅ Đặt:", towerName, "X =", axisX)
+			print("[REBUILD] ✅ Đặt lại:", towerName, "X =", axisX)
 			return
 		end
 		warn("[REBUILD] ❌ Thử lại đặt:", towerName, "X =", axisX)
@@ -84,13 +97,11 @@ local function PlaceTowerRetry(args, axisX, towerName)
 end
 
 local function UpgradeTowerRetry(axisX, path)
-	local maxTries = globalPlaceMode == "rewrite" and math.huge or 3
 	local tries = 0
+	local maxTries = globalPlaceMode == "rewrite" and math.huge or 3
 	while tries < maxTries do
 		local hash, tower = GetTowerByAxis(axisX)
-		if not hash or not tower or (tower.HealthHandler:GetHealth() <= 0) then
-			tries += 1 task.wait() continue
-		end
+		if not hash or not tower then tries += 1 task.wait() continue end
 		local before = tower.LevelHandler:GetLevelOnPath(path)
 		local cost = GetCurrentUpgradeCost(tower, path)
 		if not cost then return end
@@ -102,7 +113,6 @@ local function UpgradeTowerRetry(axisX, path)
 			print("[REBUILD] ✅ Upgrade X =", axisX, "path =", path)
 			return
 		end
-		warn("[REBUILD] 🔁 Retry Upgrade X =", axisX)
 		tries += 1
 	end
 end
@@ -136,21 +146,21 @@ local success, macro = pcall(function()
 end)
 if not success then error("Lỗi khi đọc macro") end
 
--- Skip / Be logic
+-- Skip logic
 local skipTowers = {}
 local skipModeBe = false
 local rebuildStartIndex = 0
 local rebuildWatcherRunning = false
 
--- Rebuild Watcher
+-- Watcher
 function startRebuildWatcher(macro, maxLine)
 	if rebuildWatcherRunning then return end
 	rebuildWatcherRunning = true
 	rebuildStartIndex = maxLine
-	print("[REBUILD] 🔁 Bắt đầu theo dõi mất tower từ dòng:", maxLine)
+	print("[REBUILD] 🔁 Đang theo dõi tower mất...")
 
 	task.spawn(function()
-		while rebuildWatcherRunning do
+		while true do
 			local towerRecords = {}
 			local lastIndex = {}
 
@@ -158,23 +168,14 @@ function startRebuildWatcher(macro, maxLine)
 				local e = macro[i]
 				local axisX = nil
 				if e.TowerVector then
-					local ok, vecTab = pcall(function()
-						return e.TowerVector:split(", ")
-					end)
+					local ok, vecTab = pcall(function() return e.TowerVector:split(", ") end)
 					if ok then
-						local ok2, vec = pcall(function()
-							return Vector3.new(unpack(vecTab))
-						end)
-						if ok2 then axisX = vec.X end
-					else
-						warn("[DEBUG] TowerVector bị lỗi tại dòng", i)
+						local vec = Vector3.new(unpack(vecTab))
+						axisX = vec.X
 					end
-				elseif e.TowerUpgraded then
-					axisX = tonumber(e.TowerUpgraded)
-				elseif e.ChangeTarget then
-					axisX = tonumber(e.ChangeTarget)
-				elseif e.SellTower then
-					axisX = tonumber(e.SellTower)
+				elseif e.TowerUpgraded then axisX = tonumber(e.TowerUpgraded)
+				elseif e.SellTower then axisX = tonumber(e.SellTower)
+				elseif e.ChangeTarget then axisX = tonumber(e.ChangeTarget)
 				end
 
 				if axisX then
@@ -185,59 +186,40 @@ function startRebuildWatcher(macro, maxLine)
 			end
 
 			for axisX, actions in pairs(towerRecords) do
-				local _, tower = GetTowerByAxis(axisX)
+				local lastLine = lastIndex[axisX] or 0
 				local name = "?"
 				for _, act in ipairs(actions) do
-					if act.TowerPlaced then name = act.TowerPlaced end
+					if act.TowerPlaced then name = act.TowerPlaced break end
 				end
 
-				local lastLine = lastIndex[axisX] or 0
-
-				-- DEBUG
-				print("[DEBUG] Kiểm tra tower:", name, "tại X =", axisX)
 				if skipTowers[name] then
-					if skipModeBe and lastLine < rebuildStartIndex then
-						print("→ ❌ Bị SKIP (Be=true & trước dòng rebuild):", name)
-						continue
-					elseif not skipModeBe then
-						print("→ ❌ Bị SKIP:", name)
-						continue
-					end
+					if skipModeBe and lastLine < rebuildStartIndex then continue end
+					if not skipModeBe then continue end
 				end
 
-				if not tower then
-					print("→ 🔥 Tower đã biến mất hoàn toàn tại X =", axisX)
-				elseif tower.HealthHandler and tower.HealthHandler:GetHealth() <= 0 then
-					print("→ 💀 Tower chết nhưng còn tồn tại tại X =", axisX)
-				else
-					print("→ ✅ Tower vẫn sống tại X =", axisX)
-					continue
-				end
-
-				-- Gọi rebuild
-				print("[REBUILD] ⚙️ Gọi rebuild cho:", name, "X =", axisX)
-				for _, record in ipairs(actions) do
-					if record.TowerPlaced and record.TowerVector then
-						local ok, vecTab = pcall(function()
-							return record.TowerVector:split(", ")
-						end)
-						if ok then
-							local vec = Vector3.new(unpack(vecTab))
-							local args = {
-								tonumber(record.TowerA1),
-								record.TowerPlaced,
-								vec,
-								tonumber(record.Rotation or 0)
-							}
-							WaitForCash(record.TowerPlaceCost)
-							PlaceTowerRetry(args, axisX, record.TowerPlaced)
+				if IsTowerMissing(axisX) then
+					print("[REBUILD] ⚙️ Tower biến mất tại X =", axisX, "→", name)
+					for _, record in ipairs(actions) do
+						if record.TowerPlaced and record.TowerVector then
+							local ok, vecTab = pcall(function() return record.TowerVector:split(", ") end)
+							if ok then
+								local vec = Vector3.new(unpack(vecTab))
+								local args = {
+									tonumber(record.TowerA1),
+									record.TowerPlaced,
+									vec,
+									tonumber(record.Rotation or 0)
+								}
+								WaitForCash(record.TowerPlaceCost)
+								PlaceTowerRetry(args, axisX, record.TowerPlaced)
+							end
+						elseif record.TowerUpgraded then
+							UpgradeTowerRetry(axisX, record.UpgradePath)
+						elseif record.ChangeTarget then
+							ChangeTargetRetry(axisX, record.TargetType)
+						elseif record.SellTower then
+							SellTowerRetry(axisX)
 						end
-					elseif record.TowerUpgraded then
-						UpgradeTowerRetry(axisX, record.UpgradePath)
-					elseif record.ChangeTarget then
-						ChangeTargetRetry(axisX, record.TargetType)
-					elseif record.SellTower then
-						SellTowerRetry(axisX)
 					end
 				end
 			end
@@ -270,17 +252,14 @@ for i, entry in ipairs(macro) do
 			}
 			WaitForCash(entry.TowerPlaceCost)
 			PlaceTowerRetry(args, vec.X, entry.TowerPlaced)
-		else
-			warn("[ERROR] TowerVector lỗi tại dòng đặt tower")
 		end
-	elseif entry.TowerUpgraded and entry.UpgradePath then
+	elseif entry.TowerUpgraded then
 		UpgradeTowerRetry(tonumber(entry.TowerUpgraded), entry.UpgradePath)
-	elseif entry.ChangeTarget and entry.TargetType then
+	elseif entry.ChangeTarget then
 		ChangeTargetRetry(tonumber(entry.ChangeTarget), entry.TargetType)
 	elseif entry.SellTower then
 		SellTowerRetry(tonumber(entry.SellTower))
 	end
-	task.wait()
 end
 
-print("✅ Macro + Rebuild đã hoàn tất.")
+print("✅ Macro hoàn tất + đang theo dõi rebuild.")
