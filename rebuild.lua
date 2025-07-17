@@ -1,4 +1,4 @@
--- TDX Macro Runner + Auto Rebuild + Skip/Be Support
+-- TDX Macro Runner - Full with Rebuild + Debug Log
 
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -158,8 +158,17 @@ function startRebuildWatcher(macro, maxLine)
 				local e = macro[i]
 				local axisX = nil
 				if e.TowerVector then
-					local vec = Vector3.new(unpack(e.TowerVector:split(", ")))
-					axisX = vec.X
+					local ok, vecTab = pcall(function()
+						return e.TowerVector:split(", ")
+					end)
+					if ok then
+						local ok2, vec = pcall(function()
+							return Vector3.new(unpack(vecTab))
+						end)
+						if ok2 then axisX = vec.X end
+					else
+						warn("[DEBUG] TowerVector bị lỗi tại dòng", i)
+					end
 				elseif e.TowerUpgraded then
 					axisX = tonumber(e.TowerUpgraded)
 				elseif e.ChangeTarget then
@@ -183,19 +192,37 @@ function startRebuildWatcher(macro, maxLine)
 				end
 
 				local lastLine = lastIndex[axisX] or 0
+
+				-- DEBUG
+				print("[DEBUG] Kiểm tra tower:", name, "tại X =", axisX)
 				if skipTowers[name] then
 					if skipModeBe and lastLine < rebuildStartIndex then
+						print("→ ❌ Bị SKIP (Be=true & trước dòng rebuild):", name)
 						continue
 					elseif not skipModeBe then
+						print("→ ❌ Bị SKIP:", name)
 						continue
 					end
 				end
 
-				if not tower or tower.HealthHandler:GetHealth() <= 0 then
-					print("[REBUILD] 🚨 Tower mất:", name, "X =", axisX)
-					for _, record in ipairs(actions) do
-						if record.TowerPlaced and record.TowerVector then
-							local vec = Vector3.new(unpack(record.TowerVector:split(", ")))
+				if not tower then
+					print("→ 🔥 Tower đã biến mất hoàn toàn tại X =", axisX)
+				elseif tower.HealthHandler and tower.HealthHandler:GetHealth() <= 0 then
+					print("→ 💀 Tower chết nhưng còn tồn tại tại X =", axisX)
+				else
+					print("→ ✅ Tower vẫn sống tại X =", axisX)
+					continue
+				end
+
+				-- Gọi rebuild
+				print("[REBUILD] ⚙️ Gọi rebuild cho:", name, "X =", axisX)
+				for _, record in ipairs(actions) do
+					if record.TowerPlaced and record.TowerVector then
+						local ok, vecTab = pcall(function()
+							return record.TowerVector:split(", ")
+						end)
+						if ok then
+							local vec = Vector3.new(unpack(vecTab))
 							local args = {
 								tonumber(record.TowerA1),
 								record.TowerPlaced,
@@ -204,13 +231,13 @@ function startRebuildWatcher(macro, maxLine)
 							}
 							WaitForCash(record.TowerPlaceCost)
 							PlaceTowerRetry(args, axisX, record.TowerPlaced)
-						elseif record.TowerUpgraded then
-							UpgradeTowerRetry(axisX, record.UpgradePath)
-						elseif record.ChangeTarget then
-							ChangeTargetRetry(axisX, record.TargetType)
-						elseif record.SellTower then
-							SellTowerRetry(axisX)
 						end
+					elseif record.TowerUpgraded then
+						UpgradeTowerRetry(axisX, record.UpgradePath)
+					elseif record.ChangeTarget then
+						ChangeTargetRetry(axisX, record.TargetType)
+					elseif record.SellTower then
+						SellTowerRetry(axisX)
 					end
 				end
 			end
@@ -232,15 +259,20 @@ for i, entry in ipairs(macro) do
 		skipModeBe = entry.Be or false
 		startRebuildWatcher(macro, i)
 	elseif entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
-		local vec = Vector3.new(unpack(entry.TowerVector:split(", ")))
-		local args = {
-			tonumber(entry.TowerA1),
-			entry.TowerPlaced,
-			vec,
-			tonumber(entry.Rotation or 0)
-		}
-		WaitForCash(entry.TowerPlaceCost)
-		PlaceTowerRetry(args, vec.X, entry.TowerPlaced)
+		local ok, vecTab = pcall(function() return entry.TowerVector:split(", ") end)
+		if ok then
+			local vec = Vector3.new(unpack(vecTab))
+			local args = {
+				tonumber(entry.TowerA1),
+				entry.TowerPlaced,
+				vec,
+				tonumber(entry.Rotation or 0)
+			}
+			WaitForCash(entry.TowerPlaceCost)
+			PlaceTowerRetry(args, vec.X, entry.TowerPlaced)
+		else
+			warn("[ERROR] TowerVector lỗi tại dòng đặt tower")
+		end
 	elseif entry.TowerUpgraded and entry.UpgradePath then
 		UpgradeTowerRetry(tonumber(entry.TowerUpgraded), entry.UpgradePath)
 	elseif entry.ChangeTarget and entry.TargetType then
@@ -251,4 +283,4 @@ for i, entry in ipairs(macro) do
 	task.wait()
 end
 
-print("✅ Macro + Rebuild hoàn tất.")
+print("✅ Macro + Rebuild đã hoàn tất.")
