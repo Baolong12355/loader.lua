@@ -137,9 +137,9 @@ end
 
 -- 📦 LOAD MACRO
 local config = getgenv().TDX_Config or {}
-local macroName = config["Macro Name"] or "default"
+local macroName = config["Macro Name"] or "event"
 local macroPath = "tdx/macros/" .. macroName .. ".json"
-globalPlaceMode = config["PlaceMode"] or "ashed"
+globalPlaceMode = config["PlaceMode"] or "rewrite"
 
 if not isfile(macroPath) then error("Không tìm thấy macro: " .. macroPath) end
 local success, macro = pcall(function() return HttpService:JSONDecode(readfile(macroPath)) end)
