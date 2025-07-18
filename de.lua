@@ -8,7 +8,7 @@ local fileName = "record.txt" local macroPath = "tdx/naviai.json" local startTim
 
 if isfile(fileName) then delfile(fileName) end writefile(fileName, "")
 
-local pending = nil local timeout = 2 local isRebuilding = false local enableRebuild = true
+local pending = nil local timeout = 2 local isRebuilding = false local enableRebuild = true local soldAxis = {}
 
 local function serialize(v) if typeof(v) == "Vector3" then return string.format("Vector3.new(%s,%s,%s)", v.X, v.Y, v.Z) elseif typeof(v) == "Vector2int16" then return string.format("Vector2int16.new(%s,%s)", v.X, v.Y) elseif type(v) == "table" then local out = {} for k, val in pairs(v) do table.insert(out, string.format("[%s]=%s", tostring(k), serialize(val))) end return "{" .. table.concat(out, ",") .. "}" else return tostring(v) end end
 
@@ -18,9 +18,9 @@ local function confirmAndWrite() if not pending or isRebuilding then return end 
 
 local function tryConfirm(typeStr) if pending and pending.type == typeStr then confirmAndWrite() end end
 
-local function setPending(typeStr, code) pending = { type = typeStr, code = code, created = tick() } end
+local function setPending(typeStr, code) if typeStr == "Sell" then local match = string.match(code, "TDX:sellTower%((.-)%)") if match then local args = loadstring("return {" .. match .. "}")() if args and typeof(args[1]) == "number" then soldAxis[args[1]] = true end end end pending = { type = typeStr, code = code, created = tick() } end
 
-ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data) local d = data[1] if not d then return end if d.Creation then tryConfirm("Place") else tryConfirm("Sell") end end)
+ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data) local d = data[1] if not d then return end tryConfirm(d.Creation and "Place" or "Sell") end)
 
 ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data) if data[1] then tryConfirm("Upgrade") end end)
 
@@ -30,9 +30,7 @@ spawn(function() while true do task.wait(0.3) if pending and tick() - pending.cr
 
 local oldNamecall = hookmetamethod(game, "__namecall", function(self, ...) if not isRebuilding and not checkcaller() then local method = getnamecallmethod() if method == "FireServer" or method == "InvokeServer" then local args = serializeArgs(...) local name = self.Name if name == "PlaceTower" then setPending("Place", "TDX:placeTower(" .. args .. ")") elseif name == "SellTower" then setPending("Sell", "TDX:sellTower(" .. args .. ")") elseif name == "TowerUpgradeRequest" then setPending("Upgrade", "TDX:upgradeTower(" .. args .. ")") elseif name == "ChangeQueryType" then setPending("Target", "TDX:changeQueryType(" .. args .. ")") end end end return oldNamecall(self, ...) end)
 
-local TowerClass do local client = player:WaitForChild("PlayerScripts"):WaitForChild("Client") local gameClass = client:WaitForChild("GameClass") local towerModule = gameClass:WaitForChild("TowerClass") TowerClass = require(towerModule) end
-
-local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local TowerClass = require(player:WaitForChild("PlayerScripts"):WaitForChild("Client"):WaitForChild("GameClass"):WaitForChild("TowerClass")) local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
 local function GetTowerByAxis(axisX) for _, tower in pairs(TowerClass.GetTowers()) do local model = tower.Character and tower.Character:GetCharacterModel() local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")) if root and root.Position.X == axisX then return tower end end end
 
@@ -40,7 +38,7 @@ local function GetCurrentUpgradeCost(tower, path) if not tower or not tower.Leve
 
 local function WaitForCash(amount) while cashStat.Value < amount do task.wait() end end
 
-local function PlaceTowerRetry(args, axisValue) while true do Remotes.PlaceTower:InvokeServer(unpack(args)) task.wait(0.1) if GetTowerByAxis(axisValue) then return end end end
+local function PlaceTowerRetry(args, axisValue) if soldAxis[axisValue] then return end while true do Remotes.PlaceTower:InvokeServer(unpack(args)) task.wait(0.1) if GetTowerByAxis(axisValue) then return end end end
 
 local function UpgradeTowerRetry(axisValue, path) while true do local tower = GetTowerByAxis(axisValue) if not tower then task.wait() continue end local before = tower.LevelHandler:GetLevelOnPath(path) local cost = GetCurrentUpgradeCost(tower, path) if not cost then return end WaitForCash(cost) Remotes.TowerUpgradeRequest:FireServer(tower.Hash, path, 1) task.wait(0.1) local t = GetTowerByAxis(axisValue) if t and t.LevelHandler:GetLevelOnPath(path) > before then return end end end
 
@@ -51,8 +49,10 @@ if isfile(macroPath) then local success, macro = pcall(function() return HttpSer
 print("📌 Recorder + Auto Rebuild Ready with correct hook.")
 
 
+
+
 local txtFile = "record.txt"
-local outJson = "tdx/macros/x.json"
+local outJson = "tdx/naviai.json"
 
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
