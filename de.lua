@@ -287,7 +287,6 @@ local function StartSmartRebuild(macro)
 end
 
 
-
 -- 🚀 Initialize System
 if isfile(macroPath) then
     local success, macro = pcall(function()
