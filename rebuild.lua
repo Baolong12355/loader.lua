@@ -1,10 +1,10 @@
--- 📦 TDX Runner & Rebuilder (Full Script - Executor Compatible + Full Skip/Be Logic + Debug)
+-- 📦 TDX Runner & Rebuilder (Full Script - Executor Compatible + Full Skip/Be Logic + Debug + Infinite Rebuild)
 
 warn("📦 TDX Runner khởi động...")
 
 local HttpService = game:GetService("HttpService") local ReplicatedStorage = game:GetService("ReplicatedStorage") local Players = game:GetService("Players") local player = Players.LocalPlayer local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash") local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
-getgenv().TDX_Config = getgenv().TDX_Config or { ["Macro Name"] = "event", ["PlaceMode"] = "rewrite" }
+getgenv().TDX_Config = getgenv().TDX_Config or { ["Macro Name"] = "event", ["PlaceMode"] = "rewrite", ["ForceRebuildEvenIfSold"] = false, ["MaxRebuildRetry"] = nil -- nil = infinite }
 
 local function SafeRequire(path, timeout) timeout = timeout or 5 local t0 = os.clock() while os.clock() - t0 < timeout do local success, result = pcall(function() return require(path) end) if success then return result end task.wait() end return nil end
 
@@ -28,7 +28,7 @@ local function UpgradeTowerRetry(axisValue, path) local tries = 0 while true do 
 
 local function ChangeTargetRetry(axisValue, targetType) while true do local hash = GetTowerByAxis(axisValue) if hash then Remotes.ChangeQueryType:FireServer(hash, targetType) LogDebug("TARGET", axisValue, targetType) SaveDebugLog() return end task.wait() end end
 
-local function SellTowerRetry(axisValue) while true do local hash = GetTowerByAxis(axisValue) if hash then Remotes.SellTower:FireServer(hash) task.wait(0.1) if not GetTowerByAxis(axisValue) then LogDebug("SOLD", axisValue) SaveDebugLog() return end end task.wait() end end
+local function SellTowerRetry(axisValue) while true do local hash = GetTowerByAxis(axisValue) if hash then Remotes.SellTower:FireServer(hash) task.wait(0.1) if not GetTowerByAxis(axisValue) then LogDebug("SOLD", axisValue) soldPositions = soldPositions or {} soldPositions[axisValue] = true SaveDebugLog() return end end task.wait() end end
 
 local config = getgenv().TDX_Config or {} local macroName = config["Macro Name"] or "event" local macroPath = "tdx/macros/" .. macroName .. ".json" globalPlaceMode = config["PlaceMode"] or "normal" if globalPlaceMode == "unsure" then globalPlaceMode = "rewrite" end if globalPlaceMode == "normal" then globalPlaceMode = "ashed" end
 
@@ -38,7 +38,7 @@ local success, macro = pcall(function() return HttpService:JSONDecode(readfile(m
 
 warn("📄 Macro tải thành công. Tổng dòng:", #macro)
 
-local towerRecords = {} local skipTypesMap = {} local rebuildLine = nil local watcherStarted = false
+local towerRecords, skipTypesMap, soldPositions = {}, {}, {} local rebuildAttempts, rebuildLine, watcherStarted = {}, nil, false
 
 for i, entry in ipairs(macro) do if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then local vecTab = entry.TowerVector:split(", ") local pos = Vector3.new(unpack(vecTab)) local args = { tonumber(entry.TowerA1), entry.TowerPlaced, pos, tonumber(entry.Rotation or 0) } WaitForCash(entry.TowerPlaceCost) PlaceTowerRetry(args, pos.X, entry.TowerPlaced) towerRecords[pos.X] = towerRecords[pos.X] or {} table.insert(towerRecords[pos.X], { line = i, entry = entry })
 
@@ -74,11 +74,13 @@ elseif entry.SuperFunction == "rebuild" then
                 for x, records in pairs(towerRecords) do
                     local _, t = GetTowerByAxis(x)
                     if not t then
+                        if soldPositions[x] and not config.ForceRebuildEvenIfSold then
+                            LogDebug("SKIP (Sold)", x)
+                            continue
+                        end
                         local type, firstLine = nil, math.huge
                         for _, e in ipairs(records) do
-                            if e.entry.TowerPlaced then
-                                type = e.entry.TowerPlaced
-                            end
+                            if e.entry.TowerPlaced then type = e.entry.TowerPlaced end
                             if e.line < firstLine then firstLine = e.line end
                         end
                         local skipRule = skipTypesMap[type]
@@ -90,6 +92,12 @@ elseif entry.SuperFunction == "rebuild" then
                                 LogDebug("SKIP (Be=false)", type, x)
                                 continue
                             end
+                        end
+                        rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                        local maxRetry = config.MaxRebuildRetry
+                        if maxRetry and rebuildAttempts[x] > maxRetry then
+                            LogDebug("SKIP (MaxRetry)", type, x)
+                            continue
                         end
                         LogDebug("REBUILDING", type or "Unknown", x)
                         for _, e in ipairs(records) do
