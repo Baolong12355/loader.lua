@@ -1,4 +1,4 @@
--- ✅ TDX Macro Recorder with Auto Rebuild Integration (Hooked like original record)
+
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage") local Players = game:GetService("Players") local HttpService = game:GetService("HttpService") local player = Players.LocalPlayer local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 
