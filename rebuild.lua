@@ -1,3 +1,5 @@
+-- 📦 TDX Runner & Rebuilder (Full Script - Executor Compatible)
+
 warn("📦 TDX Runner khởi động...")
 
 local HttpService = game:GetService("HttpService") local ReplicatedStorage = game:GetService("ReplicatedStorage") local Players = game:GetService("Players") local player = Players.LocalPlayer local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash") local Remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -12,9 +14,7 @@ TowerClass = TowerClass or LoadTowerClass() if not TowerClass then error("TowerC
 
 local debugLines = {} local function LogDebug(...) local msg = "[" .. os.date("%X") .. "] " .. table.concat({...}, " ") print(msg) table.insert(debugLines, msg) end
 
-local function SaveDebugLog() local content = table.concat(debugLines, "\n") writefile("log_rebuild.txt", content) end
-
-game:BindToClose(function() SaveDebugLog() end)
+local function SaveDebugLog() local content = table.concat(debugLines, "\n") pcall(function() writefile("log_rebuild.txt", content) end) end
 
 local function GetTowerByAxis(axisX) for hash, tower in pairs(TowerClass.GetTowers()) do local success, pos, name = pcall(function() local model = tower.Character:GetCharacterModel() local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")) return root and root.Position, model and (root and root.Name or model.Name) end) if success and pos and pos.X == axisX then local hp = tower.HealthHandler and tower.HealthHandler:GetHealth() if hp and hp > 0 then return hash, tower, name or "(NoName)" else LogDebug("HP0", axisX) end end end LogDebug("MISSING", axisX) return nil, nil, nil end
 
@@ -22,13 +22,13 @@ local function GetCurrentUpgradeCost(tower, path) if not tower or not tower.Leve
 
 local function WaitForCash(amount) while cashStat.Value < amount do task.wait() end end
 
-local function PlaceTowerRetry(args, axisValue, towerName) while true do Remotes.PlaceTower:InvokeServer(unpack(args)) local t0 = tick() repeat task.wait(0.1) until tick() - t0 > 2 or GetTowerByAxis(axisValue) if GetTowerByAxis(axisValue) then LogDebug("PLACED", towerName, axisValue) return end LogDebug("RETRY PLACE", towerName, axisValue) end end
+local function PlaceTowerRetry(args, axisValue, towerName) while true do Remotes.PlaceTower:InvokeServer(unpack(args)) local t0 = tick() repeat task.wait(0.1) until tick() - t0 > 2 or GetTowerByAxis(axisValue) if GetTowerByAxis(axisValue) then LogDebug("PLACED", towerName, axisValue) SaveDebugLog() return end LogDebug("RETRY PLACE", towerName, axisValue) SaveDebugLog() end end
 
-local function UpgradeTowerRetry(axisValue, path) local tries = 0 while true do local hash, tower = GetTowerByAxis(axisValue) if not hash then tries += 1 task.wait() continue end local before = tower.LevelHandler:GetLevelOnPath(path) local cost = GetCurrentUpgradeCost(tower, path) if not cost then return end WaitForCash(cost) Remotes.TowerUpgradeRequest:FireServer(hash, path, 1) local t0 = tick() repeat task.wait(0.1) local _, t = GetTowerByAxis(axisValue) if t and t.LevelHandler:GetLevelOnPath(path) > before then LogDebug("UPGRADED", axisValue, path) return end until tick() - t0 > 2 tries += 1 task.wait() end end
+local function UpgradeTowerRetry(axisValue, path) local tries = 0 while true do local hash, tower = GetTowerByAxis(axisValue) if not hash then tries += 1 task.wait() continue end local before = tower.LevelHandler:GetLevelOnPath(path) local cost = GetCurrentUpgradeCost(tower, path) if not cost then return end WaitForCash(cost) Remotes.TowerUpgradeRequest:FireServer(hash, path, 1) local t0 = tick() repeat task.wait(0.1) local _, t = GetTowerByAxis(axisValue) if t and t.LevelHandler:GetLevelOnPath(path) > before then LogDebug("UPGRADED", axisValue, path) SaveDebugLog() return end until tick() - t0 > 2 tries += 1 task.wait() end end
 
-local function ChangeTargetRetry(axisValue, targetType) while true do local hash = GetTowerByAxis(axisValue) if hash then Remotes.ChangeQueryType:FireServer(hash, targetType) LogDebug("TARGET", axisValue, targetType) return end task.wait() end end
+local function ChangeTargetRetry(axisValue, targetType) while true do local hash = GetTowerByAxis(axisValue) if hash then Remotes.ChangeQueryType:FireServer(hash, targetType) LogDebug("TARGET", axisValue, targetType) SaveDebugLog() return end task.wait() end end
 
-local function SellTowerRetry(axisValue) while true do local hash = GetTowerByAxis(axisValue) if hash then Remotes.SellTower:FireServer(hash) task.wait(0.1) if not GetTowerByAxis(axisValue) then LogDebug("SOLD", axisValue) return end end task.wait() end end
+local function SellTowerRetry(axisValue) while true do local hash = GetTowerByAxis(axisValue) if hash then Remotes.SellTower:FireServer(hash) task.wait(0.1) if not GetTowerByAxis(axisValue) then LogDebug("SOLD", axisValue) SaveDebugLog() return end end task.wait() end end
 
 local config = getgenv().TDX_Config or {} local macroName = config["Macro Name"] or "event" local macroPath = "tdx/macros/" .. macroName .. ".json" globalPlaceMode = config["PlaceMode"] or "normal" if globalPlaceMode == "unsure" then globalPlaceMode = "rewrite" end if globalPlaceMode == "normal" then globalPlaceMode = "ashed" end
 
@@ -102,9 +102,10 @@ elseif entry.SuperFunction == "rebuild" then
                                 SellTowerRetry(tonumber(e.SellTower))
                             end
                         end
+                        SaveDebugLog()
                     end
                 end
-                task.wait(0.25)
+                task.wait(2)
             end
         end)
     end
