@@ -157,7 +157,157 @@ local function GetTowerByAxis(axisX)
     return nil, nil, nil
 end
 
--- ... (giữ nguyên các hàm helper khác như WaitForCash, PlaceTowerRetry, UpgradeTowerRetry, etc.) ...
+local function GetCurrentUpgradeCost(tower, path)
+    if not tower or not tower.LevelHandler then return nil end
+    local maxLvl = tower.LevelHandler:GetMaxLevel()
+    local curLvl = tower.LevelHandler:GetLevelOnPath(path)
+    if curLvl >= maxLvl then return nil end
+    local ok, baseCost = pcall(function() return tower.LevelHandler:GetLevelUpgradeCost(path, 1) end)
+    if not ok then return nil end
+    local disc = 0
+    local ok2, d = pcall(function() return tower.BuffHandler and tower.BuffHandler:GetDiscount() or 0 end)
+    if ok2 and typeof(d) == "number" then disc = d end
+    return math.floor(baseCost * (1 - disc))
+end
+
+local function WaitForCash(amount)
+    while cashStat.Value < amount do task.wait() end
+end
+
+local function PlaceTowerRetry(args, axisValue, towerName)
+    while true do
+        Remotes.PlaceTower:InvokeServer(unpack(args))
+        local t0 = tick()
+        repeat task.wait(0.1) until tick() - t0 > 2 or GetTowerByAxis(axisValue)
+        if GetTowerByAxis(axisValue) then return end
+    end
+end
+
+local function UpgradeTowerRetry(axisValue, path)
+    while true do
+        local hash, tower = GetTowerByAxis(axisValue)
+        if not hash then task.wait() continue end
+        
+        local before = tower.LevelHandler:GetLevelOnPath(path)
+        local cost = GetCurrentUpgradeCost(tower, path)
+        if not cost then return end
+        
+        WaitForCash(cost)
+        Remotes.TowerUpgradeRequest:FireServer(hash, path, 1)
+        
+        local t0 = tick()
+        repeat
+            task.wait(0.1)
+            local _, t = GetTowerByAxis(axisValue)
+            if t and t.LevelHandler:GetLevelOnPath(path) > before then return end
+        until tick() - t0 > 2
+    end
+end
+
+local function ChangeTargetRetry(axisValue, targetType)
+    while true do
+        local hash = GetTowerByAxis(axisValue)
+        if hash then
+            Remotes.ChangeQueryType:FireServer(hash, targetType)
+            return
+        end
+        task.wait()
+    end
+end
+
+local function SellTowerRetry(axisValue)
+    while true do
+        local hash = GetTowerByAxis(axisValue)
+        if hash then
+            Remotes.SellTower:FireServer(hash)
+            task.wait(0.1)
+            if not GetTowerByAxis(axisValue) then return true end
+        end
+        task.wait()
+    end
+end
+
+-- Cơ chế rebuild với ưu tiên
+local function StartPriorityRebuildWatcher(towerRecords, rebuildLine, skipTypesMap)
+    local soldPositions = {}
+    local rebuildAttempts = {}
+    
+    while true do
+        -- Sắp xếp các tháp cần rebuild theo độ ưu tiên
+        local rebuildQueue = {}
+        for x, records in pairs(towerRecords) do
+            local _, t, name = GetTowerByAxis(x)
+            if not t then
+                if soldPositions[x] and not getgenv().TDX_Config.ForceRebuildEvenIfSold then
+                    continue
+                end
+                
+                local towerType
+                for _, record in ipairs(records) do
+                    if record.entry.TowerPlaced then towerType = record.entry.TowerPlaced end
+                end
+                
+                local skipRule = skipTypesMap[towerType]
+                if skipRule then
+                    if skipRule.beOnly and records[1].line < skipRule.fromLine then
+                        continue
+                    elseif not skipRule.beOnly then
+                        continue
+                    end
+                end
+                
+                rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                local maxRetry = getgenv().TDX_Config.MaxRebuildRetry
+                if maxRetry and rebuildAttempts[x] > maxRetry then
+                    continue
+                end
+                
+                table.insert(rebuildQueue, {
+                    x = x,
+                    records = records,
+                    priority = GetTowerPriority(towerType),
+                    name = towerType or "Unknown"
+                })
+            end
+        end
+        
+        -- Sắp xếp theo độ ưu tiên
+        table.sort(rebuildQueue, function(a, b)
+            if a.priority == b.priority then
+                return a.x < b.x
+            end
+            return a.priority < b.priority
+        end)
+        
+        -- Thực hiện rebuild theo thứ tự ưu tiên
+        for _, item in ipairs(rebuildQueue) do
+            for _, record in ipairs(item.records) do
+                local action = record.entry
+                if action.TowerPlaced then
+                    local vecTab = action.TowerVector:split(", ")
+                    local pos = Vector3.new(unpack(vecTab))
+                    local args = {
+                        tonumber(action.TowerA1), 
+                        action.TowerPlaced, 
+                        pos, 
+                        tonumber(action.Rotation or 0)
+                    }
+                    WaitForCash(action.TowerPlaceCost)
+                    PlaceTowerRetry(args, pos.X, action.TowerPlaced)
+                elseif action.TowerUpgraded then
+                    UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath)
+                elseif action.ChangeTarget then
+                    ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
+                elseif action.SellTower then
+                    SellTowerRetry(tonumber(action.SellTower))
+                end
+                task.wait(0.1)
+            end
+        end
+        
+        task.wait(0.25)
+    end
+end
 
 -- Main execution
 local config = getgenv().TDX_Config
