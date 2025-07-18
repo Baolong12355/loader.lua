@@ -1,4 +1,4 @@
--- 📦 TDX Runner & Rebuilder (Priority Rebuild + SellAll + Full Features)
+-- đŸ“¦ TDX Runner & Rebuilder (Priority Rebuild + SellAll + Full Features)
 
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,23 +7,15 @@ local player = Players.LocalPlayer
 local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
--- Cấu hình
+-- Cáº¥u hĂ¬nh
 getgenv().TDX_Config = getgenv().TDX_Config or {
     ["Macro Name"] = "event",
     ["PlaceMode"] = "rewrite",
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil, -- nil = infinite
     ["SellAllDelay"] = 0.1,
-    ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"}, -- Danh sách ưu tiên
-    ["RebuildCheckInterval"] = 0.25 -- Thời gian kiểm tra rebuild
+    ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"} -- Danh sĂ¡ch Æ°u tiĂªn
 }
-
--- Biến toàn cục
-local macroPaused = false
-local currentMacroIndex = 1
-local towerRecords = {}
-local skipTypesMap = {}
-local rebuildLine = nil
 
 local function SafeRequire(path, timeout)
     timeout = timeout or 5
@@ -47,81 +39,17 @@ end
 TowerClass = TowerClass or LoadTowerClass()
 if not TowerClass then return end
 
--- Hàm xác định độ ưu tiên
+-- HĂ m xĂ¡c Ä‘á»‹nh Ä‘á»™ Æ°u tiĂªn
 local function GetTowerPriority(towerName)
     for priority, name in ipairs(getgenv().TDX_Config.PriorityRebuildOrder or {}) do
         if towerName == name then
             return priority
         end
     end
-    return math.huge -- Mức ưu tiên thấp nhất nếu không có trong danh sách
+    return math.huge -- Má»©c Æ°u tiĂªn tháº¥p nháº¥t náº¿u khĂ´ng cĂ³ trong danh sĂ¡ch
 end
 
--- Hàm kiểm tra tháp ưu tiên bị phá hủy
-local function CheckPriorityTowersDestroyed()
-    for x, records in pairs(towerRecords) do
-        local _, t, name = GetTowerByAxis(x)
-        if not t and GetTowerPriority(name) <= #getgenv().TDX_Config.PriorityRebuildOrder then
-            return true, x, name
-        end
-    end
-    return false
-end
-
--- Hàm rebuild tháp cụ thể
-local function RebuildTower(x, records)
-    local soldPositions = {}
-    local rebuildAttempts = {}
-    
-    if soldPositions[x] and not getgenv().TDX_Config.ForceRebuildEvenIfSold then
-        return
-    end
-    
-    local towerType
-    for _, record in ipairs(records) do
-        if record.entry.TowerPlaced then towerType = record.entry.TowerPlaced end
-    end
-    
-    local skipRule = skipTypesMap[towerType]
-    if skipRule then
-        if skipRule.beOnly and records[1].line < skipRule.fromLine then
-            return
-        elseif not skipRule.beOnly then
-            return
-        end
-    end
-    
-    rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
-    local maxRetry = getgenv().TDX_Config.MaxRebuildRetry
-    if maxRetry and rebuildAttempts[x] > maxRetry then
-        return
-    end
-    
-    for _, record in ipairs(records) do
-        local action = record.entry
-        if action.TowerPlaced then
-            local vecTab = action.TowerVector:split(", ")
-            local pos = Vector3.new(unpack(vecTab))
-            local args = {
-                tonumber(action.TowerA1), 
-                action.TowerPlaced, 
-                pos, 
-                tonumber(action.Rotation or 0)
-            }
-            WaitForCash(action.TowerPlaceCost)
-            PlaceTowerRetry(args, pos.X, action.TowerPlaced)
-        elseif action.TowerUpgraded then
-            UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath)
-        elseif action.ChangeTarget then
-            ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
-        elseif action.SellTower then
-            SellTowerRetry(tonumber(action.SellTower))
-        end
-        task.wait(0.1)
-    end
-end
-
--- Hàm SellAll hoàn chỉnh
+-- HĂ m SellAll hoĂ n chá»‰nh
 local function SellAllTowers(skipList)
     local skipMap = {}
     if skipList then
@@ -227,13 +155,13 @@ local function SellTowerRetry(axisValue)
     end
 end
 
--- Cơ chế rebuild với ưu tiên
+-- CÆ¡ cháº¿ rebuild vá»›i Æ°u tiĂªn
 local function StartPriorityRebuildWatcher(towerRecords, rebuildLine, skipTypesMap)
     local soldPositions = {}
     local rebuildAttempts = {}
     
     while true do
-        -- Sắp xếp các tháp cần rebuild theo độ ưu tiên
+        -- Sáº¯p xáº¿p cĂ¡c thĂ¡p cáº§n rebuild theo Ä‘á»™ Æ°u tiĂªn
         local rebuildQueue = {}
         for x, records in pairs(towerRecords) do
             local _, t, name = GetTowerByAxis(x)
@@ -271,7 +199,7 @@ local function StartPriorityRebuildWatcher(towerRecords, rebuildLine, skipTypesM
             end
         end
         
-        -- Sắp xếp theo độ ưu tiên
+        -- Sáº¯p xáº¿p theo Ä‘á»™ Æ°u tiĂªn
         table.sort(rebuildQueue, function(a, b)
             if a.priority == b.priority then
                 return a.x < b.x
@@ -279,7 +207,7 @@ local function StartPriorityRebuildWatcher(towerRecords, rebuildLine, skipTypesM
             return a.priority < b.priority
         end)
         
-        -- Thực hiện rebuild theo thứ tự ưu tiên
+        -- Thá»±c hiá»‡n rebuild theo thá»© tá»± Æ°u tiĂªn
         for _, item in ipairs(rebuildQueue) do
             for _, record in ipairs(item.records) do
                 local action = record.entry
@@ -318,80 +246,49 @@ if not isfile(macroPath) then return end
 local ok, macro = pcall(function() return HttpService:JSONDecode(readfile(macroPath)) end)
 if not ok or type(macro) ~= "table" then return end
 
--- Chạy macro với kiểm tra ưu tiên
-task.spawn(function()
-    while currentMacroIndex <= #macro do
-        -- Kiểm tra tháp ưu tiên bị phá hủy
-        local priorityDestroyed, x, name = CheckPriorityTowersDestroyed()
-        if priorityDestroyed then
-            macroPaused = true
-            warn("⏸️ Tạm dừng macro để rebuild tháp ưu tiên:", name)
-            
-            -- Rebuild tháp ưu tiên
-            RebuildTower(x, towerRecords[x])
-            
-            macroPaused = false
-            warn("▶️ Tiếp tục macro sau khi rebuild xong")
-        end
-        
-        if not macroPaused then
-            local entry = macro[currentMacroIndex]
-            
-            if entry.SuperFunction == "sell_all" then
-                SellAllTowers(entry.Skip)
-            elseif entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
-                local vecTab = entry.TowerVector:split(", ")
-                local pos = Vector3.new(unpack(vecTab))
-                local args = {
-                    tonumber(entry.TowerA1),
-                    entry.TowerPlaced,
-                    pos,
-                    tonumber(entry.Rotation or 0)
-                }
-                WaitForCash(entry.TowerPlaceCost)
-                PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
-                towerRecords[pos.X] = towerRecords[pos.X] or {}
-                table.insert(towerRecords[pos.X], { line = currentMacroIndex, entry = entry })
-            elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
-                local axis = tonumber(entry.TowerUpgraded)
-                UpgradeTowerRetry(axis, entry.UpgradePath)
-                towerRecords[axis] = towerRecords[axis] or {}
-                table.insert(towerRecords[axis], { line = currentMacroIndex, entry = entry })
-            elseif entry.ChangeTarget and entry.TargetType then
-                local axis = tonumber(entry.ChangeTarget)
-                ChangeTargetRetry(axis, entry.TargetType)
-                towerRecords[axis] = towerRecords[axis] or {}
-                table.insert(towerRecords[axis], { line = currentMacroIndex, entry = entry })
-            elseif entry.SellTower then
-                local axis = tonumber(entry.SellTower)
-                SellTowerRetry(axis)
-                towerRecords[axis] = towerRecords[axis] or {}
-                table.insert(towerRecords[axis], { line = currentMacroIndex, entry = entry })
-            elseif entry.SuperFunction == "rebuild" then
-                rebuildLine = currentMacroIndex
-                for _, skip in ipairs(entry.Skip or {}) do
-                    skipTypesMap[skip] = { beOnly = entry.Be == true, fromLine = currentMacroIndex }
-                end
-            end
-            
-            currentMacroIndex = currentMacroIndex + 1
-        end
-        
-        task.wait(config.RebuildCheckInterval or 0.25)
-    end
-end)
+local towerRecords, skipTypesMap = {}, {}
+local rebuildLine, watcherStarted = nil, false
 
--- Watcher cho các tháp không ưu tiên
-task.spawn(function()
-    while true do
-        if not macroPaused then
-            for x, records in pairs(towerRecords) do
-                local _, t, name = GetTowerByAxis(x)
-                if not t and GetTowerPriority(name) > #getgenv().TDX_Config.PriorityRebuildOrder then
-                    RebuildTower(x, records)
-                end
-            end
+for i, entry in ipairs(macro) do
+    if entry.SuperFunction == "sell_all" then
+        SellAllTowers(entry.Skip)
+    elseif entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
+        local vecTab = entry.TowerVector:split(", ")
+        local pos = Vector3.new(unpack(vecTab))
+        local args = {
+            tonumber(entry.TowerA1),
+            entry.TowerPlaced,
+            pos,
+            tonumber(entry.Rotation or 0)
+        }
+        WaitForCash(entry.TowerPlaceCost)
+        PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
+        towerRecords[pos.X] = towerRecords[pos.X] or {}
+        table.insert(towerRecords[pos.X], { line = i, entry = entry })
+    elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
+        local axis = tonumber(entry.TowerUpgraded)
+        UpgradeTowerRetry(axis, entry.UpgradePath)
+        towerRecords[axis] = towerRecords[axis] or {}
+        table.insert(towerRecords[axis], { line = i, entry = entry })
+    elseif entry.ChangeTarget and entry.TargetType then
+        local axis = tonumber(entry.ChangeTarget)
+        ChangeTargetRetry(axis, entry.TargetType)
+        towerRecords[axis] = towerRecords[axis] or {}
+        table.insert(towerRecords[axis], { line = i, entry = entry })
+    elseif entry.SellTower then
+        local axis = tonumber(entry.SellTower)
+        SellTowerRetry(axis)
+        towerRecords[axis] = towerRecords[axis] or {}
+        table.insert(towerRecords[axis], { line = i, entry = entry })
+    elseif entry.SuperFunction == "rebuild" then
+        rebuildLine = i
+        for _, skip in ipairs(entry.Skip or {}) do
+            skipTypesMap[skip] = { beOnly = entry.Be == true, fromLine = i }
         end
-        task.wait(config.RebuildCheckInterval or 0.25)
+
+        if not watcherStarted then
+            watcherStarted = true
+            task.spawn(StartPriorityRebuildWatcher, towerRecords, rebuildLine, skipTypesMap)
+        end
     end
-end)
+end
