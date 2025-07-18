@@ -105,7 +105,7 @@ elseif entry.SuperFunction == "rebuild" then
                         SaveDebugLog()
                     end
                 end
-                task.wait(2)
+                task.wait(0.25)
             end
         end)
     end
