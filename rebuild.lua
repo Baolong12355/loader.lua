@@ -1,4 +1,4 @@
--- 📦 TDX Runner & Rebuilder (Full Script - Executor Compatible)
+-- 📦 TDX Runner & Rebuilder (Full Script - Executor Compatible + Full Skip/Be Logic + Debug)
 
 warn("📦 TDX Runner khởi động...")
 
@@ -38,32 +38,34 @@ local success, macro = pcall(function() return HttpService:JSONDecode(readfile(m
 
 warn("📄 Macro tải thành công. Tổng dòng:", #macro)
 
-local towerRecords = {} local skipTypes = {} local skipBeOnly = false local watcherStarted = false
+local towerRecords = {} local skipTypesMap = {} local rebuildLine = nil local watcherStarted = false
 
-for i, entry in ipairs(macro) do if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then local vecTab = entry.TowerVector:split(", ") local pos = Vector3.new(unpack(vecTab)) local args = { tonumber(entry.TowerA1), entry.TowerPlaced, pos, tonumber(entry.Rotation or 0) } WaitForCash(entry.TowerPlaceCost) PlaceTowerRetry(args, pos.X, entry.TowerPlaced) towerRecords[pos.X] = towerRecords[pos.X] or {} table.insert(towerRecords[pos.X], entry)
+for i, entry in ipairs(macro) do if entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then local vecTab = entry.TowerVector:split(", ") local pos = Vector3.new(unpack(vecTab)) local args = { tonumber(entry.TowerA1), entry.TowerPlaced, pos, tonumber(entry.Rotation or 0) } WaitForCash(entry.TowerPlaceCost) PlaceTowerRetry(args, pos.X, entry.TowerPlaced) towerRecords[pos.X] = towerRecords[pos.X] or {} table.insert(towerRecords[pos.X], { line = i, entry = entry })
 
 elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
     local axis = tonumber(entry.TowerUpgraded)
     UpgradeTowerRetry(axis, entry.UpgradePath)
     towerRecords[axis] = towerRecords[axis] or {}
-    table.insert(towerRecords[axis], entry)
+    table.insert(towerRecords[axis], { line = i, entry = entry })
 
 elseif entry.ChangeTarget and entry.TargetType then
     local axis = tonumber(entry.ChangeTarget)
     ChangeTargetRetry(axis, entry.TargetType)
     towerRecords[axis] = towerRecords[axis] or {}
-    table.insert(towerRecords[axis], entry)
+    table.insert(towerRecords[axis], { line = i, entry = entry })
 
 elseif entry.SellTower then
     local axis = tonumber(entry.SellTower)
     SellTowerRetry(axis)
     towerRecords[axis] = towerRecords[axis] or {}
-    table.insert(towerRecords[axis], entry)
+    table.insert(towerRecords[axis], { line = i, entry = entry })
 
 elseif entry.SuperFunction == "rebuild" then
     warn("🛠️ Phát hiện dòng rebuild tại dòng:", i)
-    skipBeOnly = entry.Be == true
-    skipTypes = entry.Skip or {}
+    rebuildLine = i
+    for _, skip in ipairs(entry.Skip or {}) do
+        skipTypesMap[skip] = { beOnly = entry.Be == true, fromLine = i }
+    end
 
     if not watcherStarted then
         watcherStarted = true
@@ -72,34 +74,40 @@ elseif entry.SuperFunction == "rebuild" then
                 for x, records in pairs(towerRecords) do
                     local _, t = GetTowerByAxis(x)
                     if not t then
-                        local type = nil
+                        local type, firstLine = nil, math.huge
                         for _, e in ipairs(records) do
-                            type = e.TowerPlaced or type
+                            if e.entry.TowerPlaced then
+                                type = e.entry.TowerPlaced
+                            end
+                            if e.line < firstLine then firstLine = e.line end
                         end
-                        local shouldSkip = false
-                        for _, skip in ipairs(skipTypes) do
-                            if skip == type then
-                                shouldSkip = true
-                                break
+                        local skipRule = skipTypesMap[type]
+                        if skipRule then
+                            if skipRule.beOnly and firstLine < skipRule.fromLine then
+                                LogDebug("SKIP (Be=true)", type, x)
+                                continue
+                            elseif not skipRule.beOnly then
+                                LogDebug("SKIP (Be=false)", type, x)
+                                continue
                             end
                         end
-                        if shouldSkip then continue end
                         LogDebug("REBUILDING", type or "Unknown", x)
                         for _, e in ipairs(records) do
-                            if e.TowerPlaced then
-                                local vecTab = e.TowerVector:split(", ")
+                            local action = e.entry
+                            if action.TowerPlaced then
+                                local vecTab = action.TowerVector:split(", ")
                                 local pos = Vector3.new(unpack(vecTab))
                                 local args = {
-                                    tonumber(e.TowerA1), e.TowerPlaced, pos, tonumber(e.Rotation or 0)
+                                    tonumber(action.TowerA1), action.TowerPlaced, pos, tonumber(action.Rotation or 0)
                                 }
-                                WaitForCash(e.TowerPlaceCost)
-                                PlaceTowerRetry(args, pos.X, e.TowerPlaced)
-                            elseif e.TowerUpgraded then
-                                UpgradeTowerRetry(tonumber(e.TowerUpgraded), e.UpgradePath)
-                            elseif e.ChangeTarget then
-                                ChangeTargetRetry(tonumber(e.ChangeTarget), e.TargetType)
-                            elseif e.SellTower then
-                                SellTowerRetry(tonumber(e.SellTower))
+                                WaitForCash(action.TowerPlaceCost)
+                                PlaceTowerRetry(args, pos.X, action.TowerPlaced)
+                            elseif action.TowerUpgraded then
+                                UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath)
+                            elseif action.ChangeTarget then
+                                ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
+                            elseif action.SellTower then
+                                SellTowerRetry(tonumber(action.SellTower))
                             end
                         end
                         SaveDebugLog()
