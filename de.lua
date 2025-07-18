@@ -4,7 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage") local Players = g
 
 local player = Players.LocalPlayer local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 
-local fileName = "record.txt" local macroPath = "tdx/macros/x.json" local startTime = time() local offset = 0
+local fileName = "record.txt" local macroPath = "tdx/naviai.json" local startTime = time() local offset = 0
 
 if isfile(fileName) then delfile(fileName) end writefile(fileName, "")
 
