@@ -55,7 +55,7 @@ local priorityMap = {
     Medic = 1,
     ["Golden Mobster"] = 2,
     Mobster = 2,
-    DJ = 3,
+    EDJ = 3,
     Commander = 4
 }
 
@@ -258,7 +258,7 @@ end
 local function PlaceTowerRetry(args, axisValue, towerName)
     if soldAxes[axisValue] then return end
     local attempts = 0
-    while attempts < 3 do
+    while attempts < 20 do
         Remotes.PlaceTower:InvokeServer(unpack(args))
         task.wait(0.1)
         if GetTowerByAxis(axisValue) then
@@ -271,7 +271,7 @@ end
 
 local function UpgradeTowerRetry(axisValue, path)
     local attempts = 0
-    while attempts < 3 do
+    while attempts < 20 do
         local tower = GetTowerByAxis(axisValue)
         if not tower then
             task.wait()
@@ -298,7 +298,7 @@ end
 
 local function ChangeTargetRetry(axisValue, targetType)
     local attempts = 0
-    while attempts < 3 do
+    while attempts < 20 do
         local tower = GetTowerByAxis(axisValue)
         if tower then
             Remotes.ChangeQueryType:FireServer(tower.Hash, targetType)
@@ -322,7 +322,7 @@ if isfile(macroPath) then
                     startRebuildWatcher(macro)
                     isRebuilding = false
                 end
-                task.wait(2)
+                task.wait(0.25)
             end
         end)
     end
