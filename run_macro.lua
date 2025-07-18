@@ -10,7 +10,7 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 -- Cấu hình
 getgenv().TDX_Config = getgenv().TDX_Config or {
     ["Macro Name"] = "event",
-    ["PlaceMode"] = "rewrite",
+    ["PlaceMode"] = "Ashed",
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil, -- nil = infinite
     ["SellAllDelay"] = 0.1,
