@@ -5,7 +5,7 @@ local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
 local config = getgenv().TDX_Config or {}
-local targetMapName = config["Map"] or "HAKUREI SHRINE"
+local targetMapName = config["Map"] or "Christmas24Part1"
 local expectedPlaceId = 9503261072
 
 -- Map cần đổi bằng Remote (ghi đúng tên, phân biệt hoa thường)
