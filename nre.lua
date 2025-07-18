@@ -10,7 +10,7 @@ if isfile(fileName) then delfile(fileName) end writefile(fileName, "")
 
 local pending = nil local timeout = 2 local isRebuilding = false local enableRebuild = true
 
--- Serialize helpers local function serialize(v) if typeof(v) == "Vector3" then return string.format("Vector3.new(%s,%s,%s)", v.X, v.Y, v.Z) elseif typeof(v) == "Vector2int16" then return string.format("Vector2int16.new(%s,%s)", v.X, v.Y) elseif type(v) == "table" then local out = {} for k, val in pairs(v) do table.insert(out, string.format("[%s]=%s", tostring(k), serialize(val))) end return "{" .. table.concat(out, ",") .. "}" else return tostring(v) end end
+ local function serialize(v) if typeof(v) == "Vector3" then return string.format("Vector3.new(%s,%s,%s)", v.X, v.Y, v.Z) elseif typeof(v) == "Vector2int16" then return string.format("Vector2int16.new(%s,%s)", v.X, v.Y) elseif type(v) == "table" then local out = {} for k, val in pairs(v) do table.insert(out, string.format("[%s]=%s", tostring(k), serialize(val))) end return "{" .. table.concat(out, ",") .. "}" else return tostring(v) end end
 
 local function serializeArgs(...) local args = {...} local out = {} for i, v in ipairs(args) do out[i] = serialize(v) end return table.concat(out, ", ") end
 
