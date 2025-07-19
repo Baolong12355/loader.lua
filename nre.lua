@@ -1,4 +1,4 @@
--- ✅ TDX Macro Recorder with Unlimited Retry Rebuild System
+Players.LocalPlayer-- ✅ TDX Macro Recorder with Unlimited Retry Rebuild System
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -309,6 +309,30 @@ local function GetTowerPlaceCostByName(name)
     return 0
 end
 
+-- Hàm lấy wave và time hiện tại từ game UI
+local function getCurrentWaveAndTime()
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if not playerGui then return nil, nil end
+    local interface = playerGui:FindFirstChild("Interface")
+    if not interface then return nil, nil end
+    local gameInfoBar = interface:FindFirstChild("GameInfoBar")
+    if not gameInfoBar then return nil, nil end
+    
+    local wave = gameInfoBar.Wave.WaveText.Text
+    local time = gameInfoBar.TimeLeft.TimeLeftText.Text
+    return wave, time
+end
+
+-- Chuyển time format từ "MM:SS" thành số (ví dụ: "02:35" -> 235)
+local function convertTimeToNumber(timeStr)
+    if not timeStr then return nil end
+    local mins, secs = timeStr:match("(%d+):(%d+)")
+    if mins and secs then
+        return tonumber(mins) * 100 + tonumber(secs)
+    end
+    return nil
+end
+
 -- ánh xạ hash -> pos liên tục
 local hash2pos = {}
 task.spawn(function()
@@ -375,15 +399,31 @@ while true do
                         end
                     end
                 else
-                    -- đổi target
+                    -- đổi target - TỰ ĐỘNG LẤY WAVE VÀ TIME HIỆN TẠI
                     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
                     if hash and targetType then
                         local pos = hash2pos[tostring(hash)]
                         if pos then
-                            table.insert(logs, HttpService:JSONEncode({
-                                ChangeTarget = pos.x,
-                                TargetType = tonumber(targetType)
-                            }))
+                            -- Lấy wave và time hiện tại
+                            local currentWave, currentTime = getCurrentWaveAndTime()
+                            local timeNumber = convertTimeToNumber(currentTime)
+                            
+                            local targetEntry = {
+                                TowerTargetChange = pos.x,
+                                TargetWanted = tonumber(targetType)
+                            }
+                            
+                            -- Thêm wave nếu có
+                            if currentWave then
+                                targetEntry.TargetWave = currentWave
+                            end
+                            
+                            -- Thêm time nếu có
+                            if timeNumber then
+                                targetEntry.TargetChangedAt = timeNumber
+                            end
+                            
+                            table.insert(logs, HttpService:JSONEncode(targetEntry))
                         end
                     else
                         -- bán
