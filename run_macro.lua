@@ -188,7 +188,7 @@ local function GetTowerByAxis(axisX)
             local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
             return root and root.Position, model and (root and root.Name or model.Name)
         end)
-        if success and pos and math.abs(pos.X - axisX) < 0.1 then
+        if success and pos and pos.X == axisX then  -- Đã bỏ làm tròn, so sánh chính xác
             local hp = 1
             pcall(function()
                 hp = tower.HealthHandler and tower.HealthHandler:GetHealth() or 1
