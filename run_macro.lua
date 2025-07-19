@@ -217,7 +217,7 @@ local function GetCurrentUpgradeCost(tower, path)
 end
 
 local function WaitForCash(amount)
-    while cashStat.Value < amount do task.wait(0.1) end
+    while cashStat.Value < amount do task.wait() end
 end
 
 local function PlaceTowerRetry(args, axisValue, towerName)
@@ -241,7 +241,7 @@ local function PlaceTowerRetry(args, axisValue, towerName)
         end
         
         attempts = attempts + 1
-        task.wait(0.2)
+        task.wait()
     end
     
     warn("Không thể đặt tower sau", maxAttempts, "lần thử")
@@ -254,7 +254,7 @@ local function UpgradeTowerRetry(axisValue, path)
     while attempts < maxAttempts do
         local hash, tower = GetTowerByAxis(axisValue)
         if not hash then 
-            task.wait(0.1) 
+            task.wait() 
             attempts = attempts + 1
             continue 
         end
@@ -279,7 +279,7 @@ local function UpgradeTowerRetry(axisValue, path)
         end
         
         attempts = attempts + 1
-        task.wait(0.2)
+        task.wait()
     end
 end
 
@@ -314,7 +314,7 @@ local function SellTowerRetry(axisValue)
             if not GetTowerByAxis(axisValue) then return true end
         end
         attempts = attempts + 1
-        task.wait(0.1)
+        task.wait()
     end
     return false
 end
