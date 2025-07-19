@@ -60,7 +60,7 @@ local defaultConfig = {
     ["TargetChangeCheckDelay"] = 0.1,
     ["RebuildPriority"] = true,
     ["RebuildCheckInterval"] = 0.05,
-    ["MacroStepDelay"] = 0.05
+    ["MacroStepDelay"] = 0
 }
 
 -- Khởi tạo config
