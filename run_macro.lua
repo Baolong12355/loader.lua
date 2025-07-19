@@ -139,7 +139,7 @@ local function ChangeTargetRetry(axisValue, targetType)
             Remotes.ChangeQueryType:FireServer(hash, targetType)
             return
         end
-        task.wait()
+        task.wait(0.1)
     end
 end
 
@@ -229,11 +229,11 @@ local function StartPriorityRebuildWatcher(towerRecords, rebuildLine, skipTypesM
                 elseif action.SellTower then
                     SellTowerRetry(tonumber(action.SellTower))
                 end
-                task.wait(0.1)
+                task.wait(0.05)
             end
         end
         
-        task.wait(0.25)
+        task.wait(0.1)
     end
 end
 
