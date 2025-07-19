@@ -40,7 +40,7 @@ end
 local defaultConfig = {
     ["Macro Name"] = "event",
     ["PlaceMode"] = "Ashed",
-    ["ForceRebuildEvenIfSold"] = false,
+    ["ForceRebuildEvenIfSold"] = true,
     ["MaxRebuildRetry"] = nil, -- nil = infinite
     ["SellAllDelay"] = 0.1,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
