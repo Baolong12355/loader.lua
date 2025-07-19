@@ -232,7 +232,7 @@ local function PlaceTowerRetry(args, axisValue, towerName)
         if success then
             local startTime = tick()
             repeat 
-                task.wait(0.05) 
+                task.wait(0.1) 
             until tick() - startTime > 3 or GetTowerByAxis(axisValue)
             
             if GetTowerByAxis(axisValue) then 
@@ -308,7 +308,7 @@ local function SellTowerRetry(axisValue)
             pcall(function()
                 Remotes.SellTower:FireServer(hash)
             end)
-            task.wait(0.05)
+            task.wait(0.1)
             if not GetTowerByAxis(axisValue) then return true end
         end
         attempts = attempts + 1
