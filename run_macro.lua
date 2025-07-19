@@ -62,12 +62,6 @@ for key, value in pairs(defaultConfig) do
     end
 end
 
-local function debugPrint(...)
-    if globalEnv.TDX_Config.CheDoDebug then
-        print("[MACRO-RUNNER]", ...)
-    end
-end
-
 local function SafeRequire(path, timeout)
     timeout = timeout or 5
     local t0 = os.clock()
@@ -354,12 +348,8 @@ local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
                         local axisValue = entry.TowerTargetChange
                         local targetType = entry.TargetWanted
                         
-                        debugPrint("Đang thay đổi target cho tower tại X:", axisValue, "Target:", targetType, "Wave:", currentWave, "Time:", currentTime)
-                        
                         ChangeTargetRetry(axisValue, targetType)
                         processedEntries[i] = true
-                        
-                        debugPrint("Đã thay đổi target thành công!")
                     end
                 end
             end
@@ -369,341 +359,23 @@ local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
     end)
 end
 
--- Main execution function
-local function RunMacroRunner()
-    debugPrint("Đang khởi động Macro Runner...")
-
+-- Hàm khởi tạo hệ thống Rebuild
+local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
+    local rebuildAttempts = {}
+    local soldPositions = {}
     local config = globalEnv.TDX_Config
-    local macroName = config["Macro Name"] or "event"
-    local macroPath = "tdx/macros/" .. macroName .. ".json"
-
-    -- Kiểm tra file macro
-    if not safeIsFile(macroPath) then 
-        warn("Không tìm thấy file macro:", macroPath)
-        warn("Vui lòng đảm bảo file macro tồn tại hoặc executor hỗ trợ file system")
-        return 
-    end
-
-    local macroContent = safeReadFile(macroPath)
-    if not macroContent then
-        warn("Không thể đọc file macro")
-        return
-    end
-
-    local ok, macro = pcall(function() 
-        return HttpService:JSONDecode(macroContent) 
-    end)
     
-    if not ok or type(macro) ~= "table" then 
-        warn("Lỗi khi parse macro file:", ok and "Invalid JSON format" or macro)
-        return 
-    end
-
-    -- Lấy UI elements
-    local gameUI = getGameUI()
-    debugPrint("Đã kết nối với GameUI")
-
-    local towerRecords, skipTypesMap = {}, {}
-    local targetChangeEntries = {}
-    local rebuildLine = nil
-
-    -- Pre-scan macro để setup rebuild system trước
-    debugPrint("🔍 Pre-scanning macro để setup rebuild system...")
-    for i, entry in ipairs(macro) do
-        if entry.SuperFunction == "rebuild" then
-            rebuildLine = i
-            debugPrint("🔧 Tìm thấy rebuild line:", i)
-            for _, skip in ipairs(entry.Skip or {}) do
-                skipTypesMap[skip] = { beOnly = entry.Be == true, fromLine = i }
-                debugPrint("  Skip rule:", skip, "beOnly:", entry.Be == true)
-            end
-        elseif entry.TowerTargetChange then
-            table.insert(targetChangeEntries, entry)
-        end
-    end
-
-    -- Khởi động Target Monitor nếu cần
-    if #targetChangeEntries > 0 then
-        StartTargetChangeMonitor(targetChangeEntries, gameUI)
-        debugPrint("Đã khởi động Target Change Monitor với", #targetChangeEntries, "entries")
-    end
-
-    -- Khởi động Rebuild System ngay từ đầu
-    if rebuildLine then
-        debugPrint("🔧 Khởi động hệ thống rebuild sớm...")
-        
-        task.spawn(function()
-            local rebuildAttempts = {}
-            local soldPositions = {}
-            
-            while true do
-                if next(towerRecords) then -- Chỉ chạy khi đã có tower records
-                    local rebuildFound = false
-                    
-                    -- Sắp xếp rebuild theo độ ưu tiên
-                    local rebuildQueue = {}
-                    
-                    for x, records in pairs(towerRecords) do
-                        local hash, tower = GetTowerByAxis(x)
-                        if not hash or not tower then -- Tower bị mất/chết
-                            -- Tìm tower type từ records
-                            local towerType = nil
-                            local firstPlaceRecord = nil
-                            
-                            for _, record in ipairs(records) do
-                                if record.entry.TowerPlaced then 
-                                    towerType = record.entry.TowerPlaced
-                                    firstPlaceRecord = record
-                                    break
-                                end
-                            end
-                            
-                            if not towerType then continue end
-                            
-                            -- Kiểm tra skip rules
-                            local skipRule = skipTypesMap[towerType]
-                            if skipRule then
-                                if skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine then
-                                    debugPrint("⏭️ Skip rebuild (beOnly rule):", towerType, "tại X:", x)
-                                    continue
-                                elseif not skipRule.beOnly then
-                                    debugPrint("⏭️ Skip rebuild (skip rule):", towerType, "tại X:", x)
-                                    continue
-                                end
-                            end
-                            
-                            -- Kiểm tra ForceRebuildEvenIfSold
-                            if soldPositions[x] and not config.ForceRebuildEvenIfSold then
-                                debugPrint("⏭️ Skip rebuild (đã bán):", towerType, "tại X:", x)
-                                continue
-                            end
-                            
-                            -- Kiểm tra MaxRebuildRetry
-                            rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
-                            local maxRetry = config.MaxRebuildRetry
-                            if maxRetry and rebuildAttempts[x] > maxRetry then
-                                debugPrint("⏭️ Skip rebuild (max retry):", towerType, "tại X:", x, "attempts:", rebuildAttempts[x])
-                                continue
-                            end
-                            
-                            -- Thêm vào queue rebuild
-                            local priority = GetTowerPriority(towerType)
-                            table.insert(rebuildQueue, {
-                                x = x,
-                                records = records,
-                                priority = priority,
-                                towerType = towerType,
-                                attempts = rebuildAttempts[x]
-                            })
-                        end
-                    end
-                    
-                    -- Sắp xếp theo độ ưu tiên (thấp hơn = ưu tiên cao hơn)
-                    table.sort(rebuildQueue, function(a, b)
-                        if a.priority == b.priority then
-                            return a.x < b.x -- Nếu cùng priority thì sắp xếp theo X
-                        end
-                        return a.priority < b.priority
-                    end)
-                    
-                    -- Rebuild tower có priority cao nhất
-                    for _, rebuildItem in ipairs(rebuildQueue) do
-                        local x = rebuildItem.x
-                        local records = rebuildItem.records
-                        local towerType = rebuildItem.towerType
-                        
-                        debugPrint("🔥 PRIORITY REBUILD:", towerType, "tại X:", x, "Priority:", rebuildItem.priority, "Attempt:", rebuildItem.attempts)
-                        
-                        -- Thực hiện tất cả các actions cho tower này
-                        local rebuildSuccess = true
-                        for _, record in ipairs(records) do
-                            local action = record.entry
-                            
-                            if action.TowerPlaced then
-                                local vecTab = {}
-                                for coord in action.TowerVector:gmatch("[^,%s]+") do
-                                    table.insert(vecTab, tonumber(coord))
-                                end
-                                if #vecTab == 3 then
-                                    local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-                                    local args = {
-                                        tonumber(action.TowerA1), 
-                                        action.TowerPlaced, 
-                                        pos, 
-                                        tonumber(action.Rotation or 0)
-                                    }
-                                    debugPrint("  📍 Placing:", action.TowerPlaced, "Cost:", action.TowerPlaceCost)
-                                    WaitForCash(action.TowerPlaceCost)
-                                    PlaceTowerRetry(args, pos.X, action.TowerPlaced)
-                                    
-                                    -- Kiểm tra placement thành công
-                                    local placedHash = GetTowerByAxis(pos.X)
-                                    if not placedHash then
-                                        debugPrint("  ❌ Placement failed!")
-                                        rebuildSuccess = false
-                                        break
-                                    end
-                                end
-                                
-                            elseif action.TowerUpgraded then
-                                debugPrint("  ⬆️ Upgrading path:", action.UpgradePath, "Cost:", action.UpgradeCost)
-                                UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath)
-                                
-                            elseif action.ChangeTarget then
-                                debugPrint("  🎯 Changing target to:", action.TargetType)
-                                ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
-                                
-                            elseif action.SellTower then
-                                debugPrint("  💰 Selling tower")
-                                local sellSuccess = SellTowerRetry(tonumber(action.SellTower))
-                                if sellSuccess then
-                                    soldPositions[tonumber(action.SellTower)] = true
-                                end
-                            end
-                            
-                            task.wait(0.03) -- Delay ngắn giữa các actions
-                        end
-                        
-                        if rebuildSuccess then
-                            debugPrint("✅ Rebuild hoàn thành:", towerType, "tại X:", x)
-                            rebuildAttempts[x] = 0 -- Reset attempts khi thành công
-                        else
-                            debugPrint("❌ Rebuild thất bại:", towerType, "tại X:", x)
-                        end
-                        
-                        rebuildFound = true
-                        break -- Chỉ rebuild một tower mỗi lần
-                    end
-                    
-                    if not rebuildFound then
-                        -- Không có tower nào cần rebuild
-                        task.wait(config.RebuildCheckInterval * 2) -- Wait lâu hơn khi không có việc gì
-                    else
-                        task.wait(config.RebuildCheckInterval) -- Wait ngắn khi có rebuild
-                    end
-                else
-                    -- Chưa có tower records, wait
-                    task.wait(0.5)
-                end
-            end
-        end)
-        
-        debugPrint("🔧 Hệ thống rebuild đã được khởi động!")
-    end
-
-    debugPrint("🚀 Bắt đầu thực thi macro")
-    
-    -- Main macro execution loop
-    for i, entry in ipairs(macro) do
-        debugPrint("Đang thực thi line", i, "of", #macro)
-        
-        if entry.SuperFunction == "sell_all" then
-            debugPrint("📤 Thực hiện sell_all")
-            SellAllTowers(entry.Skip)
-            
-        elseif entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
-            local vecTab = {}
-            for coord in entry.TowerVector:gmatch("[^,%s]+") do
-                table.insert(vecTab, tonumber(coord))
-            end
-            
-            if #vecTab == 3 then
-                local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-                local args = {
-                    tonumber(entry.TowerA1),
-                    entry.TowerPlaced,
-                    pos,
-                    tonumber(entry.Rotation or 0)
-                }
-                
-                debugPrint("🏗️ Đang đặt tower:", entry.TowerPlaced, "tại", pos)
-                WaitForCash(entry.TowerPlaceCost)
-                PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
-                
-                -- Lưu tower record ngay sau khi place
-                towerRecords[pos.X] = towerRecords[pos.X] or {}
-                table.insert(towerRecords[pos.X], { line = i, entry = entry })
-                debugPrint("📋 Đã lưu tower record tại X:", pos.X, "Total records:", #towerRecords[pos.X])
-            end
-            
-        elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
-            local axis = tonumber(entry.TowerUpgraded)
-            debugPrint("⬆️ Đang nâng cấp tower tại X:", axis, "Path:", entry.UpgradePath)
-            UpgradeTowerRetry(axis, entry.UpgradePath)
-            
-            towerRecords[axis] = towerRecords[axis] or {}
-            table.insert(towerRecords[axis], { line = i, entry = entry })
-            
-        elseif entry.ChangeTarget and entry.TargetType then
-            local axis = tonumber(entry.ChangeTarget)
-            debugPrint("🎯 Đang thay đổi target tại X:", axis, "Target:", entry.TargetType)
-            ChangeTargetRetry(axis, entry.TargetType)
-            
-            towerRecords[axis] = towerRecords[axis] or {}
-            table.insert(towerRecords[axis], { line = i, entry = entry })
-            
-        elseif entry.SellTower then
-            local axis = tonumber(entry.SellTower)
-            debugPrint("💰 Đang bán tower tại X:", axis)
-            SellTowerRetry(axis)
-            
-            towerRecords[axis] = towerRecords[axis] or {}
-            table.insert(towerRecords[axis], { line = i, entry = entry })
-            
-        elseif entry.SuperFunction == "rebuild" then
-            -- Đã được xử lý trong pre-scan
-            debugPrint("🔧 Đã setup rebuild line:", i)
-        end
-        
-        -- Delay giữa các bước macro
-        task.wait(globalEnv.TDX_Config.MacroStepDelay)
-    end
-    
-    debugPrint("✅ Macro hoàn thành! Rebuild system sẽ tiếp tục chạy...")
-    debugPrint("📊 Tower Records Summary:")
-    for x, records in pairs(towerRecords) do
-        debugPrint(string.format("  X=%.1f: %d records", x, #records))
-    endtable.insert(towerRecords[axis], { line = i, entry = entry })
-            
-        elseif entry.SellTower then
-            local axis = tonumber(entry.SellTower)
-            debugPrint("💰 Đang bán tower tại X:", axis)
-            SellTowerRetry(axis)
-            
-            towerRecords[axis] = towerRecords[axis] or {}
-            table.insert(towerRecords[axis], { line = i, entry = entry })
-            
-        elseif entry.SuperFunction == "rebuild" then
-            rebuildLine = i
-            debugPrint("🔧 Đã thiết lập rebuild line:", i)
-            for _, skip in ipairs(entry.Skip or {}) do
-                skipTypesMap[skip] = { beOnly = entry.Be == true, fromLine = i }
-            end
-        end
-        
-        -- Delay giữa các bước macro
-        task.wait(globalEnv.TDX_Config.MacroStepDelay)
-    end
-    
-    debugPrint("✅ Macro hoàn thành thành công!")
-    
-    -- Rebuild system - chạy ngay từ đầu và tiếp tục sau macro
-    if rebuildLine then
-        debugPrint("🔧 Khởi động hệ thống rebuild...")
-        
-        task.spawn(function()
-            local rebuildAttempts = {}
-            local soldPositions = {}
-            
-            while true do
+    task.spawn(function()
+        while true do
+            if next(towerRecords) then -- Chỉ chạy khi đã có tower records
                 local rebuildFound = false
                 
                 -- Sắp xếp rebuild theo độ ưu tiên
                 local rebuildQueue = {}
                 
                 for x, records in pairs(towerRecords) do
-                    local _, tower = GetTowerByAxis(x)
-                    if not tower then -- Tower bị mất/chết
+                    local hash, tower = GetTowerByAxis(x)
+                    if not hash or not tower then -- Tower bị mất/chết
                         -- Tìm tower type từ records
                         local towerType = nil
                         local firstPlaceRecord = nil
@@ -722,17 +394,14 @@ local function RunMacroRunner()
                         local skipRule = skipTypesMap[towerType]
                         if skipRule then
                             if skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine then
-                                debugPrint("⏭️ Skip rebuild (beOnly rule):", towerType, "tại X:", x)
                                 continue
                             elseif not skipRule.beOnly then
-                                debugPrint("⏭️ Skip rebuild (skip rule):", towerType, "tại X:", x)
                                 continue
                             end
                         end
                         
                         -- Kiểm tra ForceRebuildEvenIfSold
                         if soldPositions[x] and not config.ForceRebuildEvenIfSold then
-                            debugPrint("⏭️ Skip rebuild (đã bán):", towerType, "tại X:", x)
                             continue
                         end
                         
@@ -740,7 +409,6 @@ local function RunMacroRunner()
                         rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
                         local maxRetry = config.MaxRebuildRetry
                         if maxRetry and rebuildAttempts[x] > maxRetry then
-                            debugPrint("⏭️ Skip rebuild (max retry):", towerType, "tại X:", x, "attempts:", rebuildAttempts[x])
                             continue
                         end
                         
@@ -770,8 +438,6 @@ local function RunMacroRunner()
                     local records = rebuildItem.records
                     local towerType = rebuildItem.towerType
                     
-                    debugPrint("🔥 PRIORITY REBUILD:", towerType, "tại X:", x, "Priority:", rebuildItem.priority, "Attempt:", rebuildItem.attempts)
-                    
                     -- Thực hiện tất cả các actions cho tower này
                     local rebuildSuccess = true
                     for _, record in ipairs(records) do
@@ -790,29 +456,24 @@ local function RunMacroRunner()
                                     pos, 
                                     tonumber(action.Rotation or 0)
                                 }
-                                debugPrint("  📍 Placing:", action.TowerPlaced, "Cost:", action.TowerPlaceCost)
                                 WaitForCash(action.TowerPlaceCost)
                                 PlaceTowerRetry(args, pos.X, action.TowerPlaced)
                                 
                                 -- Kiểm tra placement thành công
                                 local placedHash = GetTowerByAxis(pos.X)
                                 if not placedHash then
-                                    debugPrint("  ❌ Placement failed!")
                                     rebuildSuccess = false
                                     break
                                 end
                             end
                             
                         elseif action.TowerUpgraded then
-                            debugPrint("  ⬆️ Upgrading path:", action.UpgradePath, "Cost:", action.UpgradeCost)
                             UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath)
                             
                         elseif action.ChangeTarget then
-                            debugPrint("  🎯 Changing target to:", action.TargetType)
                             ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
                             
                         elseif action.SellTower then
-                            debugPrint("  💰 Selling tower")
                             local sellSuccess = SellTowerRetry(tonumber(action.SellTower))
                             if sellSuccess then
                                 soldPositions[tonumber(action.SellTower)] = true
@@ -823,10 +484,7 @@ local function RunMacroRunner()
                     end
                     
                     if rebuildSuccess then
-                        debugPrint("✅ Rebuild hoàn thành:", towerType, "tại X:", x)
                         rebuildAttempts[x] = 0 -- Reset attempts khi thành công
-                    else
-                        debugPrint("❌ Rebuild thất bại:", towerType, "tại X:", x)
                     end
                     
                     rebuildFound = true
@@ -835,25 +493,84 @@ local function RunMacroRunner()
                 
                 if not rebuildFound then
                     -- Không có tower nào cần rebuild
-                    task.wait(config.RebuildCheckInterval) -- Wait lâu hơn khi không có việc gì
+                    task.wait(config.RebuildCheckInterval * 2)
                 else
-                    task.wait(config.RebuildCheckInterval) -- Wait ngắn khi có rebuild
+                    task.wait(config.RebuildCheckInterval)
                 end
+            else
+                -- Chưa có tower records, wait
+                task.wait(0.5)
             end
-        end)
-        
-        debugPrint("🔧 Hệ thống rebuild đã được khởi động!")
-    else
-        debugPrint("⚠️ Không tìm thấy rebuild line - rebuild system disabled")
-    end
+        end
+    end)
 end
 
--- Khởi chạy script
-local success, err = pcall(RunMacroRunner)
-if not success then
-    warn("Lỗi khi chạy Macro Runner:", err)
-    warn("Vui lòng kiểm tra:")
-    warn("1. Bạn đang trong game TDX")
-    warn("2. File macro tồn tại")
-    warn("3. Executor hỗ trợ đầy đủ các functions cần thiết")
-end
+-- Main execution function
+local function RunMacroRunner()
+    local config = globalEnv.TDX_Config
+    local macroName = config["Macro Name"] or "event"
+    local macroPath = "tdx/macros/" .. macroName .. ".json"
+
+    -- Kiểm tra file macro
+    if not safeIsFile(macroPath) then 
+        warn("Không tìm thấy file macro:", macroPath)
+        warn("Vui lòng đảm bảo file macro tồn tại hoặc executor hỗ trợ file system")
+        return 
+    end
+
+    local macroContent = safeReadFile(macroPath)
+    if not macroContent then
+        warn("Không thể đọc file macro")
+        return
+    end
+
+    local ok, macro = pcall(function() 
+        return HttpService:JSONDecode(macroContent) 
+    end)
+    
+    if not ok or type(macro) ~= "table" then 
+        warn("Lỗi khi parse macro file:", ok and "Invalid JSON format" or macro)
+        return 
+    end
+
+    -- Lấy UI elements
+    local gameUI = getGameUI()
+
+    local towerRecords = {}
+    local skipTypesMap = {}
+    local targetChangeEntries = {}
+    local rebuildSystemActive = false
+
+    -- Pre-scan macro để tìm target changes
+    for i, entry in ipairs(macro) do
+        if entry.TowerTargetChange then
+            table.insert(targetChangeEntries, entry)
+        end
+    end
+
+    -- Khởi động Target Monitor nếu cần
+    if #targetChangeEntries > 0 then
+        StartTargetChangeMonitor(targetChangeEntries, gameUI)
+    end
+    
+    -- Main macro execution loop
+    for i, entry in ipairs(macro) do
+        if entry.SuperFunction == "sell_all" then
+            SellAllTowers(entry.Skip)
+            
+        elseif entry.SuperFunction == "rebuild" then
+            -- Kích hoạt hệ thống rebuild khi gặp dòng này
+            if not rebuildSystemActive then
+                -- Setup skip rules từ entry hiện tại
+                for _, skip in ipairs(entry.Skip or {}) do
+                    skipTypesMap[skip] = { beOnly = entry.Be == true, fromLine = i }
+                end
+                
+                -- Khởi tạo hệ thống rebuild
+                StartRebuildSystem(entry, towerRecords, skipTypesMap)
+                rebuildSystemActive = true
+                
+                print("Hệ thống Rebuild đã được kích hoạt tại dòng", i)
+            end
+            
+        elseif entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost th
