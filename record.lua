@@ -90,7 +90,7 @@ end)
 -- Timeout check
 task.spawn(function()
     while true do
-        task.wait(0.1)
+        task.wait()
         if pending and tick() - pending.created > timeout then
             warn("❌ Không xác thực được: " .. pending.type)
             pending = nil
