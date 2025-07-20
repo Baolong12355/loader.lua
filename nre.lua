@@ -1,8 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local fileName = "record.txt"
-local startTime = time()
-local offset = 0
 
 -- Xoá file cũ
 if isfile(fileName) then delfile(fileName) end
@@ -39,12 +37,10 @@ local function serializeArgs(...)
     return table.concat(out, ", ")
 end
 
--- Xác nhận và ghi
+-- Xác nhận và ghi (không có delay)
 local function confirmAndWrite()
     if not pending then return end
-    appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
     appendfile(fileName, pending.code .. "\n")
-    startTime = time() - offset
     pending = nil
 end
 
@@ -90,7 +86,7 @@ end)
 -- Timeout check
 task.spawn(function()
     while true do
-        task.wait(0.3)
+        task.wait()
         if pending and tick() - pending.created > timeout then
             warn("❌ Không xác thực được: " .. pending.type)
             pending = nil
