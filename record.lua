@@ -90,7 +90,7 @@ end)
 -- Timeout check
 task.spawn(function()
     while true do
-        task.wait(0.3)
+        task.wait(0.1)
         if pending and tick() - pending.created > timeout then
             warn("❌ Không xác thực được: " .. pending.type)
             pending = nil
@@ -237,7 +237,7 @@ task.spawn(function()
                 hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
             end
         end
-        task.wait(0.1)
+        task.wait()
     end
 end)
 
@@ -341,5 +341,5 @@ while true do
 
         writefile(outJson, table.concat(logs, "\n"))
     end
-    wait(0.22)
+    wait()
 end
