@@ -207,7 +207,7 @@ local function getCurrentWaveAndTime()
     if not interface then return nil, nil end
     local gameInfoBar = interface:FindFirstChild("GameInfoBar")
     if not gameInfoBar then return nil, nil end
-    
+
     local wave = gameInfoBar.Wave.WaveText.Text
     local time = gameInfoBar.TimeLeft.TimeLeftText.Text
     return wave, time
@@ -250,10 +250,16 @@ while true do
         -- giữ dòng SuperFunction
         local preservedSuper = {}
         if isfile(outJson) then
-            for line in readfile(outJson):gmatch("[^\r\n]+") do
-                local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
-                if ok and decoded and decoded.SuperFunction then
-                    table.insert(preservedSuper, line)
+            local content = readfile(outJson)
+            -- Remove brackets and split by lines
+            content = content:gsub("^%[%s*", ""):gsub("%s*%]$", "")
+            for line in content:gmatch("[^\r\n]+") do
+                line = line:gsub(",$", "") -- Remove trailing comma
+                if line:match("%S") then -- Only non-empty lines
+                    local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
+                    if ok and decoded and decoded.SuperFunction then
+                        table.insert(preservedSuper, decoded)
+                    end
                 end
             end
         end
@@ -265,13 +271,13 @@ while true do
                 name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
                 local cost = GetTowerPlaceCostByName(name)
                 local vector = string.format("%s, %s, %s", tostring(tonumber(x) or x), tostring(tonumber(y) or y), tostring(tonumber(z) or z))
-                table.insert(logs, HttpService:JSONEncode({
+                table.insert(logs, {
                     TowerPlaceCost = tonumber(cost) or 0,
                     TowerPlaced = name,
                     TowerVector = vector,
                     Rotation = rot,
                     TowerA1 = tostring(a1)
-                }))
+                })
             else
                 -- nâng cấp
                 local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
@@ -281,11 +287,11 @@ while true do
                     local count = tonumber(upgradeCount)
                     if pos and pathNum and count and count > 0 then
                         for _ = 1, count do
-                            table.insert(logs, HttpService:JSONEncode({
+                            table.insert(logs, {
                                 UpgradeCost = 0,
                                 UpgradePath = pathNum,
                                 TowerUpgraded = pos.x
-                            }))
+                            })
                         end
                     end
                 else
@@ -297,23 +303,23 @@ while true do
                             -- Lấy wave và time hiện tại
                             local currentWave, currentTime = getCurrentWaveAndTime()
                             local timeNumber = convertTimeToNumber(currentTime)
-                            
+
                             local targetEntry = {
                                 TowerTargetChange = pos.x,
                                 TargetWanted = tonumber(targetType)
                             }
-                            
+
                             -- Thêm wave nếu có
                             if currentWave then
                                 targetEntry.TargetWave = currentWave
                             end
-                            
+
                             -- Thêm time nếu có
                             if timeNumber then
                                 targetEntry.TargetChangedAt = timeNumber
                             end
-                            
-                            table.insert(logs, HttpService:JSONEncode(targetEntry))
+
+                            table.insert(logs, targetEntry)
                         end
                     else
                         -- bán
@@ -321,9 +327,9 @@ while true do
                         if hash then
                             local pos = hash2pos[tostring(hash)]
                             if pos then
-                                table.insert(logs, HttpService:JSONEncode({
+                                table.insert(logs, {
                                     SellTower = pos.x
-                                }))
+                                })
                             end
                         end
                     end
@@ -331,11 +337,24 @@ while true do
             end
         end
 
-        for _, line in ipairs(preservedSuper) do
-            table.insert(logs, line)
+        -- Add preserved SuperFunction entries
+        for _, entry in ipairs(preservedSuper) do
+            table.insert(logs, entry)
         end
 
-        writefile(outJson, table.concat(logs, "\n"))
+        -- Convert to proper JSON array format
+        local jsonLines = {}
+        for i, entry in ipairs(logs) do
+            local jsonStr = HttpService:JSONEncode(entry)
+            if i < #logs then
+                jsonStr = jsonStr .. ","
+            end
+            table.insert(jsonLines, jsonStr)
+        end
+
+        -- Write with brackets
+        local finalJson = "[\n" .. table.concat(jsonLines, "\n") .. "\n]"
+        writefile(outJson, finalJson)
     end
     wait(0.22)
 end
