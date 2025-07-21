@@ -1,8 +1,10 @@
 -- 📌 Script Auto Vote Chế Độ (Raw Version)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
 
 -- 🔎 Tìm Remote Events
-local voteRemote = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("DifficultyVoteCast", true) -- Tìm sâu trong thư mục
+local voteRemote = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("DifficultyVoteCast", true)
 local readyRemote = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("DifficultyVoteReady", true)
 
 -- ❌ Thoát nếu không tìm thấy Remote
@@ -11,7 +13,7 @@ if not voteRemote then
     return
 end
 
--- ⚡ Lấy chế độ từ config (dùng nguyên bản)
+-- ⚡ Lấy chế độ từ config
 local mode = getgenv().TDX_Config and getgenv().TDX_Config["Auto Difficulty"]
 
 if not mode then
@@ -19,13 +21,21 @@ if not mode then
     return
 end
 
--- 🚀 Gửi vote (dùng tên gốc)
+-- ⏳ Chờ đến khi giao diện MapVoting hiển thị
+local gameInfoBar
+repeat
+    task.wait(0.25)
+    local interface = player:FindFirstChild("PlayerGui") and player.PlayerGui:FindFirstChild("Interface")
+    gameInfoBar = interface and interface:FindFirstChild("GameInfoBar")
+until gameInfoBar and gameInfoBar:FindFirstChild("MapVoting") and gameInfoBar.MapVoting.Visible
+
+-- 🚀 Gửi vote
 voteRemote:FireServer(mode)
 print("✅ ĐÃ CHỌN CHẾ ĐỘ (RAW):", mode)
 
--- ⏳ Tự động bấm BẮT ĐẦU sau 2s
+-- 🟢 Bắt đầu sau 0.25s
 if readyRemote then
-    task.wait(2)
+    task.wait(0.25)
     readyRemote:FireServer()
     print("🎮 ĐÃ KÍCH HOẠT BẮT ĐẦU!")
 end
