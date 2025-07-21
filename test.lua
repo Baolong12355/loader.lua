@@ -1,13 +1,12 @@
--- [[ Auto Rebuild - Runtime Based - No Macro - Debug Enabled ]]
+-- [[ Auto Rebuild Runtime - Hook như record.lua - No Macro - Debug ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local debugMode = true -- ✅ Bật/tắt debug
+local debugMode = true
 
--- ==== Load TowerClass ====
+-- === Load TowerClass
 local TowerClass
 do
 	local ps = player:WaitForChild("PlayerScripts")
@@ -17,8 +16,7 @@ do
 	TowerClass = require(towerModule)
 end
 
--- ==== Hàm phụ trợ ====
-
+-- === Tools
 local function WaitForCash(amount)
 	local cash = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 	while cash.Value < amount do task.wait() end
@@ -66,11 +64,12 @@ local function GetTowerByX(x)
 	return nil, nil
 end
 
--- ==== Ghi hành động và theo dõi ====
+-- === Data
 local towerRecords = {}     -- [X] = list of actions
 local rebuildAttempts = {}  -- [X] = số lần thử
-local soldPositions = {}    -- [X] = true nếu đã từng bán
+local soldPositions = {}    -- [X] = true nếu đã bán
 
+-- === Ghi log
 local function logAction(actionType, data)
 	local x = data.Axis
 	if not x then return end
@@ -79,13 +78,16 @@ local function logAction(actionType, data)
 	if debugMode then warn("📌 Log", actionType, "at X =", x) end
 end
 
--- ==== Hook ghi lại hành động ====
-local old
-old = hookmetamethod(game, "__namecall", function(self, ...)
+-- === Hook chuẩn như record
+local raw
+raw = hookmetamethod(game, "__namecall", function(self, ...)
 	local method = getnamecallmethod()
-	local args = {...}
-	if method == "FireServer" then
-		if self.Name == "PlaceTower" then
+	local args = { ... }
+
+	if not checkcaller() and typeof(self) == "Instance" and self:IsA("RemoteEvent") or self:IsA("RemoteFunction") then
+		local name = self.Name
+
+		if name == "PlaceTower" and method == "InvokeServer" then
 			local a1, name, pos, rot = unpack(args)
 			logAction("Place", {
 				A1 = a1,
@@ -95,7 +97,7 @@ old = hookmetamethod(game, "__namecall", function(self, ...)
 				Cost = GetTowerPlaceCostByName(name),
 				Axis = pos.X
 			})
-		elseif self.Name == "SellTower" then
+		elseif name == "SellTower" then
 			local hash = args[1]
 			local tower = TowerClass.GetTowers()[hash]
 			if tower then
@@ -104,11 +106,11 @@ old = hookmetamethod(game, "__namecall", function(self, ...)
 				if root then
 					local x = root.Position.X
 					soldPositions[x] = true
-					towerRecords[x] = nil -- ❌ Xoá log để ngăn rebuild lại
-					if debugMode then warn("💥 Sold tower at X =", x) end
+					towerRecords[x] = nil
+					if debugMode then warn("💥 Bán tower tại X =", x) end
 				end
 			end
-		elseif self.Name == "TowerUpgradeRequest" then
+		elseif name == "TowerUpgradeRequest" then
 			local hash, path, count = unpack(args)
 			local tower = TowerClass.GetTowers()[hash]
 			if tower then
@@ -122,7 +124,7 @@ old = hookmetamethod(game, "__namecall", function(self, ...)
 					})
 				end
 			end
-		elseif self.Name == "ChangeQueryType" then
+		elseif name == "ChangeQueryType" then
 			local hash, typ = unpack(args)
 			local tower = TowerClass.GetTowers()[hash]
 			if tower then
@@ -137,38 +139,38 @@ old = hookmetamethod(game, "__namecall", function(self, ...)
 			end
 		end
 	end
-	return old(self, ...)
+
+	return raw(self, ...)
 end)
 
--- ==== Hệ thống Rebuild ====
+-- === Rebuild Loop
 task.spawn(function()
 	while true do
-		local rebuildQueue = {}
+		local queue = {}
 
 		for x, actions in pairs(towerRecords) do
-			local hash, tower = GetTowerByX(x)
+			local hash = GetTowerByX(x)
 			if not hash and not soldPositions[x] then
 				rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
 				if rebuildAttempts[x] <= 10 then
-					table.insert(rebuildQueue, {x = x, actions = actions, attempts = rebuildAttempts[x]})
-				elseif debugMode then
-					warn("❌ Bỏ qua X =", x, "sau", rebuildAttempts[x], "lần thử")
+					table.insert(queue, {x = x, actions = actions})
+				else
+					if debugMode then warn("❌ Bỏ qua X =", x, "sau quá 10 lần thử") end
 				end
 			end
 		end
 
-		for _, item in ipairs(rebuildQueue) do
-			local x, actions = item.x, item.actions
-			if debugMode then warn("🔁 Rebuild tại X =", x, "- Lần thử:", rebuildAttempts[x]) end
+		for _, entry in ipairs(queue) do
+			local x, actions = entry.x, entry.actions
+			if debugMode then warn("🔁 Rebuild tại X =", x) end
 			for _, act in ipairs(actions) do
-				local t = act.type
-				local d = act.data
+				local t, d = act.type, act.data
 				if t == "Place" then
 					WaitForCash(d.Cost or 100)
 					local ok = pcall(function()
 						Remotes.PlaceTower:InvokeServer(d.A1, d.Name, d.Vector, d.Rotation)
 					end)
-					if not ok and debugMode then warn("❌ Fail Place tại X =", x) end
+					if not ok and debugMode then warn("❌ Place thất bại tại X =", x) end
 					task.wait(1)
 
 				elseif t == "Upgrade" then
@@ -193,7 +195,7 @@ task.spawn(function()
 							Remotes.ChangeQueryType:FireServer(hash2, d.Type)
 						end)
 					else
-						if debugMode then warn("⚠️ Không tìm thấy tower để đổi target tại X =", x) end
+						if debugMode then warn("⚠️ Không tìm thấy tower để set target tại X =", x) end
 					end
 				end
 			end
@@ -204,4 +206,4 @@ task.spawn(function()
 	end
 end)
 
-warn("✅ Auto Rebuild (Runtime) đã khởi động – debug =", debugMode)
+warn("✅ Auto Rebuild Runtime đã khởi động – Debug:", debugMode)
