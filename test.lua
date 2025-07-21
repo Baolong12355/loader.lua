@@ -1,4 +1,5 @@
--- [[ Auto Rebuild In-Game - No Macros - Không tự huỷ, không log Sell ]]
+-- [[ Auto Rebuild In-Game - Test Mode - Cho phép rebuild dù bán ]]
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
@@ -75,7 +76,6 @@ local towerRecords = {} -- [X] = { {type = "...", data = {...}} }
 
 local function logAction(typ, data)
     if not data.Axis then return end
-    if typ == "Sell" then return end -- ❌ Không log Sell để tránh tự huỷ
     towerRecords[data.Axis] = towerRecords[data.Axis] or {}
     table.insert(towerRecords[data.Axis], {type = typ, data = data})
 end
@@ -133,7 +133,7 @@ task.spawn(function()
     while true do
         for x, actions in pairs(towerRecords) do
             local hash, tower = GetTowerByX(x)
-            if not hash then
+            if not hash then -- ✅ luôn rebuild nếu tower biến mất (kể cả do bán)
                 for _, act in ipairs(actions) do
                     local t = act.type
                     local d = act.data
@@ -173,4 +173,4 @@ task.spawn(function()
     end
 end)
 
-print("✅ Auto Rebuild đã chạy (không tự huỷ - không log Sell)")
+print("✅ Auto Rebuild (Test Mode) đã chạy – sẽ rebuild lại cả khi bạn bán tower")
