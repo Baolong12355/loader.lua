@@ -1,32 +1,28 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local fileName = "record.txt"
 
--- Xoá file cũ
-if isfile(fileName) then delfile(fileName) end
-writefile(fileName, "")
-
+if isfile(fileName) then delfile(fileName) end writefile(fileName, "")
 
 local pendingQueue = {} local timeout = 2
 
-local function serialize(v) -- same as before end
+local function serialize(v) if typeof(v) == "Vector3" then return "Vector3.new(" .. v.X .. "," .. v.Y .. "," .. v.Z .. ")" elseif typeof(v) == "Vector2int16" then return "Vector2int16.new(" .. v.X .. "," .. v.Y .. ")" elseif type(v) == "table" then local out = {} for k, val in pairs(v) do out[#out + 1] = "[" .. tostring(k) .. "]=" .. serialize(val) end return "{" .. table.concat(out, ",") .. "}" else return tostring(v) end end
 
-local function serializeArgs(...) -- same as before end
+local function serializeArgs(...) local args = {...} local out = {} for i, v in ipairs(args) do out[i] = serialize(v) end return table.concat(out, ", ") end
 
-local function confirmAndWrite() if #pendingQueue == 0 then return end local confirmed = table.remove(pendingQueue, 1) appendfile(fileName, confirmed.code .. "\n") end
+local function tryConfirm(typeStr) for i, item in ipairs(pendingQueue) do if item.type == typeStr then appendfile(fileName, item.code .. "\n") table.remove(pendingQueue, i) return end end end
 
- local function tryConfirm(typeStr) for i, item in ipairs(pendingQueue) do if item.type == typeStr then appendfile(fileName, item.code .. "\n") table.remove(pendingQueue, i) return end end end
+local function setPending(typeStr, code) table.insert(pendingQueue, { type = typeStr, code = code, created = tick() }) end
 
- local function setPending(typeStr, code) table.insert(pendingQueue, { type = typeStr, code = code, created = tick() }) end
-
- ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data) local d = data[1] if not d then return end if d.Creation then tryConfirm("Place") else tryConfirm("Sell") end end)
+ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data) local d = data[1] if not d then return end if d.Creation then tryConfirm("Place") else tryConfirm("Sell") end end)
 
 ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data) if data[1] then tryConfirm("Upgrade") end end)
 
 ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data) if data[1] then tryConfirm("Target") end end)
 
- task.spawn(function() while true do task.wait(0.5) local now = tick() for i = #pendingQueue, 1, -1 do if now - pendingQueue[i].created > timeout then warn("❌ Không xác thực được: " .. pendingQueue[i].type) table.remove(pendingQueue, i) end end end end)
+task.spawn(function() while true do task.wait(0.05) local now = tick() for i = #pendingQueue, 1, -1 do if now - pendingQueue[i].created > timeout then warn("❌ Không xác thực được: " .. pendingQueue[i].type) table.remove(pendingQueue, i) end end end end)
 
- local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...) local args = serializeArgs(...) local name = self.Name
+local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...) local args = serializeArgs(...) local name = self.Name
 
 if name == "PlaceTower" then
     setPending("Place", "TDX:placeTower(" .. args .. ")")
@@ -42,7 +38,9 @@ return oldFireServer(self, ...)
 
 end)
 
- local oldNamecall oldNamecall = hookmetamethod(game, "__namecall", function(self, ...) local method = getnamecallmethod() if method == "FireServer" or method == "InvokeServer" then local args = serializeArgs(...) local name = self.Name
+local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...) local args = serializeArgs(...) return oldInvokeServer(self, ...) end)
+
+local oldNamecall oldNamecall = hookmetamethod(game, "__namecall", function(self, ...) local method = getnamecallmethod() if method == "FireServer" or method == "InvokeServer" then local args = serializeArgs(...) local name = self.Name
 
 if name == "PlaceTower" then
         setPending("Place", "TDX:placeTower(" .. args .. ")")
@@ -59,6 +57,8 @@ return oldNamecall(self, ...)
 end)
 
 print("✅ Đã bật chế độ ghi nâng cấp spam bằng queue")
+
+
 
 
 print("Script đã chạy - Chế độ ghi log đơn giản (không xác nhận từ server)")
