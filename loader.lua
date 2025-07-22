@@ -1,6 +1,6 @@
 repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
 
---  getgenv().TDX_Config đã được khai báo ở ngoài
+-- getgenv().TDX_Config đã được khai báo ở ngoài
 
 local function tryRun(name, enabled, url)
     if enabled and typeof(url) == "string" and url:match("^https?://") then
@@ -16,6 +16,16 @@ local function tryRun(name, enabled, url)
     else
         print("⏭️ Skipped:", name)
     end
+end
+
+-- Tự động bật Voter nếu có mapvoting
+if getgenv().TDX_Config["mapvoting"] ~= nil then
+    getgenv().TDX_Config["Voter"] = true
+end
+
+-- Tự động bật Loadout nếu có loadout
+if getgenv().TDX_Config["loadout"] ~= nil then
+    getgenv().TDX_Config["Loadout"] = true
 end
 
 -- 📦 Link các module
@@ -34,11 +44,11 @@ local links = {
 
 -- 🔁 Chạy từng module trong thread riêng
 spawn(function() tryRun("Return Lobby",    getgenv().TDX_Config["Return Lobby"],    links["Return Lobby"]) end)
-spawn(function() tryRun("x1.5 Speed",       getgenv().TDX_Config["x1.5 Speed"],     links["x1.5 Speed"]) end)
-spawn(function() tryRun("Join Map",         getgenv().TDX_Config["Map"] ~= nil,     links["Join Map"]) end)
-spawn(function() tryRun("Auto Difficulty",  getgenv().TDX_Config["Auto Difficulty"] ~= nil, links["Auto Difficulty"]) end)
-spawn(function() tryRun("Loadout",          getgenv().TDX_Config["Loadout"],        links["Loadout"]) end)
-spawn(function() tryRun("Voter",            getgenv().TDX_Config["Voter"],          links["Voter"]) end)
+spawn(function() tryRun("x1.5 Speed",     getgenv().TDX_Config["x1.5 Speed"],      links["x1.5 Speed"]) end)
+spawn(function() tryRun("Join Map",       getgenv().TDX_Config["Map"] ~= nil,      links["Join Map"]) end)
+spawn(function() tryRun("Auto Difficulty",getgenv().TDX_Config["Auto Difficulty"] ~= nil, links["Auto Difficulty"]) end)
+spawn(function() tryRun("Loadout",       getgenv().TDX_Config["Loadout"],         links["Loadout"]) end)
+spawn(function() tryRun("Voter",         getgenv().TDX_Config["Voter"],           links["Voter"]) end)
 
 -- 🧠 Macro chạy theo loại
 if getgenv().TDX_Config["Macros"] == "run" then
