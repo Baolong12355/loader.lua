@@ -20,6 +20,17 @@ local specialMaps = {
     ["Christmas24Part2"] = true,
     
     -- Tên rút gọn
+    ["HW1"] = true,
+    ["HW2"] = true,
+    ["HW3"] = true,
+    ["HW4"] = true,
+    ["TB"] = true,
+    ["Xmas1"] = true,
+    ["Xmas2"] = true
+}
+
+-- Map từ tên rút gọn sang tên đầy đủ
+local mapNameMapping = {
     ["HW1"] = "Halloween Part 1",
     ["HW2"] = "Halloween Part 2",
     ["HW3"] = "Halloween Part 3",
@@ -30,7 +41,7 @@ local specialMaps = {
 }
 
 -- Chuyển tên rút gọn thành tên đầy đủ nếu cần
-targetMapName = specialMaps[targetMapName] or targetMapName
+local fullTargetMapName = mapNameMapping[targetMapName] or targetMapName
 
 local function isInLobby()
     return game.PlaceId == expectedPlaceId
@@ -38,8 +49,8 @@ end
 
 local function matchMap(a, b)
     -- So khớp cả tên đầy đủ và tên rút gọn
-    local fullNameA = specialMaps[a] or a
-    local fullNameB = specialMaps[b] or b
+    local fullNameA = mapNameMapping[a] or a
+    local fullNameB = mapNameMapping[b] or b
     return tostring(fullNameA or "") == tostring(fullNameB or "")
 end
 
@@ -52,18 +63,17 @@ local function enterDetectorExact(detector)
 end
 
 local function trySetMapIfNeeded()
-    -- Kiểm tra nếu map cần đổi bằng Remote
-    if specialMaps[targetMapName] or (specialMaps[targetMapName:gsub("%d+$", "")] and targetMapName:match("%d+$")) then
+    -- Kiểm tra nếu map cần đổi bằng Remote (giữ nguyên logic cũ)
+    if specialMaps[targetMapName] then
         -- 🔁 Đổi chế độ sang Party trước
         local argsPartyType = { "Party" }
         ReplicatedStorage:WaitForChild("Network"):WaitForChild("ClientChangePartyTypeRequest"):FireServer(unpack(argsPartyType))
         print("⚙️ Đã đổi sang chế độ Party")
 
-        -- 🎯 Chọn map (dùng tên đầy đủ nếu là tên rút gọn)
-        local mapToSet = specialMaps[targetMapName] or targetMapName
-        local argsMap = { mapToSet }
+        -- 🎯 Chọn map (dùng tên đầy đủ)
+        local argsMap = { fullTargetMapName }
         ReplicatedStorage:WaitForChild("Network"):WaitForChild("ClientChangePartyMapRequest"):FireServer(unpack(argsMap))
-        print("🎯 Đã chọn map:", mapToSet, "("..targetMapName..")")
+        print("🎯 Đã chọn map:", fullTargetMapName, "(từ "..targetMapName..")")
 
         task.wait(1.5)
 
@@ -138,7 +148,7 @@ end
 print("====================================")
 print("🛠️ TDX Auto Join Map - Phiên bản Tiếng Việt")
 print("🎯 Map mục tiêu:", targetMapName)
-print("📌 Tên đầy đủ:", specialMaps[targetMapName] or targetMapName)
+print("📌 Tên đầy đủ:", fullTargetMapName)
 print("====================================")
 
 while isInLobby() do
@@ -151,4 +161,4 @@ while isInLobby() do
     task.wait()
 end
 
-print("đ phải lobby tao đình công")
+print("📤 Script kết thúc")
