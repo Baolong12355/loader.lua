@@ -22,15 +22,17 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
 
 task.spawn(function() while true do task.wait(0.05) local now = tick() for i = #pendingQueue, 1, -1 do if now - pendingQueue[i].created > timeout then warn("❌ Không xác thực được: " .. pendingQueue[i].type) table.remove(pendingQueue, i) end end end end)
 
-local function handleRemote(name, args) if name == "TowerUpgradeRequest" then local hash, path, count = unpack(args) if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" then if path >= 0 and path <= 2 and count > 0 and count <= 5 then for _ = 1, count do setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, 1)", tostring(hash), path)) end end end elseif name == "PlaceTower" then setPending("Place", "TDX:placeTower(" .. serializeArgs(unpack(args)) .. ")") elseif name == "SellTower" then setPending("Sell", "TDX:sellTower(" .. serializeArgs(unpack(args)) .. ")") elseif name == "ChangeQueryType" then setPending("Target", "TDX:changeQueryType(" .. serializeArgs(unpack(args)) .. ")") end end
+local function handleRemote(name, args) if name == "TowerUpgradeRequest" then local hash, path, count = unpack(args) if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" then if path >= 0 and path <= 2 and count > 0 and count <= 5 then for _ = 1, count do setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, 1)", tostring(hash), path)) end end end elseif name == "PlaceTower" then local a1, towerName, vec, rot = unpack(args) if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then local code = string.format('TDX:placeTower(%d, "%s", Vector3.new(%.2f, %.2f, %.2f), %d)', a1, towerName, vec.X, vec.Y, vec.Z, rot) setPending("Place", code) end elseif name == "SellTower" then setPending("Sell", "TDX:sellTower(" .. serializeArgs(unpack(args)) .. ")") elseif name == "ChangeQueryType" then setPending("Target", "TDX:changeQueryType(" .. serializeArgs(unpack(args)) .. ")") end end
 
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...) local name = self.Name local args = {...} handleRemote(name, args) return oldFireServer(self, ...) end)
 
-local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...) return oldInvokeServer(self, ...) end)
+local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...) local name = self.Name local args = {...} handleRemote(name, args) return oldInvokeServer(self, ...) end)
 
-local oldNamecall oldNamecall = hookmetamethod(game, "__namecall", function(self, ...) if checkcaller() then return oldNamecall(self, ...) end local method = getnamecallmethod() if method ~= "FireServer" then return oldNamecall(self, ...) end local name = self.Name local args = {...} handleRemote(name, args) return oldNamecall(self, ...) end)
+local oldNamecall oldNamecall = hookmetamethod(game, "__namecall", function(self, ...) if checkcaller() then return oldNamecall(self, ...) end local method = getnamecallmethod() local name = self.Name local args = {...} if method == "FireServer" or method == "InvokeServer" then handleRemote(name, args) end return oldNamecall(self, ...) end)
 
-print("✅ Queue ghi log đa kênh + chống lộn path đã bật")
+print("✅ Full hook hoạt động: PlaceTower đã được ghi lại qua InvokeServer")
+
+
 
 
 
