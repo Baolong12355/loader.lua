@@ -1,5 +1,4 @@
 
-
 -- 🕹️ Không chạy nếu không có cấu hình
 if not getgenv().TDX_Config or not getgenv().TDX_Config.mapvoter or not getgenv().TDX_Config.mapvoting then return end
 
@@ -10,9 +9,9 @@ local TeleportService = game:GetService("TeleportService")
 local player = Players.LocalPlayer
 local gui = player:WaitForChild("PlayerGui")
 
--- 🧱 Hàm viết hoa toàn bộ
-local function toUpper(str)
-    return string.upper(str)
+-- 🧱 Viết hoa toàn bộ + chuẩn hóa chuỗi
+local function normalize(str)
+    return string.upper((str:gsub("%s+", " ")):gsub("^%s*(.-)%s*$", "%1"))
 end
 
 -- 🧱 Viết hoa chữ cái đầu mỗi từ
@@ -32,7 +31,7 @@ end
 repeat task.wait() until gui:FindFirstChild("Interface") and gui.Interface:FindFirstChild("GameInfoBar") and gui.Interface.GameInfoBar:FindFirstChild("MapVoting") and gui.Interface.GameInfoBar.MapVoting.Visible
 
 -- 📄 Kiểm tra MapName trên 4 VotingScreen
-local mapNameUpper = toUpper(getgenv().TDX_Config.mapvoting)
+local targetMap = normalize(getgenv().TDX_Config.mapvoting)
 local mapScreens = workspace:WaitForChild("Game"):WaitForChild("MapVoting"):WaitForChild("VotingScreens")
 
 local found = false
@@ -41,8 +40,8 @@ for i = 1, 4 do
     if screen then
         local mapGui = screen:FindFirstChild("ScreenPart"):FindFirstChild("SurfaceGui")
         if mapGui and mapGui:FindFirstChild("MapName") then
-            local displayedName = mapGui.MapName.Text
-            if toUpper(displayedName) == mapNameUpper then
+            local displayedName = normalize(mapGui.MapName.Text)
+            if displayedName == targetMap then
                 found = true
                 break
             end
@@ -57,7 +56,7 @@ if not found then
 
     while not changeGui.Disabled.Visible do
         changeRemote:FireServer(true)
-        task.wait(0.5)
+        task.wait(0.1)
     end
 end
 
@@ -66,9 +65,9 @@ if found then
     local voteName = titleCase(getgenv().TDX_Config.mapvoting)
     local voteRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("MapVoteCast")
     local readyRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("MapVoteReady")
-    
+
     voteRemote:FireServer(voteName)
-    task.wait(0.25)
+    task.wait(0.1)
     readyRemote:FireServer()
 else
     teleportToLobby()
