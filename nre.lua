@@ -1,11 +1,38 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local fileName = "record.txt"
+
+if isfile(fileName) then delfile(fileName) end writefile(fileName, "")
+
+local pendingQueue = {} local timeout = 2
+
+local function serialize(v) if typeof(v) == "Vector3" then return "Vector3.new(" .. v.X .. "," .. v.Y .. "," .. v.Z .. ")" elseif typeof(v) == "Vector2int16" then return "Vector2int16.new(" .. v.X .. "," .. v.Y .. ")" elseif type(v) == "table" then local out = {} for k, val in pairs(v) do out[#out + 1] = "[" .. tostring(k) .. "]=" .. serialize(val) end return "{" .. table.concat(out, ",") .. "}" else return tostring(v) end end
+
+local function serializeArgs(...) local args = {...} local out = {} for i, v in ipairs(args) do out[i] = serialize(v) end return table.concat(out, ", ") end
+
+local function tryConfirm(typeStr) for i, item in ipairs(pendingQueue) do if item.type == typeStr then appendfile(fileName, item.code .. "\n") table.remove(pendingQueue, i) return end end end
+
+local function setPending(typeStr, code) table.insert(pendingQueue, { type = typeStr, code = code, created = tick() }) end
+
+ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data) local d = data[1] if not d then return end if d.Creation then tryConfirm("Place") else tryConfirm("Sell") end end)
+
+ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data) if data[1] then tryConfirm("Upgrade") end end)
+
+ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data) if data[1] then tryConfirm("Target") end end)
+
+task.spawn(function() while true do task.wait(0.05) local now = tick() for i = #pendingQueue, 1, -1 do if now - pendingQueue[i].created > timeout then warn("❌ Không xác thực được: " .. pendingQueue[i].type) table.remove(pendingQueue, i) end end end end)
+
+local function handleRemote(name, args) if name == "TowerUpgradeRequest" then local hash, path, count = unpack(args) if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" then if path >= 0 and path <= 2 and count > 0 and count <= 5 then for _ = 1, count do setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, 1)", tostring(hash), path)) end end end elseif name == "PlaceTower" then setPending("Place", "TDX:placeTower(" .. serializeArgs(unpack(args)) .. ")") elseif name == "SellTower" then setPending("Sell", "TDX:sellTower(" .. serializeArgs(unpack(args)) .. ")") elseif name == "ChangeQueryType" then setPending("Target", "TDX:changeQueryType(" .. serializeArgs(unpack(args)) .. ")") end end
+
+local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...) local name = self.Name local args = {...} handleRemote(name, args) return oldFireServer(self, ...) end)
+
+local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...) return oldInvokeServer(self, ...) end)
+
+local oldNamecall oldNamecall = hookmetamethod(game, "__namecall", function(self, ...) if checkcaller() then return oldNamecall(self, ...) end local method = getnamecallmethod() if method ~= "FireServer" then return oldNamecall(self, ...) end local name = self.Name local args = {...} handleRemote(name, args) return oldNamecall(self, ...) end)
+
+print("✅ Queue ghi log đa kênh + chống lộn path đã bật")
 
 
-
-
-
-
-
-print("Script đã chạy - Chế độ ghi log đơn giản (không xác nhận từ server)")
 
 local txtFile = "record.txt"
 local outJson = "tdx/macros/x.json"
