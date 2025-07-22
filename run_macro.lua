@@ -52,7 +52,7 @@ end
 -- Cấu hình mặc định
 local defaultConfig = {
     ["Macro Name"] = "event",
-    ["PlaceMode"] = "Ashed",
+    ["PlaceMode"] = "Rewrite",
     ["ForceRebuildEvenIfSold"] = true,
     ["MaxRebuildRetry"] = nil,
     ["SellAllDelay"] = 0.1,
@@ -79,7 +79,7 @@ local function getMaxAttempts()
     if placeMode == "Ashed" then
         return 1  -- Không retry
     elseif placeMode == "Rewrite" then
-        return 3  -- Retry 3 lần
+        return 10  -- Retry 3 lần
     else
         return 1  -- Mặc định không retry nếu không rõ mode
     end
