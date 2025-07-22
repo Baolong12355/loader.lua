@@ -8,10 +8,6 @@ local offset = 0
 if isfile(fileName) then delfile(fileName) end
 writefile(fileName, "")
 
--- Pending xác nhận
-local pending = nil
-local timeout = 2
-
 -- Serialize giá trị
 local function serialize(v)
     if typeof(v) == "Vector3" then
@@ -39,64 +35,12 @@ local function serializeArgs(...)
     return table.concat(out, ", ")
 end
 
--- Xác nhận và ghi
-local function confirmAndWrite()
-    if not pending then return end
+-- Ghi log trực tiếp
+local function writeAction(code)
     appendfile(fileName, "task.wait(" .. ((time() - offset) - startTime) .. ")\n")
-    appendfile(fileName, pending.code .. "\n")
+    appendfile(fileName, code .. "\n")
     startTime = time() - offset
-    pending = nil
 end
-
--- Ghi nếu server phản hồi đúng loại
-local function tryConfirm(typeStr)
-    if pending and pending.type == typeStr then
-        confirmAndWrite()
-    end
-end
-
--- Ghi log
-local function setPending(typeStr, code)
-    pending = {
-        type = typeStr,
-        code = code,
-        created = tick()
-    }
-end
-
--- Lắng nghe Remote xác thực
-ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
-    local d = data[1]
-    if not d then return end
-    if d.Creation then
-        tryConfirm("Place")
-    else
-        tryConfirm("Sell")
-    end
-end)
-
-ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
-    if data[1] then
-        tryConfirm("Upgrade")
-    end
-end)
-
-ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
-    if data[1] then
-        tryConfirm("Target")
-    end
-end)
-
--- Timeout check
-task.spawn(function()
-    while true do
-        task.wait()
-        if pending and tick() - pending.created > timeout then
-            warn("❌ Không xác thực được: " .. pending.type)
-            pending = nil
-        end
-    end
-end)
 
 -- Hook FireServer
 local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
@@ -104,13 +48,13 @@ local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, funct
     local name = self.Name
 
     if name == "PlaceTower" then
-        setPending("Place", "TDX:placeTower(" .. args .. ")")
+        writeAction("TDX:placeTower(" .. args .. ")")
     elseif name == "SellTower" then
-        setPending("Sell", "TDX:sellTower(" .. args .. ")")
+        writeAction("TDX:sellTower(" .. args .. ")")
     elseif name == "TowerUpgradeRequest" then
-        setPending("Upgrade", "TDX:upgradeTower(" .. args .. ")")
+        writeAction("TDX:upgradeTower(" .. args .. ")")
     elseif name == "ChangeQueryType" then
-        setPending("Target", "TDX:changeQueryType(" .. args .. ")")
+        writeAction("TDX:changeQueryType(" .. args .. ")")
     end
 
     return oldFireServer(self, ...)
@@ -131,19 +75,57 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         local name = self.Name
 
         if name == "PlaceTower" then
-            setPending("Place", "TDX:placeTower(" .. args .. ")")
+            writeAction("TDX:placeTower(" .. args .. ")")
         elseif name == "SellTower" then
-            setPending("Sell", "TDX:sellTower(" .. args .. ")")
+            writeAction("TDX:sellTower(" .. args .. ")")
         elseif name == "TowerUpgradeRequest" then
-            setPending("Upgrade", "TDX:upgradeTower(" .. args .. ")")
+            writeAction("TDX:upgradeTower(" .. args .. ")")
         elseif name == "ChangeQueryType" then
-            setPending("Target", "TDX:changeQueryType(" .. args .. ")")
+            writeAction("TDX:changeQueryType(" .. args .. ")")
         end
     end
     return oldNamecall(self, ...)
 end)
 
-print("cak")
+print("Script đã chạy")    elseif name == "SellTower" then
+        writeAction("TDX:sellTower(" .. args .. ")")
+    elseif name == "TowerUpgradeRequest" then
+        writeAction("TDX:upgradeTower(" .. args .. ")")
+    elseif name == "ChangeQueryType" then
+        writeAction("TDX:changeQueryType(" .. args .. ")")
+    end
+
+    return oldFireServer(self, ...)
+end)
+
+-- Hook InvokeServer
+local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+    local args = serializeArgs(...)
+    return oldInvokeServer(self, ...)
+end)
+
+-- Hook __namecall
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    if method == "FireServer" or method == "InvokeServer" then
+        local args = serializeArgs(...)
+        local name = self.Name
+
+        if name == "PlaceTower" then
+            writeAction("TDX:placeTower(" .. args .. ")")
+        elseif name == "SellTower" then
+            writeAction("TDX:sellTower(" .. args .. ")")
+        elseif name == "TowerUpgradeRequest" then
+            writeAction("TDX:upgradeTower(" .. args .. ")")
+        elseif name == "ChangeQueryType" then
+            writeAction("TDX:changeQueryType(" .. args .. ")")
+        end
+    end
+    return oldNamecall(self, ...)
+end)
+
+print("Script đã chạy")
 
 
 
