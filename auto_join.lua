@@ -5,26 +5,42 @@ local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
 local config = getgenv().TDX_Config or {}
-local targetMapName = config["Map"] or "Christmas24Part1"
-local expectedPlaceId = 9503261072
+local targetMapName = config["Map"] or "Xmas1" -- Mặc định là Xmas1 (Christmas24Part1)
+local expectedPlaceId = 9503261072 -- ID lobby TDX
 
--- Map cần đổi bằng Remote (ghi đúng tên, phân biệt hoa thường)
+-- Danh sách map cần đổi bằng Remote (dùng cả tên đầy đủ và tên rút gọn)
 local specialMaps = {
+    -- Tên đầy đủ
     ["Halloween Part 1"] = true,
     ["Halloween Part 2"] = true,
     ["Halloween Part 3"] = true,
     ["Halloween Part 4"] = true,
     ["Tower Battles"] = true,
     ["Christmas24Part1"] = true,
-    ["Christmas24Part2"] = true
+    ["Christmas24Part2"] = true,
+    
+    -- Tên rút gọn
+    ["HW1"] = "Halloween Part 1",
+    ["HW2"] = "Halloween Part 2",
+    ["HW3"] = "Halloween Part 3",
+    ["HW4"] = "Halloween Part 4",
+    ["TB"] = "Tower Battles",
+    ["Xmas1"] = "Christmas24Part1",
+    ["Xmas2"] = "Christmas24Part2"
 }
+
+-- Chuyển tên rút gọn thành tên đầy đủ nếu cần
+targetMapName = specialMaps[targetMapName] or targetMapName
 
 local function isInLobby()
     return game.PlaceId == expectedPlaceId
 end
 
 local function matchMap(a, b)
-    return tostring(a or "") == tostring(b or "")
+    -- So khớp cả tên đầy đủ và tên rút gọn
+    local fullNameA = specialMaps[a] or a
+    local fullNameB = specialMaps[b] or b
+    return tostring(fullNameA or "") == tostring(fullNameB or "")
 end
 
 local function enterDetectorExact(detector)
@@ -36,16 +52,18 @@ local function enterDetectorExact(detector)
 end
 
 local function trySetMapIfNeeded()
-    if specialMaps[targetMapName] then
+    -- Kiểm tra nếu map cần đổi bằng Remote
+    if specialMaps[targetMapName] or (specialMaps[targetMapName:gsub("%d+$", "")] and targetMapName:match("%d+$")) then
         -- 🔁 Đổi chế độ sang Party trước
         local argsPartyType = { "Party" }
         ReplicatedStorage:WaitForChild("Network"):WaitForChild("ClientChangePartyTypeRequest"):FireServer(unpack(argsPartyType))
         print("⚙️ Đã đổi sang chế độ Party")
 
-        -- 🎯 Chọn map
-        local argsMap = { targetMapName }
+        -- 🎯 Chọn map (dùng tên đầy đủ nếu là tên rút gọn)
+        local mapToSet = specialMaps[targetMapName] or targetMapName
+        local argsMap = { mapToSet }
         ReplicatedStorage:WaitForChild("Network"):WaitForChild("ClientChangePartyMapRequest"):FireServer(unpack(argsMap))
-        print("🎯 Đã chọn map:", targetMapName)
+        print("🎯 Đã chọn map:", mapToSet, "("..targetMapName..")")
 
         task.wait(1.5)
 
@@ -116,6 +134,13 @@ local function tryEnterMap()
     return true
 end
 
+-- Thông báo bắt đầu script
+print("====================================")
+print("🛠️ TDX Auto Join Map - Phiên bản Tiếng Việt")
+print("🎯 Map mục tiêu:", targetMapName)
+print("📌 Tên đầy đủ:", specialMaps[targetMapName] or targetMapName)
+print("====================================")
+
 while isInLobby() do
     local ok, result = pcall(tryEnterMap)
     if not ok then
@@ -126,4 +151,4 @@ while isInLobby() do
     task.wait()
 end
 
-print("📤 Script kết thúc")
+print("Đ phải lobby bố m đình công")
