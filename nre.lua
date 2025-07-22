@@ -40,23 +40,37 @@ end)
 
 local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...) local args = serializeArgs(...) return oldInvokeServer(self, ...) end)
 
-local oldNamecall oldNamecall = hookmetamethod(game, "__namecall", function(self, ...) local method = getnamecallmethod() if method == "FireServer" or method == "InvokeServer" then local args = serializeArgs(...) local name = self.Name
+local oldNamecall oldNamecall = hookmetamethod(game, "__namecall", function(self, ...) if checkcaller() then return oldNamecall(self, ...) end
 
-if name == "PlaceTower" then
-        setPending("Place", "TDX:placeTower(" .. args .. ")")
-    elseif name == "SellTower" then
-        setPending("Sell", "TDX:sellTower(" .. args .. ")")
-    elseif name == "TowerUpgradeRequest" then
-        setPending("Upgrade", "TDX:upgradeTower(" .. args .. ")")
-    elseif name == "ChangeQueryType" then
-        setPending("Target", "TDX:changeQueryType(" .. args .. ")")
-    end
+local method = getnamecallmethod()
+if method ~= "FireServer" then
+    return oldNamecall(self, ...)
 end
+
+local args = {...}
+local name = self.Name
+
+if name == "TowerUpgradeRequest" then
+    local hash, path, count = unpack(args)
+    print("[Upgrade Debug]", "hash:", hash, "path:", path, "count:", count)
+    if type(path) == "number" and type(count) == "number" then
+        setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count))
+    end
+elseif name == "PlaceTower" then
+    setPending("Place", "TDX:placeTower(" .. serializeArgs(...) .. ")")
+elseif name == "SellTower" then
+    setPending("Sell", "TDX:sellTower(" .. serializeArgs(...) .. ")")
+elseif name == "ChangeQueryType" then
+    setPending("Target", "TDX:changeQueryType(" .. serializeArgs(...) .. ")")
+end
+
 return oldNamecall(self, ...)
 
 end)
 
 print("✅ Đã bật chế độ ghi nâng cấp spam bằng queue")
+
+
 
 
 
