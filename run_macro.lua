@@ -73,6 +73,18 @@ for key, value in pairs(defaultConfig) do
     end
 end
 
+-- Hàm lấy số lần retry dựa trên PlaceMode
+local function getMaxAttempts()
+    local placeMode = globalEnv.TDX_Config.PlaceMode or "Ashed"
+    if placeMode == "Ashed" then
+        return 1  -- Không retry
+    elseif placeMode == "Rewrite" then
+        return 3  -- Retry 3 lần
+    else
+        return 1  -- Mặc định không retry nếu không rõ mode
+    end
+end
+
 local function SafeRequire(path, timeout)
     timeout = timeout or 5
     local startTime = tick()
@@ -221,7 +233,7 @@ local function WaitForCash(amount)
 end
 
 local function PlaceTowerRetry(args, axisValue, towerName)
-    local maxAttempts = 10
+    local maxAttempts = getMaxAttempts()
     local attempts = 0
     
     while attempts < maxAttempts do
@@ -246,7 +258,7 @@ local function PlaceTowerRetry(args, axisValue, towerName)
 end
 
 local function UpgradeTowerRetry(axisValue, path)
-    local maxAttempts = 10
+    local maxAttempts = getMaxAttempts()
     local attempts = 0
     
     while attempts < maxAttempts do
@@ -282,7 +294,7 @@ local function UpgradeTowerRetry(axisValue, path)
 end
 
 local function ChangeTargetRetry(axisValue, targetType)
-    local maxAttempts = 5
+    local maxAttempts = getMaxAttempts()
     local attempts = 0
     
     while attempts < maxAttempts do
@@ -299,7 +311,7 @@ local function ChangeTargetRetry(axisValue, targetType)
 end
 
 local function SellTowerRetry(axisValue)
-    local maxAttempts = 5
+    local maxAttempts = getMaxAttempts()
     local attempts = 0
     
     while attempts < maxAttempts do
@@ -483,7 +495,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                     task.wait(config.RebuildCheckInterval)
                 end
             else
-                task.wait(0.5)
+                task.wait(0.25)
             end
         end
     end)
