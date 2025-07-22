@@ -27,49 +27,81 @@ local specialMaps = {
     ["TB"] = "Tower Battles",
     ["Xmas1"] = "Christmas24Part1",
     ["Xmas2"] = "Christmas24Part2"
+-- ✅ Auto Join Map - TDX (Đã sửa lỗi tên rút gọn)
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local config = getgenv().TDX_Config or {}
+local targetMapInput = config["Map"] or "Xmas1" -- Cho phép nhập tên rút gọn
+local expectedPlaceId = 9503261072
+
+-- Bảng ánh xạ TÊN RÚT GỌN → TÊN ĐẦY ĐỦ (chỉ dùng cho Remote)
+local fullMapNames = {
+    -- Halloween
+    ["HW1"] = "Halloween Part 1",
+    ["HW2"] = "Halloween Part 2", 
+    ["HW3"] = "Halloween Part 3",
+    ["HW4"] = "Halloween Part 4",
+    
+    -- Christmas
+    ["Xmas1"] = "Christmas24Part1",
+    ["Xmas2"] = "Christmas24Part2",
+    
+    -- Tower Battles
+    ["TB"] = "Tower Battles"
 }
 
--- Chuyển tên rút gọn thành tên đầy đủ nếu cần
-targetMapName = specialMaps[targetMapName] or targetMapName
+-- Danh sách map cần đổi bằng Remote (dùng TÊN ĐẦY ĐỦ)
+local specialMaps = {
+    ["Halloween Part 1"] = true,
+    ["Halloween Part 2"] = true,
+    ["Halloween Part 3"] = true,
+    ["Halloween Part 4"] = true,
+    ["Tower Battles"] = true,
+    ["Christmas24Part1"] = true,
+    ["Christmas24Part2"] = true
+}
+
+-- Chuyển đổi tên map đầu vào → tên đầy đủ
+local function getFullMapName(input)
+    return fullMapNames[input] or input
+end
+
+local targetMapFullName = getFullMapName(targetMapInput) -- Tên đầy đủ dùng cho Remote
+local targetMapName = targetMapInput -- Giữ nguyên tên gốc để so sánh
+
+print("🎯 Map mục tiêu:", targetMapName)
+print("📌 Tên đầy đủ:", targetMapFullName)
 
 local function isInLobby()
     return game.PlaceId == expectedPlaceId
 end
 
-local function matchMap(a, b)
-    -- So khớp cả tên đầy đủ và tên rút gọn
-    local fullNameA = specialMaps[a] or a
-    local fullNameB = specialMaps[b] or b
-    return tostring(fullNameA or "") == tostring(fullNameB or "")
-end
-
-local function enterDetectorExact(detector)
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        hrp.CFrame = detector.CFrame * CFrame.new(0, 0, -2)
-    end
+local function matchMap(displayName, targetName)
+    -- So khớp cả tên hiển thị và tên đích (có thể là rút gọn hoặc đầy đủ)
+    local displayFull = getFullMapName(displayName)
+    local targetFull = getFullMapName(targetName)
+    return displayFull == targetFull
 end
 
 local function trySetMapIfNeeded()
-    -- Kiểm tra nếu map cần đổi bằng Remote
-    if specialMaps[targetMapName] or (specialMaps[targetMapName:gsub("%d+$", "")] and targetMapName:match("%d+$")) then
-        -- 🔁 Đổi chế độ sang Party trước
-        local argsPartyType = { "Party" }
-        ReplicatedStorage:WaitForChild("Network"):WaitForChild("ClientChangePartyTypeRequest"):FireServer(unpack(argsPartyType))
+    -- Chỉ đổi map nếu nằm trong danh sách specialMaps (dùng tên ĐẦY ĐỦ)
+    if specialMaps[targetMapFullName] then
+        -- 🔁 Đổi sang Party Mode
+        ReplicatedStorage.Network.ClientChangePartyTypeRequest:FireServer("Party")
         print("⚙️ Đã đổi sang chế độ Party")
-
-        -- 🎯 Chọn map (dùng tên đầy đủ nếu là tên rút gọn)
-        local mapToSet = specialMaps[targetMapName] or targetMapName
-        local argsMap = { mapToSet }
-        ReplicatedStorage:WaitForChild("Network"):WaitForChild("ClientChangePartyMapRequest"):FireServer(unpack(argsMap))
-        print("🎯 Đã chọn map:", mapToSet, "("..targetMapName..")")
-
+        
+        -- 🎯 Gửi TÊN ĐẦY ĐỦ lên Remote
+        ReplicatedStorage.Network.ClientChangePartyMapRequest:FireServer(targetMapFullName)
+        print("📡 Đã gửi tên map lên server:", targetMapFullName)
+        
         task.wait(1.5)
-
+        
         -- ▶️ Bắt đầu game
-        ReplicatedStorage:WaitForChild("Network"):WaitForChild("ClientStartGameRequest"):FireServer()
-        print("🚀 Đã gửi yêu cầu bắt đầu game")
+        ReplicatedStorage.Network.ClientStartGameRequest:FireServer()
+        print("🚀 Đã yêu cầu bắt đầu game")
     end
 end
 
