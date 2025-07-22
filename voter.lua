@@ -1,75 +1,75 @@
--- ⚙️ Config kiểm tra
-getgenv().TDX_Config = {
-    mapvoter = true,
-    mapvoting = "MILITARY BASE" -- viết hoa chữ cái đầu của mỗi từ (dùng khi gửi remote)
-}
 
--- 🚫 Nếu chưa bật config thì không làm gì
+
+-- 🕹️ Không chạy nếu không có cấu hình
 if not getgenv().TDX_Config or not getgenv().TDX_Config.mapvoter or not getgenv().TDX_Config.mapvoting then return end
 
--- ⏳ Chờ GUI hiện MapVoting
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
+
 local player = Players.LocalPlayer
+local gui = player:WaitForChild("PlayerGui")
 
-repeat task.wait() until player:FindFirstChild("PlayerGui")
-local gui = player.PlayerGui:WaitForChild("Interface"):WaitForChild("GameInfoBar"):WaitForChild("MapVoting")
-
--- 🧠 Hàm viết hoa toàn bộ
+-- 🧱 Hàm viết hoa toàn bộ
 local function toUpper(str)
     return string.upper(str)
 end
 
--- 🧠 Hàm viết hoa chữ cái đầu mỗi từ
+-- 🧱 Viết hoa chữ cái đầu mỗi từ
 local function titleCase(str)
-    return str:gsub("(%w)(%w*)", function(first, rest)
+    return string.gsub(str, "(%w)(%w*)", function(first, rest)
         return string.upper(first) .. string.lower(rest)
     end)
 end
 
--- 📌 Tên map để kiểm tra và vote
-local targetMapUpper = toUpper(getgenv().TDX_Config.mapvoting)
-local targetMapTitle = titleCase(getgenv().TDX_Config.mapvoting)
+-- 🎯 Hàm teleport về lobby Tower Defense X
+local function teleportToLobby()
+    local lobbyPlaceId = 9503261072
+    TeleportService:Teleport(lobbyPlaceId)
+end
 
--- 📦 Remote
-local changeRemote = ReplicatedStorage.Remotes:WaitForChild("MapChangeVoteCast")
-local voteRemote = ReplicatedStorage.Remotes:WaitForChild("MapVoteCast")
-local readyRemote = ReplicatedStorage.Remotes:WaitForChild("MapVoteReady")
+-- ⏳ Đợi GUI hiện
+repeat task.wait() until gui:FindFirstChild("Interface") and gui.Interface:FindFirstChild("GameInfoBar") and gui.Interface.GameInfoBar:FindFirstChild("MapVoting") and gui.Interface.GameInfoBar.MapVoting.Visible
 
-local voted = false
-while true do
-    task.wait(0.25)
+-- 📄 Kiểm tra MapName trên 4 VotingScreen
+local mapNameUpper = toUpper(getgenv().TDX_Config.mapvoting)
+local mapScreens = workspace:WaitForChild("Game"):WaitForChild("MapVoting"):WaitForChild("VotingScreens")
 
-    local done = player.PlayerGui.Interface:FindFirstChild("MapVotingScreen") and
-                 player.PlayerGui.Interface.MapVotingScreen.Bottom.ChangeMap.Disabled.Visible
-
-    if done then break end -- ✅ Hết lượt đổi map
-
-    for i = 1, 4 do
-        local screen = workspace:FindFirstChild("Game") and workspace.Game.MapVoting.VotingScreens:FindFirstChild("VotingScreen" .. i)
-        if screen then
-            local mapGui = screen:FindFirstChild("ScreenPart") and screen.ScreenPart:FindFirstChild("SurfaceGui")
-            local mapLabel = mapGui and mapGui:FindFirstChild("MapName")
-            if mapLabel and typeof(mapLabel.Text) == "string" then
-                local name = toUpper(mapLabel.Text)
-                if name ~= targetMapUpper then
-                    -- 🔁 Gọi remote đổi map nếu không đúng
-                    changeRemote:FireServer(true)
-                else
-                    voted = true
-                end
+local found = false
+for i = 1, 4 do
+    local screen = mapScreens:FindFirstChild("VotingScreen" .. i)
+    if screen then
+        local mapGui = screen:FindFirstChild("ScreenPart"):FindFirstChild("SurfaceGui")
+        if mapGui and mapGui:FindFirstChild("MapName") then
+            local displayedName = mapGui.MapName.Text
+            if toUpper(displayedName) == mapNameUpper then
+                found = true
+                break
             end
         end
     end
 end
 
--- ✅ Nếu đã thấy map cần vote thì vote map
-if voted then
-    voteRemote:FireServer(targetMapTitle)
+-- 🔁 Nếu không thấy map yêu cầu, đổi map đến khi hết lượt
+if not found then
+    local changeRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("MapChangeVoteCast")
+    local changeGui = gui.Interface:WaitForChild("MapVotingScreen").Bottom.ChangeMap
+
+    while not changeGui.Disabled.Visible do
+        changeRemote:FireServer(true)
+        task.wait(0.5)
+    end
+end
+
+-- ✅ Nếu thấy map, vote map
+if found then
+    local voteName = titleCase(getgenv().TDX_Config.mapvoting)
+    local voteRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("MapVoteCast")
+    local readyRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("MapVoteReady")
+    
+    voteRemote:FireServer(voteName)
     task.wait(0.25)
     readyRemote:FireServer()
 else
-    -- ❌ Nếu không thấy map cần vote, về lobby
-    TeleportService:Teleport(9503261072, player)
+    teleportToLobby()
 end
