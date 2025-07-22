@@ -21,13 +21,13 @@ if not mode then
     return
 end
 
--- ⏳ Chờ đến khi giao diện MapVoting hiển thị
-local gameInfoBar
+-- ⏳ Chờ đến khi giao diện DifficultyVoteScreen hiển thị
+local difficultyVoteScreen
 repeat
     task.wait(0.25)
     local interface = player:FindFirstChild("PlayerGui") and player.PlayerGui:FindFirstChild("Interface")
-    gameInfoBar = interface and interface:FindFirstChild("GameInfoBar")
-until gameInfoBar and gameInfoBar:FindFirstChild("MapVoting") and gameInfoBar.MapVoting.Visible
+    difficultyVoteScreen = interface and interface:FindFirstChild("DifficultyVoteScreen")
+until difficultyVoteScreen and difficultyVoteScreen.Visible
 
 -- 🚀 Gửi vote
 voteRemote:FireServer(mode)
