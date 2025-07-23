@@ -1,4 +1,24 @@
--- Thêm vào phần xử lý TowerUpgradeQueueUpdated
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+-- Cấu hình
+local FILENAME = "tower_upgrades_log.txt"
+local TIMEOUT = 2 -- Thời gian chờ xác nhận (giây)
+
+-- Khởi tạo file log
+if isfile(FILENAME) then delfile(FILENAME) end
+writefile(FILENAME, "=== LOG NÂNG CẤP TOWER ===\n")
+
+-- Biến lưu trữ
+local lastLevels = {} -- { [hash] = {path1, path2} }
+local pendingRequests = {} -- Các yêu cầu đang chờ xác nhận
+
+-- Hàm ghi log chi tiết
+local function log(message)
+    appendfile(FILENAME, os.date("[%H:%M:%S] ") .. message .. "\n")
+end
+
+-- Xử lý khi nhận thông báo nâng cấp từ server
 ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
     if not data or not data[1] then return end
     
@@ -6,81 +26,113 @@ ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(functio
     local hash = towerData.Hash
     local newLevels = towerData.LevelReplicationData
     
-    -- Kiểm tra nâng cấp không khớp
-    local function logMismatch(expectedPath, actualPath)
-        local logEntry = string.format(
-            "⚠️ CẢNH BÁO: Yêu cầu path %d nhưng server nâng path %d | Tower %s | Cấp độ: %s\n",
-            expectedPath,
-            actualPath,
-            tostring(hash),
-            serialize(newLevels)
-        )
-        appendfile(fileName, logEntry)
-        warn(logEntry)
-    end
-
-    if lastLevelData[hash] then
-        -- Tìm path nào thực sự được nâng cấp
-        local upgradedPaths = {}
+    -- Tìm path nào thực sự thay đổi
+    local changedPaths = {}
+    if lastLevels[hash] then
         for path = 1, 2 do
-            if newLevels[path] > (lastLevelData[hash][path] or 0) then
-                table.insert(upgradedPaths, path)
+            if (newLevels[path] or 0) > (lastLevels[hash][path] or 0) then
+                table.insert(changedPaths, path)
             end
         end
-
-        -- Kiểm tra với yêu cầu đang chờ
-        for i, pending in ipairs(pendingUpgrades) do
-            if pending.hash == hash then
-                if #upgradedPaths == 0 then
-                    -- Server không nâng cấp path nào
-                    appendfile(fileName, string.format(
-                        "❌ Yêu cầu path %d nhưng KHÔNG path nào được nâng | Tower %s\n",
-                        pending.path,
-                        tostring(hash)
-                    ))
-                elseif not table.find(upgradedPaths, pending.path) then
-                    -- Path nâng không khớp với yêu cầu
-                    logMismatch(pending.path, upgradedPaths[1])
+    end
+    
+    -- Xử lý yêu cầu đang chờ
+    for i, req in ipairs(pendingRequests) do
+        if req.hash == hash then
+            if #changedPaths > 0 then
+                -- Phát hiện path không khớp
+                if not table.find(changedPaths, req.path) then
+                    local actualPath = changedPaths[1]
+                    log(string.format("PHÁT HIỆN KHÔNG KHỚP: Yêu cầu path %d | Server nâng path %d", req.path, actualPath))
                     
-                    -- Vẫn ghi lại path thực tế được nâng
-                    for _, actualPath in ipairs(upgradedPaths) do
-                        appendfile(fileName, string.format(
-                            "TDX:upgradeTower(%s, %d, 1) -- Path %d: %d → %d (THỰC TẾ)\n",
-                            tostring(hash),
-                            actualPath,
-                            actualPath,
-                            lastLevelData[hash][actualPath] or 0,
-                            newLevels[actualPath]
-                        ))
-                    end
+                    -- Ghi lại path thực tế từ server
+                    log(string.format("THỰC TẾ: upgradeTower(%d, %d, 1) - Từ level %d → %d", 
+                        hash, actualPath, 
+                        lastLevels[hash][actualPath] or 0, 
+                        newLevels[actualPath]))
+                    
+                    -- Thực hiện lại với path từ server (nếu cần)
+                    -- ReplicatedStorage.Remotes.TowerUpgradeRequest:FireServer(hash, actualPath, 1)
                 else
                     -- Trường hợp bình thường
-                    appendfile(fileName, string.format(
-                        "TDX:upgradeTower(%s, %d, 1) -- Path %d: %d → %d (Chi phí: $%d)\n",
-                        tostring(hash),
-                        pending.path,
-                        pending.path,
-                        lastLevelData[hash][pending.path] or 0,
-                        newLevels[pending.path],
-                        towerData.TotalCost or 0
-                    ))
+                    log(string.format("THÀNH CÔNG: upgradeTower(%d, %d, 1)", hash, req.path))
                 end
+            else
+                log(string.format("LỖI: Yêu cầu path %d nhưng không path nào được nâng", req.path))
+            end
+            
+            table.remove(pendingRequests, i)
+            break
+        end
+    end
+    
+    -- Cập nhật level mới nhất
+    lastLevels[hash] = newLevels
+end)
+
+-- Hook hàm FireServer
+local originalFireServer
+originalFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+    local args = {...}
+    
+    if self.Name == "TowerUpgradeRequest" and #args >= 3 then
+        local hash, requestedPath, count = args[1], args[2], args[3]
+        
+        -- Kiểm tra tính hợp lệ
+        if typeof(hash) == "number" and (requestedPath == 1 or requestedPath == 2) and count > 0 then
+            -- Lưu yêu cầu vào hàng đợi chờ xác nhận
+            table.insert(pendingRequests, {
+                hash = hash,
+                path = requestedPath,
+                count = count,
+                time = os.time()
+            })
+            
+            log(string.format("GỬI YÊU CẦU: upgradeTower(%d, %d, %d)", hash, requestedPath, count))
+        end
+    end
+    
+    return originalFireServer(self, ...)
+end)
+
+-- Hook __namecall để bắt các gọi remote
+local originalNamecall
+originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    if getnamecallmethod() == "FireServer" and self.Name == "TowerUpgradeRequest" then
+        local args = {...}
+        if #args >= 3 then
+            local hash, requestedPath, count = args[1], args[2], args[3]
+            
+            if typeof(hash) == "number" and (requestedPath == 1 or requestedPath == 2) and count > 0 then
+                table.insert(pendingRequests, {
+                    hash = hash,
+                    path = requestedPath,
+                    count = count,
+                    time = os.time()
+                })
                 
-                table.remove(pendingUpgrades, i)
-                break
+                log(string.format("GỬI YÊU CẦU (namecall): upgradeTower(%d, %d, %d)", hash, requestedPath, count))
             end
         end
+    end
+    return originalNamecall(self, ...)
+end)
 
-        -- Cập nhật dữ liệu level mới nhất
-        lastLevelData[hash] = newLevels
-    else
-        -- Tower mới được phát hiện
-        lastLevelData[hash] = newLevels
-        appendfile(fileName, string.format(
-            "🆕 Tower mới: %s | Cấp độ khởi tạo: Path1=%d, Path2=%d\n",
-            tostring(hash),
-            newLevels[1] or 0,
-            newLevels[2] or 0
-        ))
+-- Xóa các yêu cầu quá hạn
+task.spawn(function()
+    while true do
+        task.wait(1)
+        local now = os.time()
+        
+        for i = #pendingRequests, 1, -1 do
+            if now - pendingRequests[i].time > TIMEOUT then
+                local req = pendingRequests[i]
+                log(string.format("HẾT HẠN: upgradeTower(%d, %d, %d) không được xác nhận", 
+                    req.hash, req.path, req.count))
+                table.remove(pendingRequests, i)
+            end
+        end
     end
 end)
+
+print("✅ Script đã sẵn sàng - Luôn ưu tiên path từ server khi có không khớp")
