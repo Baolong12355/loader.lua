@@ -1,24 +1,40 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
 
--- Cấu hình
-local FILENAME = "tower_upgrades_log.txt"
-local TIMEOUT = 2 -- Thời gian chờ xác nhận (giây)
+local fileName = "record.txt"
+if isfile(fileName) then delfile(fileName) end 
+writefile(fileName, "")
 
--- Khởi tạo file log
-if isfile(FILENAME) then delfile(FILENAME) end
-writefile(FILENAME, "=== LOG NÂNG CẤP TOWER ===\n")
+local pendingQueue = {}
+local timeout = 2
+local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
 
--- Biến lưu trữ
-local lastLevels = {} -- { [hash] = {path1, path2} }
-local pendingRequests = {} -- Các yêu cầu đang chờ xác nhận
-
--- Hàm ghi log chi tiết
-local function log(message)
-    appendfile(FILENAME, os.date("[%H:%M:%S] ") .. message .. "\n")
+-- Hàm phụ trợ
+local function serialize(v)
+    if typeof(v) == "Vector3" then
+        return "Vector3.new("..v.X..","..v.Y..","..v.Z..")"
+    elseif typeof(v) == "Vector2int16" then
+        return "Vector2int16.new("..v.X..","..v.Y..")"
+    elseif type(v) == "table" then
+        local out = {}
+        for k, val in pairs(v) do
+            out[#out+1] = "["..tostring(k).."]="..serialize(val)
+        end
+        return "{"..table.concat(out, ",").."}"
+    else
+        return tostring(v)
+    end
 end
 
--- Xử lý khi nhận thông báo nâng cấp từ server
+local function serializeArgs(...)
+    local args = {...}
+    local out = {}
+    for i, v in ipairs(args) do
+        out[i] = serialize(v)
+    end
+    return table.concat(out, ", ")
+end
+
+-- Xử lý TowerUpgradeQueueUpdated với ưu tiên path từ server
 ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
     if not data or not data[1] then return end
     
@@ -26,113 +42,122 @@ ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(functio
     local hash = towerData.Hash
     local newLevels = towerData.LevelReplicationData
     
-    -- Tìm path nào thực sự thay đổi
-    local changedPaths = {}
-    if lastLevels[hash] then
+    -- Tìm path nào thực sự được nâng cấp
+    local upgradedPath = nil
+    if lastKnownLevels[hash] then
         for path = 1, 2 do
-            if (newLevels[path] or 0) > (lastLevels[hash][path] or 0) then
-                table.insert(changedPaths, path)
+            if (newLevels[path] or 0) > (lastKnownLevels[hash][path] or 0) then
+                upgradedPath = path
+                break
             end
         end
     end
     
-    -- Xử lý yêu cầu đang chờ
-    for i, req in ipairs(pendingRequests) do
-        if req.hash == hash then
-            if #changedPaths > 0 then
-                -- Phát hiện path không khớp
-                if not table.find(changedPaths, req.path) then
-                    local actualPath = changedPaths[1]
-                    log(string.format("PHÁT HIỆN KHÔNG KHỚP: Yêu cầu path %d | Server nâng path %d", req.path, actualPath))
-                    
-                    -- Ghi lại path thực tế từ server
-                    log(string.format("THỰC TẾ: upgradeTower(%d, %d, 1) - Từ level %d → %d", 
-                        hash, actualPath, 
-                        lastLevels[hash][actualPath] or 0, 
-                        newLevels[actualPath]))
-                    
-                    -- Thực hiện lại với path từ server (nếu cần)
-                    -- ReplicatedStorage.Remotes.TowerUpgradeRequest:FireServer(hash, actualPath, 1)
-                else
-                    -- Trường hợp bình thường
-                    log(string.format("THÀNH CÔNG: upgradeTower(%d, %d, 1)", hash, req.path))
-                end
-            else
-                log(string.format("LỖI: Yêu cầu path %d nhưng không path nào được nâng", req.path))
-            end
-            
-            table.remove(pendingRequests, i)
-            break
-        end
-    end
-    
-    -- Cập nhật level mới nhất
-    lastLevels[hash] = newLevels
-end)
-
--- Hook hàm FireServer
-local originalFireServer
-originalFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-    local args = {...}
-    
-    if self.Name == "TowerUpgradeRequest" and #args >= 3 then
-        local hash, requestedPath, count = args[1], args[2], args[3]
+    -- Nếu tìm thấy path được nâng cấp
+    if upgradedPath then
+        local code = string.format("TDX:upgradeTower(%s, %d, 1)", tostring(hash), upgradedPath)
+        appendfile(fileName, code.."\n")
         
-        -- Kiểm tra tính hợp lệ
-        if typeof(hash) == "number" and (requestedPath == 1 or requestedPath == 2) and count > 0 then
-            -- Lưu yêu cầu vào hàng đợi chờ xác nhận
-            table.insert(pendingRequests, {
-                hash = hash,
-                path = requestedPath,
-                count = count,
-                time = os.time()
-            })
-            
-            log(string.format("GỬI YÊU CẦU: upgradeTower(%d, %d, %d)", hash, requestedPath, count))
-        end
-    end
-    
-    return originalFireServer(self, ...)
-end)
-
--- Hook __namecall để bắt các gọi remote
-local originalNamecall
-originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    if getnamecallmethod() == "FireServer" and self.Name == "TowerUpgradeRequest" then
-        local args = {...}
-        if #args >= 3 then
-            local hash, requestedPath, count = args[1], args[2], args[3]
-            
-            if typeof(hash) == "number" and (requestedPath == 1 or requestedPath == 2) and count > 0 then
-                table.insert(pendingRequests, {
-                    hash = hash,
-                    path = requestedPath,
-                    count = count,
-                    time = os.time()
-                })
-                
-                log(string.format("GỬI YÊU CẦU (namecall): upgradeTower(%d, %d, %d)", hash, requestedPath, count))
+        -- Xóa các yêu cầu đang chờ cho tower này
+        for i = #pendingQueue, 1, -1 do
+            if pendingQueue[i].type == "Upgrade" and string.find(pendingQueue[i].code, tostring(hash)) then
+                table.remove(pendingQueue, i)
             end
         end
     end
-    return originalNamecall(self, ...)
+    
+    -- Cập nhật trạng thái mới nhất
+    lastKnownLevels[hash] = newLevels
 end)
 
--- Xóa các yêu cầu quá hạn
+-- Các hàm xử lý khác giữ nguyên
+local function tryConfirm(typeStr)
+    for i, item in ipairs(pendingQueue) do
+        if item.type == typeStr then
+            appendfile(fileName, item.code.."\n")
+            table.remove(pendingQueue, i)
+            return
+        end
+    end
+end
+
+local function setPending(typeStr, code)
+    table.insert(pendingQueue, {
+        type = typeStr,
+        code = code,
+        created = tick()
+    })
+end
+
+ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
+    local d = data[1]
+    if not d then return end
+    if d.Creation then tryConfirm("Place") else tryConfirm("Sell") end
+end)
+
+ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
+    if data[1] then tryConfirm("Target") end
+end)
+
 task.spawn(function()
     while true do
-        task.wait(1)
-        local now = os.time()
-        
-        for i = #pendingRequests, 1, -1 do
-            if now - pendingRequests[i].time > TIMEOUT then
-                local req = pendingRequests[i]
-                log(string.format("HẾT HẠN: upgradeTower(%d, %d, %d) không được xác nhận", 
-                    req.hash, req.path, req.count))
-                table.remove(pendingRequests, i)
+        task.wait(0.05)
+        local now = tick()
+        for i = #pendingQueue, 1, -1 do
+            if now - pendingQueue[i].created > timeout then
+                table.remove(pendingQueue, i)
             end
         end
     end
 end)
 
-print("✅ Script đã sẵn sàng - Luôn ưu tiên path từ server khi có không khớp")
+local function handleRemote(name, args)
+    if name == "TowerUpgradeRequest" then
+        local hash, path, count = unpack(args)
+        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" then
+            if path >= 0 and path <= 2 and count > 0 and count <= 5 then
+                for _ = 1, count do
+                    setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, 1)", tostring(hash), path))
+                end
+            end
+        end
+    elseif name == "PlaceTower" then
+        local a1, towerName, vec, rot = unpack(args)
+        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
+            local code = string.format('TDX:placeTower(%d, "%s", Vector3.new(%s, %s, %s), %d)', 
+                a1, towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), rot)
+            setPending("Place", code)
+        end
+    elseif name == "SellTower" then
+        setPending("Sell", "TDX:sellTower("..serializeArgs(unpack(args))..")")
+    elseif name == "ChangeQueryType" then
+        setPending("Target", "TDX:changeQueryType("..serializeArgs(unpack(args))..")")
+    end
+end
+
+-- Các hook function giữ nguyên
+local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+    local name = self.Name
+    local args = {...}
+    handleRemote(name, args)
+    return oldFireServer(self, ...)
+end)
+
+local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+    local name = self.Name
+    local args = {...}
+    handleRemote(name, args)
+    return oldInvokeServer(self, ...)
+end)
+
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    if checkcaller() then return oldNamecall(self, ...) end
+    local method = getnamecallmethod()
+    local name = self.Name
+    local args = {...}
+    if method == "FireServer" or method == "InvokeServer" then
+        handleRemote(name, args)
+    end
+    return oldNamecall(self, ...)
+end)
