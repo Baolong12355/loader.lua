@@ -330,19 +330,15 @@ local function convertTimeToNumber(timeStr)
     return nil
 end
 
--- ánh xạ hash -> pos liên tục
-local hash2pos = {}
-task.spawn(function()
-    while true do
-        for hash, tower in pairs(TowerClass and TowerClass.GetTowers() or {}) do
-            local pos = GetTowerPosition(tower)
-            if pos then
-                hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
-            end
+while true do
+    for hash, tower in pairs(TowerClass.GetTowers()) do
+        local pos = GetTowerPosition(tower)
+        if pos then
+            hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
         end
-        task.wait()
     end
-end)
+    task.wait()
+end
 
 if makefolder then
     pcall(function() makefolder("tdx") end)
