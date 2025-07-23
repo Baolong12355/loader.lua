@@ -278,12 +278,45 @@ do
 end
 
 local function GetTowerPosition(tower)
-    local success, pos = pcall(function()
-        return tower and (tower.Position or tower:GetTorsoPosition())
+    if not TowerClass or not tower then return nil end
+    
+    -- Thử lấy vị trí từ CFrame trước (nếu có)
+    local success, cframe = pcall(function()
+        return tower.CFrame
     end)
-    if success and typeof(pos) == "Vector3" then
-        return pos
+    if success and cframe and typeof(cframe) == "CFrame" then
+        return cframe.Position
     end
+    
+    -- Thử sử dụng GetPosition() từ TowerClass
+    if tower.GetPosition and typeof(tower.GetPosition) == "function" then
+        local success, position = pcall(tower.GetPosition, tower)
+        if success and position and typeof(position) == "Vector3" then
+            return position
+        end
+    end
+    
+    -- Thử sử dụng GetTorsoPosition() từ TowerClass
+    if tower.GetTorsoPosition and typeof(tower.GetTorsoPosition) == "function" then
+        local success, torsoPosition = pcall(tower.GetTorsoPosition, tower)
+        if success and torsoPosition and typeof(torsoPosition) == "Vector3" then
+            return torsoPosition
+        end
+    end
+    
+    -- Fallback cuối cùng - truy cập trực tiếp vào model
+    if tower.Character then
+        local success, model = pcall(function()
+            return tower.Character:GetCharacterModel()
+        end)
+        if success and model then
+            local root = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
+            if root then
+                return root.Position
+            end
+        end
+    end
+    
     return nil
 end
 
