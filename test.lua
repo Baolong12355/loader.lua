@@ -279,9 +279,12 @@ end
 
 local function GetTowerPosition(tower)
     local success, pos = pcall(function()
-        return tower.Position
+        return tower and (tower.Position or tower:GetTorsoPosition())
     end)
-    return success and pos or nil
+    if success and typeof(pos) == "Vector3" then
+        return pos
+    end
+    return nil
 end
 
 local function GetTowerPlaceCostByName(name)
