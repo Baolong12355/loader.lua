@@ -263,8 +263,6 @@ local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
-local hash2pos = {}
-
 -- Safe require tower module
 local function SafeRequire(module)
     local success, result = pcall(require, module)
@@ -279,11 +277,31 @@ do
     TowerClass = SafeRequire(towerModule)
 end
 
-local function GetTowerPosition(tower)
-    if not tower or not tower.Character then return nil end
-    local model = tower.Character:GetCharacterModel()
-    local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
-    return root and root.Position or nil
+local function local function GetTowerPosition(tower)
+    if not tower or not TowerClass then return nil end
+    
+    -- Sử dụng phương thức GetPosition từ TowerClass nếu có
+    if tower.GetPosition and typeof(tower.GetPosition) == "function" then
+        local success, position = pcall(function() return tower:GetPosition() end)
+        if success then return position end
+    end
+    
+    -- Fallback sử dụng phương thức GetTorsoPosition nếu GetPosition không có
+    if tower.GetTorsoPosition and typeof(tower.GetTorsoPosition) == "function" then
+        local success, torsoPosition = pcall(function() return tower:GetTorsoPosition() end)
+        if success then return torsoPosition end
+    end
+    
+    -- Fallback cuối cùng nếu cả hai phương thức trên đều không hoạt động
+    if tower.Character then
+        local success, model = pcall(function() return tower.Character:GetCharacterModel() end)
+        if success and model then
+            local root = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
+            return root and root.Position or nil
+        end
+    end
+    
+    return nil
 end
 
 local function GetTowerPlaceCostByName(name)
@@ -332,15 +350,19 @@ local function convertTimeToNumber(timeStr)
     return nil
 end
 
-while true do
-    for hash, tower in pairs(TowerClass.GetTowers()) do
-        local pos = GetTowerPosition(tower)
-        if pos then
-            hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+-- ánh xạ hash -> pos liên tục
+local hash2pos = {}
+task.spawn(function()
+    while true do
+        for hash, tower in pairs(TowerClass and TowerClass.GetTowers() or {}) do
+            local pos = GetTowerPosition(tower)
+            if pos then
+                hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+            end
         end
+        task.wait()
     end
-    task.wait()
-end
+end)
 
 if makefolder then
     pcall(function() makefolder("tdx") end)
