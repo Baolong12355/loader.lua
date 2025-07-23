@@ -162,10 +162,7 @@ local function handleRemote(name, args)
         if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
             local code = string.format('TDX:placeTower(%d, "%s", Vector3.new(%s, %s, %s), %d)', 
                 a1, towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), rot)
-            -- PlaceTower sử dụng InvokeServer nên ghi ngay lập tức
-            if appendfile then
-                safeFileOperation(appendfile, fileName, code.."\n")
-            end
+            setPending("Place", code)
         end
     elseif name == "SellTower" then
         setPending("Sell", "TDX:sellTower("..serializeArgs(unpack(args))..")")
