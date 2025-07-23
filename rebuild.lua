@@ -48,7 +48,7 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["Macro Name"] = "event",
+    ["Macro Name"] = "kl",
     ["PlaceMode"] = "Rewrite",
     ["ForceRebuildEvenIfSold"] = true,
     ["MaxRebuildRetry"] = nil,
