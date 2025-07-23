@@ -263,6 +263,8 @@ local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
+local hash2pos = {}
+
 -- Safe require tower module
 local function SafeRequire(module)
     local success, result = pcall(require, module)
