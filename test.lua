@@ -21,6 +21,7 @@ end
 local pendingQueue = {}
 local timeout = 2
 local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
+local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upgrade sinh đôi
 
 -- Hàm phụ trợ
 local function serialize(v)
@@ -76,7 +77,7 @@ end
 ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
     local d = data[1]
     if not d then return end
-    
+
     if d.Creation then
         tryConfirm("Place")
     else
@@ -84,32 +85,47 @@ ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(functio
     end
 end)
 
--- Xử lý TowerUpgradeQueueUpdated với ưu tiên path từ server
+-- Xử lý TowerUpgradeQueueUpdated với tính toán số lượng upgrade chính xác
 ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
     if not data or not data[1] then return end
-    
+
     local towerData = data[1]
     local hash = towerData.Hash
     local newLevels = towerData.LevelReplicationData
+    local currentTime = tick()
+
+    -- Kiểm tra upgrade sinh đôi (cách nhau dưới 0.0001 giây)
+    if lastUpgradeTime[hash] and (currentTime - lastUpgradeTime[hash]) < 0.0001 then
+        -- Đây là upgrade sinh đôi, bỏ qua
+        return
+    end
     
-    -- Tìm path nào thực sự được nâng cấp
+    lastUpgradeTime[hash] = currentTime
+
+    -- Tìm path nào thực sự được nâng cấp và tính số lượng
     local upgradedPath = nil
+    local upgradeCount = 0
+    
     if lastKnownLevels[hash] then
         for path = 1, 2 do
-            if (newLevels[path] or 0) > (lastKnownLevels[hash][path] or 0) then
+            local oldLevel = lastKnownLevels[hash][path] or 0
+            local newLevel = newLevels[path] or 0
+            
+            if newLevel > oldLevel then
                 upgradedPath = path
+                upgradeCount = newLevel - oldLevel
                 break
             end
         end
     end
-    
+
     -- Nếu tìm thấy path được nâng cấp
-    if upgradedPath then
-        local code = string.format("TDX:upgradeTower(%s, %d, 1)", tostring(hash), upgradedPath)
+    if upgradedPath and upgradeCount > 0 then
+        local code = string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), upgradedPath, upgradeCount)
         if appendfile then
             safeFileOperation(appendfile, fileName, code.."\n")
         end
-        
+
         -- Xóa các yêu cầu đang chờ cho tower này
         for i = #pendingQueue, 1, -1 do
             if pendingQueue[i].type == "Upgrade" and pendingQueue[i].hash == hash then
@@ -120,7 +136,7 @@ ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(functio
         -- Nếu không tìm thấy path cụ thể, thử confirm từ pending queue
         tryConfirm("Upgrade", hash)
     end
-    
+
     -- Cập nhật trạng thái mới nhất
     lastKnownLevels[hash] = newLevels or {}
 end)
@@ -152,9 +168,8 @@ local function handleRemote(name, args)
         local hash, path, count = unpack(args)
         if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" then
             if path >= 0 and path <= 2 and count > 0 and count <= 5 then
-                for _ = 1, count do
-                    setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, 1)", tostring(hash), path), hash)
-                end
+                -- Chỉ tạo 1 pending entry với số lượng chính xác
+                setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
             end
         end
     elseif name == "PlaceTower" then
@@ -218,40 +233,24 @@ end)
 local oldNamecall
 oldNamecall = safeHookMetamethod(game, "__namecall", function(self, ...)
     if safeCheckCaller() then return oldNamecall(self, ...) end
-    
+
     local method = getnamecallmethod()
     if not method then return oldNamecall(self, ...) end
-    
+
     local name = self.Name
     local args = {...}
-    
+
     if method == "FireServer" or method == "InvokeServer" then
         handleRemote(name, args)
     end
-    
+
     return oldNamecall(self, ...)
 end)
 
 print("✅ Complete TDX Recorder hoạt động: Tất cả hành động đã được hook")
 print("📁 Ghi dữ liệu vào file: " .. fileName)
 
--- Kiểm tra các function cần thiết
-if not hookfunction then warn("⚠️ hookfunction không khả dụng") end
-if not hookmetamethod then warn("⚠️ hookmetamethod không khả dụng") end  
-if not isfile then warn("⚠️ isfile không khả dụng") end
-if not writefile then warn("⚠️ writefile không khả dụng") end
-if not appendfile then warn("⚠️ appendfile không khả dụng") end
 
--- Test file operations
-if writefile and appendfile then
-    local testResult = safeFileOperation(writefile, "test_record.txt", "test")
-    if testResult then
-        print("✅ File operations working properly")
-        safeFileOperation(delfile, "test_record.txt")
-    else
-        warn("❌ File operations not working")
-    end
-end
 
 
 
