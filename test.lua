@@ -279,7 +279,7 @@ end
 
 local function GetTowerPosition(tower)
     local success, pos = pcall(function()
-        return tower:GetTorsoPosition()
+        return tower.Position
     end)
     return success and pos or nil
 end
