@@ -1,8 +1,22 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+-- Kiểm tra file functions an toàn
+local function safeFileOperation(operation, ...)
+    local success, result = pcall(operation, ...)
+    if not success then
+        warn("File operation failed: " .. tostring(result))
+        return false
+    end
+    return result
+end
+
 local fileName = "record.txt"
-if isfile(fileName) then delfile(fileName) end 
-writefile(fileName, "")
+if isfile and safeFileOperation(isfile, fileName) then 
+    safeFileOperation(delfile, fileName)
+end 
+if writefile then
+    safeFileOperation(writefile, fileName, "")
+end
 
 local pendingQueue = {}
 local timeout = 2
@@ -38,15 +52,14 @@ local function tryConfirm(typeStr, specificHash)
     for i, item in ipairs(pendingQueue) do
         if item.type == typeStr then
             -- Nếu có hash cụ thể, kiểm tra xem có khớp không
-            if specificHash and not string.find(item.code, tostring(specificHash)) then
-                goto continue
+            if not specificHash or string.find(item.code, tostring(specificHash)) then
+                if appendfile then
+                    safeFileOperation(appendfile, fileName, item.code.."\n")
+                end
+                table.remove(pendingQueue, i)
+                return
             end
-            
-            appendfile(fileName, item.code.."\n")
-            table.remove(pendingQueue, i)
-            return
         end
-        ::continue::
     end
 end
 
@@ -93,7 +106,9 @@ ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(functio
     -- Nếu tìm thấy path được nâng cấp
     if upgradedPath then
         local code = string.format("TDX:upgradeTower(%s, %d, 1)", tostring(hash), upgradedPath)
-        appendfile(fileName, code.."\n")
+        if appendfile then
+            safeFileOperation(appendfile, fileName, code.."\n")
+        end
         
         -- Xóa các yêu cầu đang chờ cho tower này
         for i = #pendingQueue, 1, -1 do
@@ -156,8 +171,35 @@ local function handleRemote(name, args)
     end
 end
 
+-- Kiểm tra và tạo function an toàn cho các executor
+local function safeHookFunction(originalFunc, hookFunc)
+    if hookfunction then
+        return hookfunction(originalFunc, hookFunc)
+    else
+        warn("hookfunction không hỗ trợ trên executor này")
+        return originalFunc
+    end
+end
+
+local function safeHookMetamethod(object, method, hookFunc)
+    if hookmetamethod then
+        return hookmetamethod(object, method, hookFunc)
+    else
+        warn("hookmetamethod không hỗ trợ trên executor này")
+        return nil
+    end
+end
+
+local function safeCheckCaller()
+    if checkcaller then
+        return checkcaller()
+    else
+        return false
+    end
+end
+
 -- Hook FireServer
-local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+local oldFireServer = safeHookFunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
     local name = self.Name
     local args = {...}
     handleRemote(name, args)
@@ -165,7 +207,7 @@ local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, funct
 end)
 
 -- Hook InvokeServer
-local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+local oldInvokeServer = safeHookFunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
     local name = self.Name
     local args = {...}
     handleRemote(name, args)
@@ -174,10 +216,12 @@ end)
 
 -- Hook namecall metamethod
 local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    if checkcaller() then return oldNamecall(self, ...) end
+oldNamecall = safeHookMetamethod(game, "__namecall", function(self, ...)
+    if safeCheckCaller() then return oldNamecall(self, ...) end
     
     local method = getnamecallmethod()
+    if not method then return oldNamecall(self, ...) end
+    
     local name = self.Name
     local args = {...}
     
@@ -189,3 +233,22 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 print("✅ Complete TDX Recorder hoạt động: Tất cả hành động đã được hook")
+print("📁 Ghi dữ liệu vào file: " .. fileName)
+
+-- Kiểm tra các function cần thiết
+if not hookfunction then warn("⚠️ hookfunction không khả dụng") end
+if not hookmetamethod then warn("⚠️ hookmetamethod không khả dụng") end  
+if not isfile then warn("⚠️ isfile không khả dụng") end
+if not writefile then warn("⚠️ writefile không khả dụng") end
+if not appendfile then warn("⚠️ appendfile không khả dụng") end
+
+-- Test file operations
+if writefile and appendfile then
+    local testResult = safeFileOperation(writefile, "test_record.txt", "test")
+    if testResult then
+        print("✅ File operations working properly")
+        safeFileOperation(delfile, "test_record.txt")
+    else
+        warn("❌ File operations not working")
+    end
+end
