@@ -277,31 +277,11 @@ do
     TowerClass = SafeRequire(towerModule)
 end
 
-local function local function GetTowerPosition(tower)
-    if not tower or not TowerClass then return nil end
-    
-    -- Sử dụng phương thức GetPosition từ TowerClass nếu có
-    if tower.GetPosition and typeof(tower.GetPosition) == "function" then
-        local success, position = pcall(function() return tower:GetPosition() end)
-        if success then return position end
-    end
-    
-    -- Fallback sử dụng phương thức GetTorsoPosition nếu GetPosition không có
-    if tower.GetTorsoPosition and typeof(tower.GetTorsoPosition) == "function" then
-        local success, torsoPosition = pcall(function() return tower:GetTorsoPosition() end)
-        if success then return torsoPosition end
-    end
-    
-    -- Fallback cuối cùng nếu cả hai phương thức trên đều không hoạt động
-    if tower.Character then
-        local success, model = pcall(function() return tower.Character:GetCharacterModel() end)
-        if success and model then
-            local root = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
-            return root and root.Position or nil
-        end
-    end
-    
-    return nil
+local function GetTowerPosition(tower)
+    local success, pos = pcall(function()
+        return tower:GetTorsoPosition()
+    end)
+    return success and pos or nil
 end
 
 local function GetTowerPlaceCostByName(name)
