@@ -58,7 +58,7 @@ local defaultConfig = {
     ["SellAllDelay"] = 0.1,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
     ["TargetChangeCheckDelay"] = 0.1,
-    ["RebuildPriority"] = true,
+    ["RebuildPriority"] = false,
     ["RebuildCheckInterval"] = 0.05,
     ["MacroStepDelay"] = 0
 }
@@ -79,7 +79,7 @@ local function getMaxAttempts()
     if placeMode == "Ashed" then
         return 1  -- Không retry
     elseif placeMode == "Rewrite" then
-        return 10  -- Retry 3 lần
+        return 30  -- Retry 3 lần
     else
         return 1  -- Mặc định không retry nếu không rõ mode
     end
