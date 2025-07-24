@@ -38,6 +38,7 @@ local links = {
     ["Join Map"]        = base .. "auto_join.lua",
     ["Auto Difficulty"] = base .. "difficulty.lua",
     ["Return Lobby"]    = base .. "return_lobby.lua",
+    ["Heal"]            = base .. "heal.lua",
     ["Loadout"]         = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/loadout.lua",
     ["Voter"]           = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/voter.lua"
 }
@@ -47,6 +48,7 @@ spawn(function() tryRun("Return Lobby",    getgenv().TDX_Config["Return Lobby"],
 spawn(function() tryRun("x1.5 Speed",     getgenv().TDX_Config["x1.5 Speed"],      links["x1.5 Speed"]) end)
 spawn(function() tryRun("Join Map",       getgenv().TDX_Config["Map"] ~= nil,      links["Join Map"]) end)
 spawn(function() tryRun("Auto Difficulty",getgenv().TDX_Config["Auto Difficulty"] ~= nil, links["Auto Difficulty"]) end)
+spawn(function() tryRun("Heal",           getgenv().TDX_Config["Heal"],            links["Heal"]) end)
 spawn(function() tryRun("Loadout",       getgenv().TDX_Config["Loadout"],         links["Loadout"]) end)
 spawn(function() tryRun("Voter",         getgenv().TDX_Config["Voter"],           links["Voter"]) end)
 
