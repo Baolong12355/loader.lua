@@ -370,15 +370,14 @@ local function convertTimeToNumber(timeStr)
     return nil
 end
 
--- Modify the hash2pos task to check TowerClass first
+-- ánh xạ hash -> pos - CHỈ CẬP NHẬT CHO LẦN ĐẦU TIÊN
+local hash2pos = {}
 task.spawn(function()
     while true do
-        if TowerClass and type(TowerClass.GetTowers) == "function" then
-            for hash, tower in pairs(TowerClass.GetTowers()) do
-                local pos = GetTowerPosition(tower)
-                if pos then
-                    hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
-                end
+        for hash, tower in pairs(TowerClass and TowerClass.GetTowers() or {}) do
+            local pos = GetTowerPosition(tower)
+            if pos then
+                hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
             end
         end
         task.wait()
@@ -402,7 +401,7 @@ local function parseMacroLine(line)
         }
     end
 
-    -- nâng cấp - đúng format có sẵn
+    -- nâng cấp
     local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
     if hash and path and upgradeCount then
         local pos = hash2pos[tostring(hash)]
@@ -412,16 +411,16 @@ local function parseMacroLine(line)
             local entries = {}
             for _ = 1, count do
                 table.insert(entries, {
-                    TowerUpgraded = pos.x,
+                    UpgradeCost = 0,
                     UpgradePath = pathNum,
-                    UpgradeCost = 0
+                    TowerUpgraded = pos.x
                 })
             end
             return entries
         end
     end
 
-    -- đổi target - đúng format có sẵn
+    -- đổi target
     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
     if hash and targetType then
         local pos = hash2pos[tostring(hash)]
@@ -446,7 +445,7 @@ local function parseMacroLine(line)
         end
     end
 
-    -- bán - đúng format có sẵn
+    -- bán
     local hash = line:match('TDX:sellTower%(([^%)]+)%)')
     if hash then
         local pos = hash2pos[tostring(hash)]
