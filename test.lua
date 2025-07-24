@@ -370,14 +370,15 @@ local function convertTimeToNumber(timeStr)
     return nil
 end
 
--- ánh xạ hash -> pos - CHỈ CẬP NHẬT CHO LẦN ĐẦU TIÊN
-local hash2pos = {}
+-- Modify the hash2pos task to check TowerClass first
 task.spawn(function()
     while true do
-        for hash, tower in pairs(TowerClass and TowerClass.GetTowers() or {}) do
-            local pos = GetTowerPosition(tower)
-            if pos then
-                hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+        if TowerClass and type(TowerClass.GetTowers) == "function" then
+            for hash, tower in pairs(TowerClass.GetTowers()) do
+                local pos = GetTowerPosition(tower)
+                if pos then
+                    hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+                end
             end
         end
         task.wait()
