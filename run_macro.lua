@@ -59,7 +59,7 @@ local defaultConfig = {
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
     ["TargetChangeCheckDelay"] = 0.1,
     ["RebuildPriority"] = false,
-    ["RebuildCheckInterval"] = 0.05,
+    ["RebuildCheckInterval"] = 0,
     ["MacroStepDelay"] = 0
 }
 
