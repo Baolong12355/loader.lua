@@ -263,11 +263,9 @@ local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
--- Track đã convert lần đầu chưa
 local initialConverted = false
 local lastProcessedContent = ""
 
--- Safe require tower module
 local function SafeRequire(module)
     local success, result = pcall(require, module)
     return success and result or nil
@@ -284,7 +282,6 @@ end
 local function GetTowerPosition(tower)
     if not TowerClass or not tower then return nil end
 
-    -- Thử lấy vị trí từ CFrame trước (nếu có)
     local success, cframe = pcall(function()
         return tower.CFrame
     end)
@@ -292,7 +289,6 @@ local function GetTowerPosition(tower)
         return cframe.Position
     end
 
-    -- Thử sử dụng GetPosition() từ TowerClass
     if tower.GetPosition and typeof(tower.GetPosition) == "function" then
         local success, position = pcall(tower.GetPosition, tower)
         if success and position and typeof(position) == "Vector3" then
@@ -300,7 +296,6 @@ local function GetTowerPosition(tower)
         end
     end
 
-    -- Thử sử dụng GetTorsoPosition() từ TowerClass
     if tower.GetTorsoPosition and typeof(tower.GetTorsoPosition) == "function" then
         local success, torsoPosition = pcall(tower.GetTorsoPosition, tower)
         if success and torsoPosition and typeof(torsoPosition) == "Vector3" then
@@ -308,7 +303,6 @@ local function GetTowerPosition(tower)
         end
     end
 
-    -- Fallback cuối cùng - truy cập trực tiếp vào model
     if tower.Character then
         local success, model = pcall(function()
             return tower.Character:GetCharacterModel()
@@ -346,7 +340,6 @@ local function GetTowerPlaceCostByName(name)
     return 0
 end
 
--- Hàm lấy wave và time hiện tại từ game UI
 local function getCurrentWaveAndTime()
     local playerGui = player:FindFirstChild("PlayerGui")
     if not playerGui then return nil, nil end
@@ -360,7 +353,6 @@ local function getCurrentWaveAndTime()
     return wave, time
 end
 
--- Chuyển time format từ "MM:SS" thành số (ví dụ: "02:35" -> 235)
 local function convertTimeToNumber(timeStr)
     if not timeStr then return nil end
     local mins, secs = timeStr:match("(%d+):(%d+)")
@@ -370,7 +362,6 @@ local function convertTimeToNumber(timeStr)
     return nil
 end
 
--- ánh xạ hash -> pos - CHỈ CẬP NHẬT CHO LẦN ĐẦU TIÊN
 local hash2pos = {}
 task.spawn(function()
     while true do
@@ -384,10 +375,8 @@ task.spawn(function()
     end
 end)
 
-
--- Hàm parse một dòng macro thành entry - GIỮ NGUYÊN FORMAT NHƯ BẢN GỐC
 local function parseMacroLine(line)
-    -- 1. Đặt tháp (placeTower) - GIỮ NGUYÊN FORMAT
+    -- placeTower
     local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
     if a1 and name and x and y and z and rot then
         name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
@@ -402,7 +391,7 @@ local function parseMacroLine(line)
         }
     end
 
-    -- 2. Nâng cấp tháp (upgradeTower) - GIỮ NGUYÊN FORMAT
+    -- upgradeTower
     local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
     if hash and path and upgradeCount then
         local pos = hash2pos[tostring(hash)]
@@ -421,7 +410,7 @@ local function parseMacroLine(line)
         end
     end
 
-    -- 3. Đổi mục tiêu (changeQueryType) - GIỮ NGUYÊN FORMAT
+    -- changeQueryType
     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
     if hash and targetType then
         local pos = hash2pos[tostring(hash)]
@@ -446,7 +435,7 @@ local function parseMacroLine(line)
         end
     end
 
-    -- 4. Bán tháp (sellTower) - GIỮ NGUYÊN FORMAT
+    -- sellTower
     local hash = line:match('TDX:sellTower%(([^%)]+)%)')
     if hash then
         local pos = hash2pos[tostring(hash)]
@@ -460,14 +449,11 @@ local function parseMacroLine(line)
     return nil
 end
 
-
--- Hàm thêm entry mới vào JSON file
 local function appendToJsonFile(newEntries)
     if not newEntries or #newEntries == 0 then return end
 
     local existingLogs = {}
-    
-    -- Đọc file hiện tại
+
     if isfile(outJson) then
         local content = readfile(outJson)
         content = content:gsub("^%[%s*", ""):gsub("%s*%]$", "")
@@ -482,12 +468,10 @@ local function appendToJsonFile(newEntries)
         end
     end
 
-    -- Thêm entries mới
     for _, entry in ipairs(newEntries) do
         table.insert(existingLogs, entry)
     end
 
-    -- Ghi lại file
     local jsonLines = {}
     for i, entry in ipairs(existingLogs) do
         local jsonStr = HttpService:JSONEncode(entry)
@@ -509,13 +493,10 @@ end
 while true do
     if isfile(txtFile) then
         local currentContent = readfile(txtFile)
-        
+
         if not initialConverted then
-            -- Lần đầu tiên - convert toàn bộ
-            print("Initial conversion...")
             local logs = {}
 
-            -- Giữ SuperFunction entries
             local preservedSuper = {}
             if isfile(outJson) then
                 local content = readfile(outJson)
@@ -535,23 +516,19 @@ while true do
                 local result = parseMacroLine(line)
                 if result then
                     if type(result) == "table" and result[1] then
-                        -- Multiple entries (như upgrade multiple times)
                         for _, entry in ipairs(result) do
                             table.insert(logs, entry)
                         end
                     else
-                        -- Single entry
                         table.insert(logs, result)
                     end
                 end
             end
 
-            -- Add preserved SuperFunction entries
             for _, entry in ipairs(preservedSuper) do
                 table.insert(logs, entry)
             end
 
-            -- Ghi file hoàn chỉnh
             local jsonLines = {}
             for i, entry in ipairs(logs) do
                 local jsonStr = HttpService:JSONEncode(entry)
@@ -563,32 +540,27 @@ while true do
 
             local finalJson = "[\n" .. table.concat(jsonLines, "\n") .. "\n]"
             writefile(outJson, finalJson)
-            
+
             lastProcessedContent = currentContent
             initialConverted = true
-            print("Initial conversion completed!")
-            
+
         elseif currentContent ~= lastProcessedContent then
-            -- Chỉ xử lý phần mới thêm
-            print("Processing new lines...")
             local newLines = {}
             local currentLines = {}
             local lastLines = {}
-            
+
             for line in currentContent:gmatch("[^\r\n]+") do
                 table.insert(currentLines, line)
             end
-            
+
             for line in lastProcessedContent:gmatch("[^\r\n]+") do
                 table.insert(lastLines, line)
             end
-            
-            -- Lấy những dòng mới
+
             for i = #lastLines + 1, #currentLines do
                 table.insert(newLines, currentLines[i])
             end
-            
-            -- Xử lý và thêm entries mới
+
             local newEntries = {}
             for _, line in ipairs(newLines) do
                 local result = parseMacroLine(line)
@@ -602,10 +574,9 @@ while true do
                     end
                 end
             end
-            
+
             appendToJsonFile(newEntries)
             lastProcessedContent = currentContent
-            print("Added " .. #newEntries .. " new entries")
         end
     end
     wait(0.1)
