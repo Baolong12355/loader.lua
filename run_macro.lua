@@ -388,6 +388,63 @@ local function clearTowerDeath(x)
     deadTowerTracker.deadTowers[x] = nil
 end
 
+-- Tracking system cho rebuild processes đang chạy
+local activeRebuilds = {} -- {x = coroutine, ...}
+
+local function RebuildTowerAsync(x, records, rebuildAttempts, soldPositions, config)
+    return task.spawn(function()
+        local rebuildSuccess = true
+        
+        for _, record in ipairs(records) do
+            local action = record.entry
+
+            if action.TowerPlaced then
+                local vecTab = {}
+                for coord in action.TowerVector:gmatch("[^,%s]+") do
+                    table.insert(vecTab, tonumber(coord))
+                end
+                if #vecTab == 3 then
+                    local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
+                    local args = {
+                        tonumber(action.TowerA1), 
+                        action.TowerPlaced, 
+                        pos, 
+                        tonumber(action.Rotation or 0)
+                    }
+                    WaitForCash(action.TowerPlaceCost)
+                    local placeSuccess = PlaceTowerRetry(args, pos.X, action.TowerPlaced)
+
+                    if not placeSuccess then
+                        rebuildSuccess = false
+                        break
+                    end
+                end
+
+            elseif action.TowerUpgraded then
+                UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath)
+
+            elseif action.ChangeTarget then
+                ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
+
+            elseif action.SellTower then
+                local sellSuccess = SellTowerRetry(tonumber(action.SellTower))
+                if sellSuccess then
+                    soldPositions[tonumber(action.SellTower)] = true
+                end
+            end
+        end
+
+        -- Cleanup sau khi rebuild xong
+        if rebuildSuccess then
+            rebuildAttempts[x] = 0
+            clearTowerDeath(x)
+        end
+        
+        -- Remove khỏi active rebuilds
+        activeRebuilds[x] = nil
+    end)
+end
+
 local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     local rebuildAttempts = {}
     local soldPositions = {}
@@ -396,125 +453,56 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     task.spawn(function()
         while true do
             if next(towerRecords) then
-                -- Check for dead towers và rebuild ngay lập tức
-                local rebuildQueue = {}
-                
+                -- Check for dead towers và rebuild song song
                 for x, records in pairs(towerRecords) do
                     local hash, tower = GetTowerByAxis(x)
                     if not hash or not tower then
-                        -- Tower chết, record và add vào rebuild queue ngay
-                        recordTowerDeath(x)
-                        
-                        local towerType = nil
-                        local firstPlaceRecord = nil
-
-                        for _, record in ipairs(records) do
-                            if record.entry.TowerPlaced then 
-                                towerType = record.entry.TowerPlaced
-                                firstPlaceRecord = record
-                                break
-                            end
-                        end
-
-                        if towerType then
-                            local skipRule = skipTypesMap[towerType]
-                            local shouldSkip = false
+                        -- Tower chết và chưa có rebuild process nào đang chạy
+                        if not activeRebuilds[x] then
+                            recordTowerDeath(x)
                             
-                            if skipRule then
-                                if skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine then
-                                    shouldSkip = true
-                                elseif not skipRule.beOnly then
-                                    shouldSkip = true
+                            local towerType = nil
+                            local firstPlaceRecord = nil
+
+                            for _, record in ipairs(records) do
+                                if record.entry.TowerPlaced then 
+                                    towerType = record.entry.TowerPlaced
+                                    firstPlaceRecord = record
+                                    break
                                 end
                             end
 
-                            if not shouldSkip then
-                                if not (soldPositions[x] and not config.ForceRebuildEvenIfSold) then
-                                    rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
-                                    local maxRetry = config.MaxRebuildRetry
-                                    
-                                    if not maxRetry or rebuildAttempts[x] <= maxRetry then
-                                        local deathInfo = deadTowerTracker.deadTowers[x]
-                                        table.insert(rebuildQueue, {
-                                            x = x,
-                                            records = records,
-                                            towerType = towerType,
-                                            attempts = rebuildAttempts[x],
-                                            deathId = deathInfo and deathInfo.deathId or 0
-                                        })
+                            if towerType then
+                                local skipRule = skipTypesMap[towerType]
+                                local shouldSkip = false
+                                
+                                if skipRule then
+                                    if skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine then
+                                        shouldSkip = true
+                                    elseif not skipRule.beOnly then
+                                        shouldSkip = true
+                                    end
+                                end
+
+                                if not shouldSkip then
+                                    if not (soldPositions[x] and not config.ForceRebuildEvenIfSold) then
+                                        rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                                        local maxRetry = config.MaxRebuildRetry
+                                        
+                                        if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                                            -- Start rebuild process song song
+                                            activeRebuilds[x] = RebuildTowerAsync(x, records, rebuildAttempts, soldPositions, config)
+                                        end
                                     end
                                 end
                             end
                         end
                     else
-                        -- Tower vẫn sống, clear death record nếu có
+                        -- Tower vẫn sống, clear death record và cancel rebuild nếu có
                         clearTowerDeath(x)
-                    end
-                end
-
-                -- Nếu có towers cần rebuild, rebuild ngay lập tức
-                if #rebuildQueue > 0 then
-                    -- Sort theo thứ tự chết (deathId)
-                    table.sort(rebuildQueue, function(a, b)
-                        return a.deathId < b.deathId
-                    end)
-
-                    -- Rebuild tất cả towers trong queue tuần tự
-                    for _, rebuildItem in ipairs(rebuildQueue) do
-                        local x = rebuildItem.x
-                        local records = rebuildItem.records
-
-                        -- Double check tower vẫn chết không
-                        local hash = GetTowerByAxis(x)
-                        if not hash then
-                            local rebuildSuccess = true
-                            
-                            for _, record in ipairs(records) do
-                                local action = record.entry
-
-                                if action.TowerPlaced then
-                                    local vecTab = {}
-                                    for coord in action.TowerVector:gmatch("[^,%s]+") do
-                                        table.insert(vecTab, tonumber(coord))
-                                    end
-                                    if #vecTab == 3 then
-                                        local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-                                        local args = {
-                                            tonumber(action.TowerA1), 
-                                            action.TowerPlaced, 
-                                            pos, 
-                                            tonumber(action.Rotation or 0)
-                                        }
-                                        WaitForCash(action.TowerPlaceCost)
-                                        local placeSuccess = PlaceTowerRetry(args, pos.X, action.TowerPlaced)
-
-                                        if not placeSuccess then
-                                            rebuildSuccess = false
-                                            break
-                                        end
-                                    end
-
-                                elseif action.TowerUpgraded then
-                                    UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath)
-
-                                elseif action.ChangeTarget then
-                                    ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
-
-                                elseif action.SellTower then
-                                    local sellSuccess = SellTowerRetry(tonumber(action.SellTower))
-                                    if sellSuccess then
-                                        soldPositions[tonumber(action.SellTower)] = true
-                                    end
-                                end
-                            end
-
-                            if rebuildSuccess then
-                                rebuildAttempts[x] = 0
-                                clearTowerDeath(x)
-                            end
-                        else
-                            -- Tower đã sống lại, clear death record
-                            clearTowerDeath(x)
+                        if activeRebuilds[x] then
+                            task.cancel(activeRebuilds[x])
+                            activeRebuilds[x] = nil
                         end
                     end
                 end
