@@ -370,15 +370,19 @@ local function convertTimeToNumber(timeStr)
     return nil
 end
 
--- ánh xạ vị trí tower khi vừa đặt
-local towerPlacedHash = tostring(a1) -- a1 là hash từ log
-local tower = TowerClass.GetTowers()[towerPlacedHash]
-if tower then
-    local pos = GetTowerPosition(tower)
-    if pos then
-        hash2pos[towerPlacedHash] = {x = pos.X, y = pos.Y, z = pos.Z}
+-- ánh xạ hash -> pos - CHỈ CẬP NHẬT CHO LẦN ĐẦU TIÊN
+local hash2pos = {}
+task.spawn(function()
+    while true do
+        for hash, tower in pairs(TowerClass and TowerClass.GetTowers() or {}) do
+            local pos = GetTowerPosition(tower)
+            if pos then
+                hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+            end
+        end
+        task.wait()
     end
-end
+end)
 
 -- Hàm parse một dòng macro thành entry
 local function parseMacroLine(line)
@@ -400,7 +404,7 @@ local function parseMacroLine(line)
     -- nâng cấp - đúng format có sẵn
     local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
     if hash and path and upgradeCount then
-        local pos = getPositionByHash(hash)
+        local pos = hash2pos[tostring(hash)]
         local pathNum = tonumber(path)
         local count = tonumber(upgradeCount)
         if pos and pathNum and count and count > 0 then
@@ -419,7 +423,7 @@ local function parseMacroLine(line)
     -- đổi target - đúng format có sẵn
     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
     if hash and targetType then
-        local pos = getPositionByHash(hash)
+        local pos = hash2pos[tostring(hash)]
         if pos then
             local currentWave, currentTime = getCurrentWaveAndTime()
             local timeNumber = convertTimeToNumber(currentTime)
@@ -444,7 +448,7 @@ local function parseMacroLine(line)
     -- bán - đúng format có sẵn
     local hash = line:match('TDX:sellTower%(([^%)]+)%)')
     if hash then
-        local pos = getPositionByHash(hash)
+        local pos = hash2pos[tostring(hash)]
         if pos then
             return {
                 SellTower = pos.x
