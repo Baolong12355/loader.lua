@@ -53,7 +53,7 @@ end
 local defaultConfig = {
     ["Macro Name"] = "event",
     ["PlaceMode"] = "Rewrite",
-    ["ForceRebuildEvenIfSold"] = true,
+    ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
     ["SellAllDelay"] = 0.1,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
@@ -478,7 +478,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                             end
                         end
                         
-                        task.wait(0.03)
+                        task.wait(0.05)
                     end
                     
                     if rebuildSuccess then
@@ -495,7 +495,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                     task.wait(config.RebuildCheckInterval)
                 end
             else
-                task.wait(0.25)
+                task.wait(0.1)
             end
         end
     end)
