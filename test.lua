@@ -370,19 +370,21 @@ local function convertTimeToNumber(timeStr)
     return nil
 end
 
--- ánh xạ hash -> pos - CHỈ CẬP NHẬT CHO LẦN ĐẦU TIÊN
-local hash2pos = {}
-task.spawn(function()
-    while true do
-        for hash, tower in pairs(TowerClass and TowerClass.GetTowers() or {}) do
-            local pos = GetTowerPosition(tower)
-            if pos then
-                hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
-            end
-        end
-        task.wait()
+-- Hàm ánh xạ hash -> pos trực tiếp
+local function getPositionByHash(hash)
+    if not TowerClass then return nil end
+    local towers = TowerClass.GetTowers()
+    if not towers then return nil end
+    
+    local tower = towers[hash]
+    if not tower then return nil end
+    
+    local pos = GetTowerPosition(tower)
+    if pos then
+        return {x = pos.X, y = pos.Y, z = pos.Z}
     end
-end)
+    return nil
+end
 
 -- Hàm parse một dòng macro thành entry
 local function parseMacroLine(line)
@@ -401,29 +403,29 @@ local function parseMacroLine(line)
         }
     end
 
-    -- nâng cấp
+    -- nâng cấp - đúng format có sẵn
     local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
     if hash and path and upgradeCount then
-        local pos = hash2pos[tostring(hash)]
+        local pos = getPositionByHash(hash)
         local pathNum = tonumber(path)
         local count = tonumber(upgradeCount)
         if pos and pathNum and count and count > 0 then
             local entries = {}
             for _ = 1, count do
                 table.insert(entries, {
-                    UpgradeCost = 0,
+                    TowerUpgraded = pos.x,
                     UpgradePath = pathNum,
-                    TowerUpgraded = pos.x
+                    UpgradeCost = 0
                 })
             end
             return entries
         end
     end
 
-    -- đổi target
+    -- đổi target - đúng format có sẵn
     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
     if hash and targetType then
-        local pos = hash2pos[tostring(hash)]
+        local pos = getPositionByHash(hash)
         if pos then
             local currentWave, currentTime = getCurrentWaveAndTime()
             local timeNumber = convertTimeToNumber(currentTime)
@@ -445,10 +447,10 @@ local function parseMacroLine(line)
         end
     end
 
-    -- bán
+    -- bán - đúng format có sẵn
     local hash = line:match('TDX:sellTower%(([^%)]+)%)')
     if hash then
-        local pos = hash2pos[tostring(hash)]
+        local pos = getPositionByHash(hash)
         if pos then
             return {
                 SellTower = pos.x
