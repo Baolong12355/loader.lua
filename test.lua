@@ -370,20 +370,14 @@ local function convertTimeToNumber(timeStr)
     return nil
 end
 
--- Hàm ánh xạ hash -> pos trực tiếp
-local function getPositionByHash(hash)
-    if not TowerClass then return nil end
-    local towers = TowerClass.GetTowers()
-    if not towers then return nil end
-    
-    local tower = towers[hash]
-    if not tower then return nil end
-    
+-- ánh xạ vị trí tower khi vừa đặt
+local towerPlacedHash = tostring(a1) -- a1 là hash từ log
+local tower = TowerClass.GetTowers()[towerPlacedHash]
+if tower then
     local pos = GetTowerPosition(tower)
     if pos then
-        return {x = pos.X, y = pos.Y, z = pos.Z}
+        hash2pos[towerPlacedHash] = {x = pos.X, y = pos.Y, z = pos.Z}
     end
-    return nil
 end
 
 -- Hàm parse một dòng macro thành entry
