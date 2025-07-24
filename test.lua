@@ -384,9 +384,10 @@ task.spawn(function()
     end
 end)
 
--- Hàm parse một dòng macro thành entry
+
+-- Hàm parse một dòng macro thành entry - GIỮ NGUYÊN FORMAT NHƯ BẢN GỐC
 local function parseMacroLine(line)
-    -- parser cho placeTower với Vector3.new(...)
+    -- 1. Đặt tháp (placeTower) - GIỮ NGUYÊN FORMAT
     local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
     if a1 and name and x and y and z and rot then
         name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
@@ -401,7 +402,7 @@ local function parseMacroLine(line)
         }
     end
 
-    -- nâng cấp
+    -- 2. Nâng cấp tháp (upgradeTower) - GIỮ NGUYÊN FORMAT
     local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
     if hash and path and upgradeCount then
         local pos = hash2pos[tostring(hash)]
@@ -420,7 +421,7 @@ local function parseMacroLine(line)
         end
     end
 
-    -- đổi target
+    -- 3. Đổi mục tiêu (changeQueryType) - GIỮ NGUYÊN FORMAT
     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
     if hash and targetType then
         local pos = hash2pos[tostring(hash)]
@@ -445,7 +446,7 @@ local function parseMacroLine(line)
         end
     end
 
-    -- bán
+    -- 4. Bán tháp (sellTower) - GIỮ NGUYÊN FORMAT
     local hash = line:match('TDX:sellTower%(([^%)]+)%)')
     if hash then
         local pos = hash2pos[tostring(hash)]
@@ -458,6 +459,7 @@ local function parseMacroLine(line)
 
     return nil
 end
+
 
 -- Hàm thêm entry mới vào JSON file
 local function appendToJsonFile(newEntries)
