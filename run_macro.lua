@@ -79,7 +79,7 @@ local function getMaxAttempts()
     if placeMode == "Ashed" then
         return 1  -- Không retry
     elseif placeMode == "Rewrite" then
-        return 30  -- Retry 3 lần
+        return 10  -- Retry 3 lần
     else
         return 1  -- Mặc định không retry nếu không rõ mode
     end
