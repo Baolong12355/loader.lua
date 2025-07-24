@@ -1,3 +1,7 @@
+-- TDX Macro Runner - Universal Compatibility & Optimized Rebuild
+-- Hỗ trợ tất cả executor và loadstring từ GitHub
+-- Tối ưu bởi Gemini: Áp dụng cơ chế worker song song để rebuild nhiều tháp cùng lúc.
+
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -57,7 +61,10 @@ local defaultConfig = {
     ["TargetChangeCheckDelay"] = 0.1,
     ["RebuildPriority"] = false,
     ["RebuildCheckInterval"] = 0,
-    ["MacroStepDelay"] = 0
+    ["MacroStepDelay"] = 0,
+    -- TÙY CHỈNH TỐI ƯU: Số lượng tháp có thể được rebuild cùng một lúc.
+    -- Tăng giá trị này có thể nhanh hơn nhưng có thể gây lag/lỗi nếu quá cao.
+    ["MaxConcurrentRebuilds"] = 3 
 }
 
 -- Khởi tạo config
@@ -74,11 +81,11 @@ end
 local function getMaxAttempts()
     local placeMode = globalEnv.TDX_Config.PlaceMode or "Ashed"
     if placeMode == "Ashed" then
-        return 1  -- Không retry
+        return 1
     elseif placeMode == "Rewrite" then
-        return 10  -- Retry 10 lần
+        return 10
     else
-        return 1  -- Mặc định không retry nếu không rõ mode
+        return 1
     end
 end
 
@@ -225,7 +232,7 @@ end
 
 local function WaitForCash(amount)
     while cashStat.Value < amount do 
-        task.wait() 
+        RunService.Heartbeat:Wait()
     end
 end
 
@@ -234,19 +241,17 @@ local function PlaceTowerRetry(args, axisValue, towerName)
     local attempts = 0
 
     while attempts < maxAttempts do
-        local success = pcall(function()
+        pcall(function()
             Remotes.PlaceTower:InvokeServer(unpack(args))
         end)
 
-        if success then
-            local startTime = tick()
-            repeat 
-                task.wait(0.1) 
-            until tick() - startTime > 3 or GetTowerByAxis(axisValue)
+        local startTime = tick()
+        repeat 
+            RunService.Heartbeat:Wait()
+        until tick() - startTime > 2 or GetTowerByAxis(axisValue) -- Giảm timeout để nhanh hơn
 
-            if GetTowerByAxis(axisValue) then 
-                return true
-            end
+        if GetTowerByAxis(axisValue) then 
+            return true
         end
 
         attempts = attempts + 1
@@ -269,26 +274,25 @@ local function UpgradeTowerRetry(axisValue, path)
 
         local before = tower.LevelHandler:GetLevelOnPath(path)
         local cost = GetCurrentUpgradeCost(tower, path)
-        if not cost then return end
+        if not cost then return true end -- Đã max level, coi như thành công
 
         WaitForCash(cost)
+        
+        Remotes.TowerUpgradeRequest:FireServer(hash, path, 1)
 
-        local success = pcall(function()
-            Remotes.TowerUpgradeRequest:FireServer(hash, path, 1)
-        end)
-
-        if success then
-            local startTime = tick()
-            repeat
-                task.wait(0.1)
-                local _, t = GetTowerByAxis(axisValue)
-                if t and t.LevelHandler:GetLevelOnPath(path) > before then return end
-            until tick() - startTime > 3
-        end
+        local startTime = tick()
+        repeat
+            RunService.Heartbeat:Wait()
+            local _, t = GetTowerByAxis(axisValue)
+            if t and t.LevelHandler and t.LevelHandler:GetLevelOnPath(path) > before then 
+                return true 
+            end
+        until tick() - startTime > 2 -- Giảm timeout
 
         attempts = attempts + 1
         task.wait()
     end
+    return false
 end
 
 local function ChangeTargetRetry(axisValue, targetType)
@@ -304,7 +308,7 @@ local function ChangeTargetRetry(axisValue, targetType)
             return
         end
         attempts = attempts + 1
-        task.wait(0.1)
+        RunService.Heartbeat:Wait()
     end
 end
 
@@ -318,7 +322,7 @@ local function SellTowerRetry(axisValue)
             pcall(function()
                 Remotes.SellTower:FireServer(hash)
             end)
-            task.wait(0.1)
+            task.wait(0.05)
             if not GetTowerByAxis(axisValue) then return true end
         end
         attempts = attempts + 1
@@ -368,102 +372,90 @@ local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
     end)
 end
 
--- Thêm tracking system cho towers đã chết
-local deadTowerTracker = {
-    deadTowers = {}, -- {x = firstDeathTime, ...}
-    nextDeathId = 1
-}
+--[[
+    HỆ THỐNG REBUILD ĐÃ TỐI ƯU HÓA (OPTIMIZED REBUILD SYSTEM)
+    - Cơ chế: Producer-Consumer (Worker Threads)
+    - Producer (Vòng lặp chính): Quét tìm các tháp đã bị phá hủy và đưa chúng vào một hàng đợi ("jobQueue").
+    - Consumer (Các "worker"): Nhiều tiến trình chạy song song, liên tục lấy "công việc" từ hàng đợi ra để thực hiện rebuild.
+    - Lợi ích: Rebuild nhiều tháp cùng lúc thay vì phải chờ đợi tuần tự, tăng tốc độ phản ứng đáng kể.
+]]
+local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
+    local config = globalEnv.TDX_Config
+    local soldPositions = {}
+    
+    local jobQueue = {}
+    local activeJobs = {} -- { [x] = true } to track towers being rebuilt or in queue
+    local rebuildAttempts = {}
 
-local function recordTowerDeath(x)
-    if not deadTowerTracker.deadTowers[x] then
-        deadTowerTracker.deadTowers[x] = {
-            deathTime = tick(),
-            deathId = deadTowerTracker.nextDeathId
-        }
-        deadTowerTracker.nextDeathId = deadTowerTracker.nextDeathId + 1
-    end
-end
-
-local function clearTowerDeath(x)
-    deadTowerTracker.deadTowers[x] = nil
-end
-
--- Tracking system cho rebuild processes đang chạy
-local activeRebuilds = {} -- {x = coroutine, ...}
-
-local function RebuildTowerAsync(x, records, rebuildAttempts, soldPositions, config)
-    return task.spawn(function()
-        local rebuildSuccess = true
-        
-        for _, record in ipairs(records) do
-            local action = record.entry
-
-            if action.TowerPlaced then
-                local vecTab = {}
-                for coord in action.TowerVector:gmatch("[^,%s]+") do
-                    table.insert(vecTab, tonumber(coord))
-                end
-                if #vecTab == 3 then
-                    local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-                    local args = {
-                        tonumber(action.TowerA1), 
-                        action.TowerPlaced, 
-                        pos, 
-                        tonumber(action.Rotation or 0)
-                    }
-                    WaitForCash(action.TowerPlaceCost)
-                    local placeSuccess = PlaceTowerRetry(args, pos.X, action.TowerPlaced)
-
-                    if not placeSuccess then
-                        rebuildSuccess = false
-                        break
+    -- Worker: Hàm thực hiện công việc rebuild một tháp
+    local function RebuildWorker()
+        task.spawn(function()
+            while true do
+                if #jobQueue > 0 then
+                    local job = table.remove(jobQueue, 1)
+                    local x = job.x
+                    local records = job.records
+                    
+                    local rebuildSuccess = true
+                    for _, record in ipairs(records) do
+                        local action = record.entry
+                        if action.TowerPlaced then
+                            local vecTab = {}
+                            for coord in action.TowerVector:gmatch("[^,%s]+") do table.insert(vecTab, tonumber(coord)) end
+                            if #vecTab == 3 then
+                                local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
+                                local args = {tonumber(action.TowerA1), action.TowerPlaced, pos, tonumber(action.Rotation or 0)}
+                                WaitForCash(action.TowerPlaceCost)
+                                if not PlaceTowerRetry(args, pos.X, action.TowerPlaced) then
+                                    rebuildSuccess = false
+                                    break
+                                end
+                            end
+                        elseif action.TowerUpgraded then
+                            if not UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath) then
+                                rebuildSuccess = false
+                                break
+                            end
+                        elseif action.ChangeTarget then
+                            ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
+                        elseif action.SellTower then
+                            if SellTowerRetry(tonumber(action.SellTower)) then
+                                soldPositions[tonumber(action.SellTower)] = true
+                            end
+                        end
                     end
-                end
 
-            elseif action.TowerUpgraded then
-                UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath)
-
-            elseif action.ChangeTarget then
-                ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
-
-            elseif action.SellTower then
-                local sellSuccess = SellTowerRetry(tonumber(action.SellTower))
-                if sellSuccess then
-                    soldPositions[tonumber(action.SellTower)] = true
+                    if rebuildSuccess then
+                        rebuildAttempts[x] = 0
+                    end
+                    
+                    -- Mark job as complete
+                    activeJobs[x] = nil
+                else
+                    task.wait(0.1) -- Wait if queue is empty
                 end
             end
-        end
+        end)
+    end
 
-        -- Cleanup sau khi rebuild xong
-        if rebuildSuccess then
-            rebuildAttempts[x] = 0
-            clearTowerDeath(x)
-        end
-        
-        -- Remove khỏi active rebuilds
-        activeRebuilds[x] = nil
-    end)
-end
+    -- Khởi tạo các worker
+    for i = 1, config.MaxConcurrentRebuilds do
+        RebuildWorker()
+    end
 
-local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
-    local rebuildAttempts = {}
-    local soldPositions = {}
-    local config = globalEnv.TDX_Config
-
+    -- Producer: Vòng lặp tìm tháp chết và đưa vào hàng đợi
     task.spawn(function()
         while true do
-            if next(towerRecords) then
-                -- Check for dead towers và rebuild song song
-                for x, records in pairs(towerRecords) do
-                    local hash, tower = GetTowerByAxis(x)
-                    if not hash or not tower then
-                        -- Tower chết và chưa có rebuild process nào đang chạy
-                        if not activeRebuilds[x] then
-                            recordTowerDeath(x)
-                            
-                            local towerType = nil
-                            local firstPlaceRecord = nil
-
+            for x, records in pairs(towerRecords) do
+                if not activeJobs[x] then -- Chỉ kiểm tra nếu không có job nào đang chạy cho tháp này
+                    local hash = GetTowerByAxis(x)
+                    if not hash then
+                        -- Tower is dead, queue it for rebuild
+                        rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                        local maxRetry = config.MaxRebuildRetry
+                        
+                        if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                            local towerType, firstPlaceRecord = nil, nil
                             for _, record in ipairs(records) do
                                 if record.entry.TowerPlaced then 
                                     towerType = record.entry.TowerPlaced
@@ -474,45 +466,26 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
 
                             if towerType then
                                 local skipRule = skipTypesMap[towerType]
-                                local shouldSkip = false
+                                local shouldSkip = (skipRule and ((skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine) or not skipRule.beOnly))
                                 
-                                if skipRule then
-                                    if skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine then
-                                        shouldSkip = true
-                                    elseif not skipRule.beOnly then
-                                        shouldSkip = true
-                                    end
-                                end
-
-                                if not shouldSkip then
-                                    if not (soldPositions[x] and not config.ForceRebuildEvenIfSold) then
-                                        rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
-                                        local maxRetry = config.MaxRebuildRetry
-                                        
-                                        if not maxRetry or rebuildAttempts[x] <= maxRetry then
-                                            -- Start rebuild process song song
-                                            activeRebuilds[x] = RebuildTowerAsync(x, records, rebuildAttempts, soldPositions, config)
-                                        end
-                                    end
+                                if not shouldSkip and not (soldPositions[x] and not config.ForceRebuildEvenIfSold) then
+                                    -- Add to queue and mark as active
+                                    activeJobs[x] = true
+                                    local priority = GetTowerPriority(towerType)
+                                    table.insert(jobQueue, { x = x, records = records, priority = priority })
+                                    -- Sắp xếp hàng đợi để ưu tiên tháp quan trọng
+                                    table.sort(jobQueue, function(a, b) return a.priority < b.priority end)
                                 end
                             end
-                        end
-                    else
-                        -- Tower vẫn sống, clear death record và cancel rebuild nếu có
-                        clearTowerDeath(x)
-                        if activeRebuilds[x] then
-                            task.cancel(activeRebuilds[x])
-                            activeRebuilds[x] = nil
                         end
                     end
                 end
             end
-            
-            -- Check liên tục với heartbeat để response nhanh nhất
-            RunService.Heartbeat:Wait()
+            RunService.Heartbeat:Wait() -- Check every frame
         end
     end)
 end
+
 
 local function RunMacroRunner()
     local config = globalEnv.TDX_Config
@@ -618,3 +591,4 @@ local success, err = pcall(RunMacroRunner)
 if not success then
     error("Lỗi Macro Runner: " .. tostring(err))
 end
+
