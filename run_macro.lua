@@ -197,7 +197,7 @@ local function GetTowerByAxis(axisX)
             local root = model and (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart"))
             return root and root.Position, model and (root and root.Name or model.Name)
         end)
-        if success and pos and pos.X == axisX then  -- Đã bỏ làm tròn, so sánh chính xác
+        if success and pos and pos.X == axisX then
             local hp = 1
             pcall(function()
                 hp = tower.HealthHandler and tower.HealthHandler:GetHealth() or 1
@@ -245,13 +245,14 @@ local function PlaceTowerRetry(args, axisValue, towerName)
             until tick() - startTime > 3 or GetTowerByAxis(axisValue)
 
             if GetTowerByAxis(axisValue) then 
-                return 
+                return true
             end
         end
 
         attempts = attempts + 1
         task.wait()
     end
+    return false
 end
 
 local function UpgradeTowerRetry(axisValue, path)
@@ -367,174 +368,172 @@ local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
     end)
 end
 
+-- Thêm tracking system cho towers đã chết
+local deadTowerTracker = {
+    deadTowers = {}, -- {x = firstDeathTime, ...}
+    nextDeathId = 1
+}
+
+local function recordTowerDeath(x)
+    if not deadTowerTracker.deadTowers[x] then
+        deadTowerTracker.deadTowers[x] = {
+            deathTime = tick(),
+            deathId = deadTowerTracker.nextDeathId
+        }
+        deadTowerTracker.nextDeathId = deadTowerTracker.nextDeathId + 1
+    end
+end
+
+local function clearTowerDeath(x)
+    deadTowerTracker.deadTowers[x] = nil
+end
+
 local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     local rebuildAttempts = {}
     local soldPositions = {}
     local config = globalEnv.TDX_Config
-    local towerDeathOrder = {} -- Track thứ tự tower bị giết
-    local deathCounter = 0
+    local isRebuilding = false
 
     task.spawn(function()
         while true do
-            if next(towerRecords) then
-                local rebuildQueue = {}
-                local newDeaths = {}
-
-                -- Kiểm tra towers nào vừa bị giết và ghi lại thứ tự
+            if next(towerRecords) and not isRebuilding then
+                -- Check for new dead towers và record chúng
                 for x, records in pairs(towerRecords) do
                     local hash, tower = GetTowerByAxis(x)
                     if not hash or not tower then
-                        -- Tower đã chết
-                        if not towerDeathOrder[x] then
-                            -- Tower vừa mới chết, ghi lại thứ tự
-                            deathCounter = deathCounter + 1
-                            towerDeathOrder[x] = deathCounter
-                            table.insert(newDeaths, x)
-                        end
-
-                        local towerType = nil
-                        local firstPlaceRecord = nil
-
-                        -- Lấy tower đầu tiên được đặt
-                        for _, record in ipairs(records) do
-                            if record.entry.TowerPlaced then 
-                                if not firstPlaceRecord or record.line < firstPlaceRecord.line then
-                                    towerType = record.entry.TowerPlaced
-                                    firstPlaceRecord = record
-                                end
-                            end
-                        end
-
-                        if not towerType then continue end
-
-                        local skipRule = skipTypesMap[towerType]
-                        if skipRule then
-                            if skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine then
-                                continue
-                            elseif not skipRule.beOnly then
-                                continue
-                            end
-                        end
-
-                        if soldPositions[x] and not config.ForceRebuildEvenIfSold then
-                            continue
-                        end
-
-                        rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
-                        local maxRetry = config.MaxRebuildRetry
-                        if maxRetry and rebuildAttempts[x] > maxRetry then
-                            continue
-                        end
-
-                        local priority = GetTowerPriority(towerType)
-                        table.insert(rebuildQueue, {
-                            x = x,
-                            records = records,
-                            priority = priority,
-                            towerType = towerType,
-                            attempts = rebuildAttempts[x],
-                            deathOrder = towerDeathOrder[x] or math.huge -- Thứ tự bị giết
-                        })
+                        recordTowerDeath(x)
                     else
-                        -- Tower còn sống, xóa khỏi death order nếu có
-                        if towerDeathOrder[x] then
-                            towerDeathOrder[x] = nil
-                        end
+                        -- Tower vẫn sống, clear death record nếu có
+                        clearTowerDeath(x)
                     end
                 end
 
-                -- Sort theo thứ tự: priority trước, nếu bằng nhau thì theo thứ tự bị giết
-                table.sort(rebuildQueue, function(a, b)
-                    if a.priority == b.priority then
-                        return a.deathOrder < b.deathOrder -- Tower chết trước được rebuild trước
-                    end
-                    return a.priority < b.priority
-                end)
+                -- Nếu có dead towers, bắt đầu rebuild process
+                if next(deadTowerTracker.deadTowers) then
+                    isRebuilding = true
+                    
+                    -- Tạo rebuild queue dựa trên thứ tự chết (deathId)
+                    local rebuildQueue = {}
+                    
+                    for x, deathInfo in pairs(deadTowerTracker.deadTowers) do
+                        local records = towerRecords[x]
+                        if records then
+                            local towerType = nil
+                            local firstPlaceRecord = nil
 
-                -- Rebuild tất cả towers trong queue lần lượt
-                for _, rebuildItem in ipairs(rebuildQueue) do
-                    local x = rebuildItem.x
-                    local records = rebuildItem.records
-
-                    -- Kiểm tra lại tower có còn chết không (có thể đã được rebuild bởi action khác)
-                    local hash, tower = GetTowerByAxis(x)
-                    if hash and tower then
-                        -- Tower đã sống lại, bỏ qua
-                        rebuildAttempts[x] = 0
-                        continue
-                    end
-
-                    -- Sort records theo line number để rebuild theo đúng thứ tự
-                    table.sort(records, function(a, b) return a.line < b.line end)
-
-                    local rebuildSuccess = true
-                    for _, record in ipairs(records) do
-                        local action = record.entry
-
-                        if action.TowerPlaced then
-                            local vecTab = {}
-                            for coord in action.TowerVector:gmatch("[^,%s]+") do
-                                table.insert(vecTab, tonumber(coord))
-                            end
-                            if #vecTab == 3 then
-                                local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-                                local args = {
-                                    tonumber(action.TowerA1), 
-                                    action.TowerPlaced, 
-                                    pos, 
-                                    tonumber(action.Rotation or 0)
-                                }
-                                WaitForCash(action.TowerPlaceCost)
-                                PlaceTowerRetry(args, pos.X, action.TowerPlaced)
-
-                                local placedHash = GetTowerByAxis(pos.X)
-                                if not placedHash then
-                                    rebuildSuccess = false
+                            for _, record in ipairs(records) do
+                                if record.entry.TowerPlaced then 
+                                    towerType = record.entry.TowerPlaced
+                                    firstPlaceRecord = record
                                     break
                                 end
                             end
 
-                        elseif action.TowerUpgraded then
-                            UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath)
-
-                        elseif action.ChangeTarget then
-                            ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
-
-                        elseif action.SellTower then
-                            local sellSuccess = SellTowerRetry(tonumber(action.SellTower))
-                            if sellSuccess then
-                                soldPositions[tonumber(action.SellTower)] = true
-                            end
-                        end
-
-                        -- Trong quá trình rebuild, kiểm tra có tower khác chết không
-                        for otherX, otherRecords in pairs(towerRecords) do
-                            if otherX ~= x then -- Không check tower đang rebuild
-                                local otherHash, otherTower = GetTowerByAxis(otherX)
-                                if not otherHash or not otherTower then
-                                    -- Tower khác vừa chết
-                                    if not towerDeathOrder[otherX] then
-                                        deathCounter = deathCounter + 1
-                                        towerDeathOrder[otherX] = deathCounter
+                            if towerType then
+                                local skipRule = skipTypesMap[towerType]
+                                local shouldSkip = false
+                                
+                                if skipRule then
+                                    if skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine then
+                                        shouldSkip = true
+                                    elseif not skipRule.beOnly then
+                                        shouldSkip = true
                                     end
-                                else
-                                    -- Tower khác còn sống, xóa khỏi death order nếu có
-                                    if towerDeathOrder[otherX] then
-                                        towerDeathOrder[otherX] = nil
+                                end
+
+                                if not shouldSkip then
+                                    if not (soldPositions[x] and not config.ForceRebuildEvenIfSold) then
+                                        rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                                        local maxRetry = config.MaxRebuildRetry
+                                        
+                                        if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                                            local priority = GetTowerPriority(towerType)
+                                            table.insert(rebuildQueue, {
+                                                x = x,
+                                                records = records,
+                                                priority = priority,
+                                                towerType = towerType,
+                                                attempts = rebuildAttempts[x],
+                                                deathId = deathInfo.deathId
+                                            })
+                                        end
                                     end
                                 end
                             end
                         end
                     end
 
-                    if rebuildSuccess then
-                        rebuildAttempts[x] = 0
-                    end
+                    -- Sort theo thứ tự chết (deathId), không phải priority
+                    table.sort(rebuildQueue, function(a, b)
+                        return a.deathId < b.deathId
+                    end)
 
-                    -- Không break, tiếp tục rebuild tower tiếp theo trong queue
+                    -- Rebuild tất cả towers trong queue tuần tự
+                    for _, rebuildItem in ipairs(rebuildQueue) do
+                        local x = rebuildItem.x
+                        local records = rebuildItem.records
+
+                        -- Check lại xem tower vẫn chết không
+                        local hash = GetTowerByAxis(x)
+                        if not hash then
+                            local rebuildSuccess = true
+                            
+                            for _, record in ipairs(records) do
+                                local action = record.entry
+
+                                if action.TowerPlaced then
+                                    local vecTab = {}
+                                    for coord in action.TowerVector:gmatch("[^,%s]+") do
+                                        table.insert(vecTab, tonumber(coord))
+                                    end
+                                    if #vecTab == 3 then
+                                        local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
+                                        local args = {
+                                            tonumber(action.TowerA1), 
+                                            action.TowerPlaced, 
+                                            pos, 
+                                            tonumber(action.Rotation or 0)
+                                        }
+                                        WaitForCash(action.TowerPlaceCost)
+                                        local placeSuccess = PlaceTowerRetry(args, pos.X, action.TowerPlaced)
+
+                                        if not placeSuccess then
+                                            rebuildSuccess = false
+                                            break
+                                        end
+                                    end
+
+                                elseif action.TowerUpgraded then
+                                    UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath)
+
+                                elseif action.ChangeTarget then
+                                    ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
+
+                                elseif action.SellTower then
+                                    local sellSuccess = SellTowerRetry(tonumber(action.SellTower))
+                                    if sellSuccess then
+                                        soldPositions[tonumber(action.SellTower)] = true
+                                    end
+                                end
+
+                                -- Không delay giữa các actions
+                            end
+
+                            if rebuildSuccess then
+                                rebuildAttempts[x] = 0
+                                clearTowerDeath(x)
+                            end
+                        else
+                            -- Tower đã sống lại (có thể do rebuild khác), clear death record
+                            clearTowerDeath(x)
+                        end
+                    end
+                    
+                    isRebuilding = false
                 end
             end
-            -- Không có delay, check liên tục
+            
+            -- Không delay, check liên tục
             task.wait()
         end
     end)
