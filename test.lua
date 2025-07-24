@@ -375,116 +375,6 @@ task.spawn(function()
     end
 end)
 
-local function parseMacroLine(line)
-    -- placeTower
-    local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
-    if a1 and name and x and y and z and rot then
-        name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
-        local cost = GetTowerPlaceCostByName(name)
-        local vector = string.format("%s, %s, %s", tostring(tonumber(x) or x), tostring(tonumber(y) or y), tostring(tonumber(z) or z))
-        return {
-            TowerPlaceCost = tonumber(cost) or 0,
-            TowerPlaced = name,
-            TowerVector = vector,
-            Rotation = rot,
-            TowerA1 = tostring(a1)
-        }
-    end
-
-    -- upgradeTower
-    local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-    if hash and path and upgradeCount then
-        local pos = hash2pos[tostring(hash)]
-        local pathNum = tonumber(path)
-        local count = tonumber(upgradeCount)
-        if pos and pathNum and count and count > 0 then
-            local entries = {}
-            for _ = 1, count do
-                table.insert(entries, {
-                    UpgradeCost = 0,
-                    UpgradePath = pathNum,
-                    TowerUpgraded = pos.x
-                })
-            end
-            return entries
-        end
-    end
-
-    -- changeQueryType
-    local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
-    if hash and targetType then
-        local pos = hash2pos[tostring(hash)]
-        if pos then
-            local currentWave, currentTime = getCurrentWaveAndTime()
-            local timeNumber = convertTimeToNumber(currentTime)
-
-            local targetEntry = {
-                TowerTargetChange = pos.x,
-                TargetWanted = tonumber(targetType)
-            }
-
-            if currentWave then
-                targetEntry.TargetWave = currentWave
-            end
-
-            if timeNumber then
-                targetEntry.TargetChangedAt = timeNumber
-            end
-
-            return targetEntry
-        end
-    end
-
-    -- sellTower
-    local hash = line:match('TDX:sellTower%(([^%)]+)%)')
-    if hash then
-        local pos = hash2pos[tostring(hash)]
-        if pos then
-            return {
-                SellTower = pos.x
-            }
-        end
-    end
-
-    return nil
-end
-
-local function appendToJsonFile(newEntries)
-    if not newEntries or #newEntries == 0 then return end
-
-    local existingLogs = {}
-
-    if isfile(outJson) then
-        local content = readfile(outJson)
-        content = content:gsub("^%[%s*", ""):gsub("%s*%]$", "")
-        for line in content:gmatch("[^\r\n]+") do
-            line = line:gsub(",$", "")
-            if line:match("%S") then
-                local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
-                if ok and decoded then
-                    table.insert(existingLogs, decoded)
-                end
-            end
-        end
-    end
-
-    for _, entry in ipairs(newEntries) do
-        table.insert(existingLogs, entry)
-    end
-
-    local jsonLines = {}
-    for i, entry in ipairs(existingLogs) do
-        local jsonStr = HttpService:JSONEncode(entry)
-        if i < #existingLogs then
-            jsonStr = jsonStr .. ","
-        end
-        table.insert(jsonLines, jsonStr)
-    end
-
-    local finalJson = "[\n" .. table.concat(jsonLines, "\n") .. "\n]"
-    writefile(outJson, finalJson)
-end
-
 if makefolder then
     pcall(function() makefolder("tdx") end)
     pcall(function() makefolder("tdx/macros") end)
@@ -497,6 +387,7 @@ while true do
         if not initialConverted then
             local logs = {}
 
+            -- Giữ lại các dòng SuperFunction nếu có
             local preservedSuper = {}
             if isfile(outJson) then
                 local content = readfile(outJson)
@@ -512,23 +403,83 @@ while true do
                 end
             end
 
+            -- Xử lý từng dòng trong file record.txt
             for line in currentContent:gmatch("[^\r\n]+") do
-                local result = parseMacroLine(line)
-                if result then
-                    if type(result) == "table" and result[1] then
-                        for _, entry in ipairs(result) do
-                            table.insert(logs, entry)
+                -- Xử lý placeTower
+                local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
+                if a1 and name and x and y and z and rot then
+                    name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
+                    local cost = GetTowerPlaceCostByName(name)
+                    local vector = string.format("%s, %s, %s", tostring(tonumber(x) or x), tostring(tonumber(y) or y), tostring(tonumber(z) or z))
+                    table.insert(logs, {
+                        TowerPlaceCost = tonumber(cost) or 0,
+                        TowerPlaced = name,
+                        TowerVector = vector,
+                        Rotation = rot,
+                        TowerA1 = tostring(a1)
+                    })
+                else
+                    -- Xử lý upgradeTower
+                    local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+                    if hash and path and upgradeCount then
+                        local pos = hash2pos[tostring(hash)]
+                        local pathNum = tonumber(path)
+                        local count = tonumber(upgradeCount)
+                        if pos and pathNum and count and count > 0 then
+                            for _ = 1, count do
+                                table.insert(logs, {
+                                    UpgradeCost = 0,
+                                    UpgradePath = pathNum,
+                                    TowerUpgraded = pos.x
+                                })
+                            end
                         end
                     else
-                        table.insert(logs, result)
+                        -- Xử lý changeQueryType
+                        local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
+                        if hash and targetType then
+                            local pos = hash2pos[tostring(hash)]
+                            if pos then
+                                local currentWave, currentTime = getCurrentWaveAndTime()
+                                local timeNumber = convertTimeToNumber(currentTime)
+
+                                local targetEntry = {
+                                    TowerTargetChange = pos.x,
+                                    TargetWanted = tonumber(targetType)
+                                }
+
+                                if currentWave then
+                                    targetEntry.TargetWave = currentWave
+                                end
+
+                                if timeNumber then
+                                    targetEntry.TargetChangedAt = timeNumber
+                                end
+
+                                table.insert(logs, targetEntry)
+                            end
+                        else
+                            -- Xử lý sellTower
+                            local hash = line:match('TDX:sellTower%(([^%)]+)%)')
+                            if hash then
+                                local pos = hash2pos[tostring(hash)]
+                                if pos then
+                                    table.insert(logs, {
+                                        SellTower = pos.x
+                                    })
+                                end
+                            end
+                        end
                     end
                 end
             end
 
+            -- Thêm lại các dòng SuperFunction
             for _, entry in ipairs(preservedSuper) do
                 table.insert(logs, entry)
             end
 
+            -- Tạo JSON
             local jsonLines = {}
             for i, entry in ipairs(logs) do
                 local jsonStr = HttpService:JSONEncode(entry)
@@ -557,25 +508,113 @@ while true do
                 table.insert(lastLines, line)
             end
 
+            -- Chỉ lấy những dòng mới được thêm vào
             for i = #lastLines + 1, #currentLines do
                 table.insert(newLines, currentLines[i])
             end
 
             local newEntries = {}
             for _, line in ipairs(newLines) do
-                local result = parseMacroLine(line)
-                if result then
-                    if type(result) == "table" and result[1] then
-                        for _, entry in ipairs(result) do
-                            table.insert(newEntries, entry)
+                -- Xử lý tương tự như trên cho từng loại lệnh
+                local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
+                if a1 and name and x and y and z and rot then
+                    name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
+                    local cost = GetTowerPlaceCostByName(name)
+                    local vector = string.format("%s, %s, %s", tostring(tonumber(x) or x), tostring(tonumber(y) or y), tostring(tonumber(z) or z))
+                    table.insert(newEntries, {
+                        TowerPlaceCost = tonumber(cost) or 0,
+                        TowerPlaced = name,
+                        TowerVector = vector,
+                        Rotation = rot,
+                        TowerA1 = tostring(a1)
+                    })
+                else
+                    local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+                    if hash and path and upgradeCount then
+                        local pos = hash2pos[tostring(hash)]
+                        local pathNum = tonumber(path)
+                        local count = tonumber(upgradeCount)
+                        if pos and pathNum and count and count > 0 then
+                            for _ = 1, count do
+                                table.insert(newEntries, {
+                                    UpgradeCost = 0,
+                                    UpgradePath = pathNum,
+                                    TowerUpgraded = pos.x
+                                })
+                            end
                         end
                     else
-                        table.insert(newEntries, result)
+                        local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
+                        if hash and targetType then
+                            local pos = hash2pos[tostring(hash)]
+                            if pos then
+                                local currentWave, currentTime = getCurrentWaveAndTime()
+                                local timeNumber = convertTimeToNumber(currentTime)
+
+                                local targetEntry = {
+                                    TowerTargetChange = pos.x,
+                                    TargetWanted = tonumber(targetType)
+                                }
+
+                                if currentWave then
+                                    targetEntry.TargetWave = currentWave
+                                end
+
+                                if timeNumber then
+                                    targetEntry.TargetChangedAt = timeNumber
+                                end
+
+                                table.insert(newEntries, targetEntry)
+                            end
+                        else
+                            local hash = line:match('TDX:sellTower%(([^%)]+)%)')
+                            if hash then
+                                local pos = hash2pos[tostring(hash)]
+                                if pos then
+                                    table.insert(newEntries, {
+                                        SellTower = pos.x
+                                    })
+                                end
+                            end
+                        end
                     end
                 end
             end
 
-            appendToJsonFile(newEntries)
+            -- Đọc file JSON hiện tại
+            local existingLogs = {}
+            if isfile(outJson) then
+                local content = readfile(outJson)
+                content = content:gsub("^%[%s*", ""):gsub("%s*%]$", "")
+                for line in content:gmatch("[^\r\n]+") do
+                    line = line:gsub(",$", "")
+                    if line:match("%S") then
+                        local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
+                        if ok and decoded then
+                            table.insert(existingLogs, decoded)
+                        end
+                    end
+                end
+            end
+
+            -- Thêm các entry mới
+            for _, entry in ipairs(newEntries) do
+                table.insert(existingLogs, entry)
+            end
+
+            -- Ghi lại file JSON
+            local jsonLines = {}
+            for i, entry in ipairs(existingLogs) do
+                local jsonStr = HttpService:JSONEncode(entry)
+                if i < #existingLogs then
+                    jsonStr = jsonStr .. ","
+                end
+                table.insert(jsonLines, jsonStr)
+            end
+
+            local finalJson = "[\n" .. table.concat(jsonLines, "\n") .. "\n]"
+            writefile(outJson, finalJson)
+
             lastProcessedContent = currentContent
         end
     end
