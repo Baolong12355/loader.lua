@@ -392,78 +392,69 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     local rebuildAttempts = {}
     local soldPositions = {}
     local config = globalEnv.TDX_Config
-    local isRebuilding = false
 
     task.spawn(function()
         while true do
-            if next(towerRecords) and not isRebuilding then
-                -- Check for new dead towers và record chúng
+            if next(towerRecords) then
+                -- Check for dead towers và rebuild ngay lập tức
+                local rebuildQueue = {}
+                
                 for x, records in pairs(towerRecords) do
                     local hash, tower = GetTowerByAxis(x)
                     if not hash or not tower then
+                        -- Tower chết, record và add vào rebuild queue ngay
                         recordTowerDeath(x)
+                        
+                        local towerType = nil
+                        local firstPlaceRecord = nil
+
+                        for _, record in ipairs(records) do
+                            if record.entry.TowerPlaced then 
+                                towerType = record.entry.TowerPlaced
+                                firstPlaceRecord = record
+                                break
+                            end
+                        end
+
+                        if towerType then
+                            local skipRule = skipTypesMap[towerType]
+                            local shouldSkip = false
+                            
+                            if skipRule then
+                                if skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine then
+                                    shouldSkip = true
+                                elseif not skipRule.beOnly then
+                                    shouldSkip = true
+                                end
+                            end
+
+                            if not shouldSkip then
+                                if not (soldPositions[x] and not config.ForceRebuildEvenIfSold) then
+                                    rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                                    local maxRetry = config.MaxRebuildRetry
+                                    
+                                    if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                                        local deathInfo = deadTowerTracker.deadTowers[x]
+                                        table.insert(rebuildQueue, {
+                                            x = x,
+                                            records = records,
+                                            towerType = towerType,
+                                            attempts = rebuildAttempts[x],
+                                            deathId = deathInfo and deathInfo.deathId or 0
+                                        })
+                                    end
+                                end
+                            end
+                        end
                     else
                         -- Tower vẫn sống, clear death record nếu có
                         clearTowerDeath(x)
                     end
                 end
 
-                -- Nếu có dead towers, bắt đầu rebuild process
-                if next(deadTowerTracker.deadTowers) then
-                    isRebuilding = true
-                    
-                    -- Tạo rebuild queue dựa trên thứ tự chết (deathId)
-                    local rebuildQueue = {}
-                    
-                    for x, deathInfo in pairs(deadTowerTracker.deadTowers) do
-                        local records = towerRecords[x]
-                        if records then
-                            local towerType = nil
-                            local firstPlaceRecord = nil
-
-                            for _, record in ipairs(records) do
-                                if record.entry.TowerPlaced then 
-                                    towerType = record.entry.TowerPlaced
-                                    firstPlaceRecord = record
-                                    break
-                                end
-                            end
-
-                            if towerType then
-                                local skipRule = skipTypesMap[towerType]
-                                local shouldSkip = false
-                                
-                                if skipRule then
-                                    if skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine then
-                                        shouldSkip = true
-                                    elseif not skipRule.beOnly then
-                                        shouldSkip = true
-                                    end
-                                end
-
-                                if not shouldSkip then
-                                    if not (soldPositions[x] and not config.ForceRebuildEvenIfSold) then
-                                        rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
-                                        local maxRetry = config.MaxRebuildRetry
-                                        
-                                        if not maxRetry or rebuildAttempts[x] <= maxRetry then
-                                            local priority = GetTowerPriority(towerType)
-                                            table.insert(rebuildQueue, {
-                                                x = x,
-                                                records = records,
-                                                priority = priority,
-                                                towerType = towerType,
-                                                attempts = rebuildAttempts[x],
-                                                deathId = deathInfo.deathId
-                                            })
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-
-                    -- Sort theo thứ tự chết (deathId), không phải priority
+                -- Nếu có towers cần rebuild, rebuild ngay lập tức
+                if #rebuildQueue > 0 then
+                    -- Sort theo thứ tự chết (deathId)
                     table.sort(rebuildQueue, function(a, b)
                         return a.deathId < b.deathId
                     end)
@@ -473,7 +464,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                         local x = rebuildItem.x
                         local records = rebuildItem.records
 
-                        -- Check lại xem tower vẫn chết không
+                        -- Double check tower vẫn chết không
                         local hash = GetTowerByAxis(x)
                         if not hash then
                             local rebuildSuccess = true
@@ -515,8 +506,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                                         soldPositions[tonumber(action.SellTower)] = true
                                     end
                                 end
-
-                                -- Không delay giữa các actions
                             end
 
                             if rebuildSuccess then
@@ -524,17 +513,15 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                                 clearTowerDeath(x)
                             end
                         else
-                            -- Tower đã sống lại (có thể do rebuild khác), clear death record
+                            -- Tower đã sống lại, clear death record
                             clearTowerDeath(x)
                         end
                     end
-                    
-                    isRebuilding = false
                 end
             end
             
-            -- Không delay, check liên tục
-            task.wait()
+            -- Check liên tục với heartbeat để response nhanh nhất
+            RunService.Heartbeat:Wait()
         end
     end)
 end
