@@ -478,7 +478,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                             end
                         end
                         
-                        task.wait(0.05)
+                        task.wait()
                     end
                     
                     if rebuildSuccess then
@@ -495,7 +495,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                     task.wait(config.RebuildCheckInterval)
                 end
             else
-                task.wait(0.1)
+                task.wait()
             end
         end
     end)
