@@ -263,6 +263,10 @@ local player = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
+-- Track đã convert lần đầu chưa
+local initialConverted = false
+local lastProcessedContent = ""
+
 -- Safe require tower module
 local function SafeRequire(module)
     local success, result = pcall(require, module)
@@ -279,7 +283,7 @@ end
 
 local function GetTowerPosition(tower)
     if not TowerClass or not tower then return nil end
-    
+
     -- Thử lấy vị trí từ CFrame trước (nếu có)
     local success, cframe = pcall(function()
         return tower.CFrame
@@ -287,7 +291,7 @@ local function GetTowerPosition(tower)
     if success and cframe and typeof(cframe) == "CFrame" then
         return cframe.Position
     end
-    
+
     -- Thử sử dụng GetPosition() từ TowerClass
     if tower.GetPosition and typeof(tower.GetPosition) == "function" then
         local success, position = pcall(tower.GetPosition, tower)
@@ -295,7 +299,7 @@ local function GetTowerPosition(tower)
             return position
         end
     end
-    
+
     -- Thử sử dụng GetTorsoPosition() từ TowerClass
     if tower.GetTorsoPosition and typeof(tower.GetTorsoPosition) == "function" then
         local success, torsoPosition = pcall(tower.GetTorsoPosition, tower)
@@ -303,7 +307,7 @@ local function GetTowerPosition(tower)
             return torsoPosition
         end
     end
-    
+
     -- Fallback cuối cùng - truy cập trực tiếp vào model
     if tower.Character then
         local success, model = pcall(function()
@@ -316,7 +320,7 @@ local function GetTowerPosition(tower)
             end
         end
     end
-    
+
     return nil
 end
 
@@ -366,7 +370,7 @@ local function convertTimeToNumber(timeStr)
     return nil
 end
 
--- ánh xạ hash -> pos liên tục
+-- ánh xạ hash -> pos - CHỈ CẬP NHẬT CHO LẦN ĐẦU TIÊN
 local hash2pos = {}
 task.spawn(function()
     while true do
@@ -380,6 +384,121 @@ task.spawn(function()
     end
 end)
 
+-- Hàm parse một dòng macro thành entry
+local function parseMacroLine(line)
+    -- parser cho placeTower với Vector3.new(...)
+    local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
+    if a1 and name and x and y and z and rot then
+        name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
+        local cost = GetTowerPlaceCostByName(name)
+        local vector = string.format("%s, %s, %s", tostring(tonumber(x) or x), tostring(tonumber(y) or y), tostring(tonumber(z) or z))
+        return {
+            TowerPlaceCost = tonumber(cost) or 0,
+            TowerPlaced = name,
+            TowerVector = vector,
+            Rotation = rot,
+            TowerA1 = tostring(a1)
+        }
+    end
+
+    -- nâng cấp
+    local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+    if hash and path and upgradeCount then
+        local pos = hash2pos[tostring(hash)]
+        local pathNum = tonumber(path)
+        local count = tonumber(upgradeCount)
+        if pos and pathNum and count and count > 0 then
+            local entries = {}
+            for _ = 1, count do
+                table.insert(entries, {
+                    UpgradeCost = 0,
+                    UpgradePath = pathNum,
+                    TowerUpgraded = pos.x
+                })
+            end
+            return entries
+        end
+    end
+
+    -- đổi target
+    local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
+    if hash and targetType then
+        local pos = hash2pos[tostring(hash)]
+        if pos then
+            local currentWave, currentTime = getCurrentWaveAndTime()
+            local timeNumber = convertTimeToNumber(currentTime)
+
+            local targetEntry = {
+                TowerTargetChange = pos.x,
+                TargetWanted = tonumber(targetType)
+            }
+
+            if currentWave then
+                targetEntry.TargetWave = currentWave
+            end
+
+            if timeNumber then
+                targetEntry.TargetChangedAt = timeNumber
+            end
+
+            return targetEntry
+        end
+    end
+
+    -- bán
+    local hash = line:match('TDX:sellTower%(([^%)]+)%)')
+    if hash then
+        local pos = hash2pos[tostring(hash)]
+        if pos then
+            return {
+                SellTower = pos.x
+            }
+        end
+    end
+
+    return nil
+end
+
+-- Hàm thêm entry mới vào JSON file
+local function appendToJsonFile(newEntries)
+    if not newEntries or #newEntries == 0 then return end
+
+    local existingLogs = {}
+    
+    -- Đọc file hiện tại
+    if isfile(outJson) then
+        local content = readfile(outJson)
+        content = content:gsub("^%[%s*", ""):gsub("%s*%]$", "")
+        for line in content:gmatch("[^\r\n]+") do
+            line = line:gsub(",$", "")
+            if line:match("%S") then
+                local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
+                if ok and decoded then
+                    table.insert(existingLogs, decoded)
+                end
+            end
+        end
+    end
+
+    -- Thêm entries mới
+    for _, entry in ipairs(newEntries) do
+        table.insert(existingLogs, entry)
+    end
+
+    -- Ghi lại file
+    local jsonLines = {}
+    for i, entry in ipairs(existingLogs) do
+        local jsonStr = HttpService:JSONEncode(entry)
+        if i < #existingLogs then
+            jsonStr = jsonStr .. ","
+        end
+        table.insert(jsonLines, jsonStr)
+    end
+
+    local finalJson = "[\n" .. table.concat(jsonLines, "\n") .. "\n]"
+    writefile(outJson, finalJson)
+end
+
 if makefolder then
     pcall(function() makefolder("tdx") end)
     pcall(function() makefolder("tdx/macros") end)
@@ -387,117 +506,105 @@ end
 
 while true do
     if isfile(txtFile) then
-        local macro = readfile(txtFile)
-        local logs = {}
+        local currentContent = readfile(txtFile)
+        
+        if not initialConverted then
+            -- Lần đầu tiên - convert toàn bộ
+            print("Initial conversion...")
+            local logs = {}
 
-        -- giữ dòng SuperFunction
-        local preservedSuper = {}
-        if isfile(outJson) then
-            local content = readfile(outJson)
-            -- Remove brackets and split by lines
-            content = content:gsub("^%[%s*", ""):gsub("%s*%]$", "")
-            for line in content:gmatch("[^\r\n]+") do
-                line = line:gsub(",$", "") -- Remove trailing comma
-                if line:match("%S") then -- Only non-empty lines
-                    local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
-                    if ok and decoded and decoded.SuperFunction then
-                        table.insert(preservedSuper, decoded)
+            -- Giữ SuperFunction entries
+            local preservedSuper = {}
+            if isfile(outJson) then
+                local content = readfile(outJson)
+                content = content:gsub("^%[%s*", ""):gsub("%s*%]$", "")
+                for line in content:gmatch("[^\r\n]+") do
+                    line = line:gsub(",$", "")
+                    if line:match("%S") then
+                        local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
+                        if ok and decoded and decoded.SuperFunction then
+                            table.insert(preservedSuper, decoded)
+                        end
                     end
                 end
             end
-        end
 
-        for line in macro:gmatch("[^\r\n]+") do
-            -- parser mới cho placeTower với Vector3.new(...)
-            local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
-            if a1 and name and x and y and z and rot then
-                name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
-                local cost = GetTowerPlaceCostByName(name)
-                local vector = string.format("%s, %s, %s", tostring(tonumber(x) or x), tostring(tonumber(y) or y), tostring(tonumber(z) or z))
-                table.insert(logs, {
-                    TowerPlaceCost = tonumber(cost) or 0,
-                    TowerPlaced = name,
-                    TowerVector = vector,
-                    Rotation = rot,
-                    TowerA1 = tostring(a1)
-                })
-            else
-                -- nâng cấp
-                local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-                if hash and path and upgradeCount then
-                    local pos = hash2pos[tostring(hash)]
-                    local pathNum = tonumber(path)
-                    local count = tonumber(upgradeCount)
-                    if pos and pathNum and count and count > 0 then
-                        for _ = 1, count do
-                            table.insert(logs, {
-                                UpgradeCost = 0,
-                                UpgradePath = pathNum,
-                                TowerUpgraded = pos.x
-                            })
-                        end
-                    end
-                else
-                    -- đổi target - TỰ ĐỘNG LẤY WAVE VÀ TIME HIỆN TẠI
-                    local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
-                    if hash and targetType then
-                        local pos = hash2pos[tostring(hash)]
-                        if pos then
-                            -- Lấy wave và time hiện tại
-                            local currentWave, currentTime = getCurrentWaveAndTime()
-                            local timeNumber = convertTimeToNumber(currentTime)
-
-                            local targetEntry = {
-                                TowerTargetChange = pos.x,
-                                TargetWanted = tonumber(targetType)
-                            }
-
-                            -- Thêm wave nếu có
-                            if currentWave then
-                                targetEntry.TargetWave = currentWave
-                            end
-
-                            -- Thêm time nếu có
-                            if timeNumber then
-                                targetEntry.TargetChangedAt = timeNumber
-                            end
-
-                            table.insert(logs, targetEntry)
+            for line in currentContent:gmatch("[^\r\n]+") do
+                local result = parseMacroLine(line)
+                if result then
+                    if type(result) == "table" and result[1] then
+                        -- Multiple entries (như upgrade multiple times)
+                        for _, entry in ipairs(result) do
+                            table.insert(logs, entry)
                         end
                     else
-                        -- bán
-                        local hash = line:match('TDX:sellTower%(([^%)]+)%)')
-                        if hash then
-                            local pos = hash2pos[tostring(hash)]
-                            if pos then
-                                table.insert(logs, {
-                                    SellTower = pos.x
-                                })
-                            end
-                        end
+                        -- Single entry
+                        table.insert(logs, result)
                     end
                 end
             end
-        end
 
-        -- Add preserved SuperFunction entries
-        for _, entry in ipairs(preservedSuper) do
-            table.insert(logs, entry)
-        end
-
-        -- Convert to proper JSON array format
-        local jsonLines = {}
-        for i, entry in ipairs(logs) do
-            local jsonStr = HttpService:JSONEncode(entry)
-            if i < #logs then
-                jsonStr = jsonStr .. ","
+            -- Add preserved SuperFunction entries
+            for _, entry in ipairs(preservedSuper) do
+                table.insert(logs, entry)
             end
-            table.insert(jsonLines, jsonStr)
-        end
 
-        -- Write with brackets
-        local finalJson = "[\n" .. table.concat(jsonLines, "\n") .. "\n]"
-        writefile(outJson, finalJson)
+            -- Ghi file hoàn chỉnh
+            local jsonLines = {}
+            for i, entry in ipairs(logs) do
+                local jsonStr = HttpService:JSONEncode(entry)
+                if i < #logs then
+                    jsonStr = jsonStr .. ","
+                end
+                table.insert(jsonLines, jsonStr)
+            end
+
+            local finalJson = "[\n" .. table.concat(jsonLines, "\n") .. "\n]"
+            writefile(outJson, finalJson)
+            
+            lastProcessedContent = currentContent
+            initialConverted = true
+            print("Initial conversion completed!")
+            
+        elseif currentContent ~= lastProcessedContent then
+            -- Chỉ xử lý phần mới thêm
+            print("Processing new lines...")
+            local newLines = {}
+            local currentLines = {}
+            local lastLines = {}
+            
+            for line in currentContent:gmatch("[^\r\n]+") do
+                table.insert(currentLines, line)
+            end
+            
+            for line in lastProcessedContent:gmatch("[^\r\n]+") do
+                table.insert(lastLines, line)
+            end
+            
+            -- Lấy những dòng mới
+            for i = #lastLines + 1, #currentLines do
+                table.insert(newLines, currentLines[i])
+            end
+            
+            -- Xử lý và thêm entries mới
+            local newEntries = {}
+            for _, line in ipairs(newLines) do
+                local result = parseMacroLine(line)
+                if result then
+                    if type(result) == "table" and result[1] then
+                        for _, entry in ipairs(result) do
+                            table.insert(newEntries, entry)
+                        end
+                    else
+                        table.insert(newEntries, result)
+                    end
+                end
+            end
+            
+            appendToJsonFile(newEntries)
+            lastProcessedContent = currentContent
+            print("Added " .. #newEntries .. " new entries")
+        end
     end
-    wait()
+    wait(0.1)
 end
