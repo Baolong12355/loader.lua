@@ -300,20 +300,38 @@ end
 
 local function ChangeTargetRetry(axisValue, targetType)
     local maxAttempts = getMaxAttempts()
-    local target = tostring(targetType) -- Đảm bảo luôn là chuỗi
+    local target = tostring(targetType)
+    
+    print(string.format("\n→ Bắt đầu đổi target (X: %.2f → %s)", axisValue, target))
     
     for attempt = 1, maxAttempts do
-        local hash, tower = GetTowerByAxis(axisValue)
+        print(string.format("  Lần thử %d/%d", attempt, maxAttempts))
+        
+        local hash, tower, name = GetTowerByAxis(axisValue)
         if hash then
-            pcall(function()
+            print(string.format("  ✅ Tìm thấy tháp: %s (Hash: %s)", name or "Unknown", tostring(hash)))
+            
+            local success, err = pcall(function()
                 Remotes.ChangeQueryType:FireServer(hash, target)
             end)
-            return true
+            
+            if success then
+                print("  ✅ Gọi remote thành công")
+                return true
+            else
+                print("  ❌ Lỗi gọi remote:", err)
+            end
+        else
+            print("  ❌ Không tìm thấy tháp tại X:", axisValue)
         end
+        
         task.wait(0.1)
     end
+    
+    print("  ⚠️ Đổi target THẤT BẠI sau", maxAttempts, "lần thử")
     return false
 end
+
 
 local function SellTowerRetry(axisValue)
     local maxAttempts = getMaxAttempts()
@@ -355,21 +373,28 @@ end
 
 local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
     task.spawn(function()
+        print("\n=== BẮT ĐẦU THEO DÕI TARGET ===")
+        
         while true do
             local currentWave = gameUI.waveText.Text
             local currentTime = gameUI.timeText.Text
             
-            for _, entry in ipairs(targetChangeEntries) do
-                if currentWave == entry.TargetWave then
-                    local targetTimeOK = not entry.TargetChangedAt or 
-                                       (currentTime == convertToTimeFormat(entry.TargetChangedAt))
+            for i, entry in ipairs(targetChangeEntries) do
+                local waveMatch = (currentWave == entry.TargetWave)
+                local timeMatch = not entry.TargetChangedAt or 
+                                (currentTime == convertToTimeFormat(entry.TargetChangedAt))
+                
+                if waveMatch and timeMatch then
+                    print(string.format(
+                        "\n🎯 Phát hiện điều kiện (Entry %d): Wave %s + Time %s",
+                        i, entry.TargetWave, entry.TargetChangedAt or "ANY"
+                    ))
                     
-                    if targetTimeOK then
-                        ChangeTargetRetry(entry.TowerTargetChange, entry.TargetWanted)
-                    end
+                    ChangeTargetRetry(entry.TowerTargetChange, entry.TargetWanted)
                 end
             end
-            task.wait(0.1)
+            
+            task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay or 0.1)
         end
     end)
 end
