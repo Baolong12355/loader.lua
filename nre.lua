@@ -1,5 +1,6 @@
 --[[
-    TDX Recorder - Phiên bản Hợp nhất
+    TDX Recorder - Phiên bản Hợp nhất (Đã sửa lỗi)
+    - Sửa lỗi "FindFirstDescendant is not enabled" bằng cách thay thế bằng FindFirstChild.
     - Hợp nhất hai script thành một.
     - Loại bỏ việc sử dụng file "record.txt" trung gian.
     - Ghi trực tiếp các hành động đã được xử lý vào file JSON.
@@ -83,33 +84,51 @@ local function GetTowerPosition(tower)
     return nil
 end
 
--- Lấy chi phí đặt tower dựa trên tên
+-- [SỬA LỖI] Lấy chi phí đặt tower dựa trên tên, sử dụng FindFirstChild
 local function GetTowerPlaceCostByName(name)
     local playerGui = player:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return 0 end
-    local towersBar = playerGui:FindFirstDescendant("TowersBar")
+    
+    -- Sử dụng chuỗi FindFirstChild thay vì FindFirstDescendant để đảm bảo tương thích
+    local interface = playerGui:FindFirstChild("Interface")
+    if not interface then return 0 end
+    local bottomBar = interface:FindFirstChild("BottomBar")
+    if not bottomBar then return 0 end
+    local towersBar = bottomBar:FindFirstChild("TowersBar")
     if not towersBar then return 0 end
 
     for _, towerButton in ipairs(towersBar:GetChildren()) do
-        if towerButton.Name == name and towerButton:FindFirstDescendant("CostText") then
-            local raw = tostring(towerButton.CostFrame.CostText.Text):gsub("%D", "")
-            return tonumber(raw) or 0
+        if towerButton.Name == name then
+            -- Tương tự, sử dụng FindFirstChild ở đây
+            local costFrame = towerButton:FindFirstChild("CostFrame")
+            if costFrame then
+                local costText = costFrame:FindFirstChild("CostText")
+                if costText and costText:IsA("TextLabel") then
+                    local raw = tostring(costText.Text):gsub("%D", "")
+                    return tonumber(raw) or 0
+                end
+            end
         end
     end
     return 0
 end
 
--- Lấy thông tin wave và thời gian hiện tại
+-- [SỬA LỖI] Lấy thông tin wave và thời gian hiện tại, sử dụng FindFirstChild
 local function getCurrentWaveAndTime()
     local playerGui = player:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return nil, nil end
-    local gameInfoBar = playerGui:FindFirstDescendant("GameInfoBar")
+    
+    -- Sử dụng chuỗi FindFirstChild thay vì FindFirstDescendant
+    local interface = playerGui:FindFirstChild("Interface")
+    if not interface then return nil, nil end
+    local gameInfoBar = interface:FindFirstChild("GameInfoBar")
     if not gameInfoBar then return nil, nil end
 
     local wave = gameInfoBar.Wave.WaveText.Text
     local time = gameInfoBar.TimeLeft.TimeLeftText.Text
     return wave, time
 end
+
 
 -- Chuyển đổi chuỗi thời gian (vd: "1:23") thành số (vd: 123)
 local function convertTimeToNumber(timeStr)
@@ -408,6 +427,6 @@ end)
 preserveSuperFunctions()
 setupHooks()
 
-print("✅ TDX Recorder Hợp nhất đã hoạt động!")
+print("✅ TDX Recorder Hợp nhất (Đã sửa lỗi) đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 
