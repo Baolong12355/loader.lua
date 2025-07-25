@@ -1,305 +1,413 @@
 --[[
-    TDX JSON Recorder (Định dạng gốc, Ghi trực tiếp)
-    Phiên bản: 4.0
-    Mô tả: Script này kết hợp định dạng file JSON nhiều dòng của phiên bản gốc
-    với phương pháp ghi trực tiếp (append-only) để tăng hiệu quả.
-    Nó sẽ không đọc toàn bộ file vào bộ nhớ, thay vào đó sẽ nối các log mới vào cuối file.
+    TDX Recorder - Phiên bản Hợp nhất
+    - Hợp nhất hai script thành một.
+    - Loại bỏ việc sử dụng file "record.txt" trung gian.
+    - Ghi trực tiếp các hành động đã được xử lý vào file JSON.
+    - Giữ nguyên các chức năng cốt lõi về hook và xử lý sự kiện.
 ]]
 
--- Dịch vụ Roblox
+-- Dịch vụ và Biến Toàn cục
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
-
--- Người chơi cục bộ và Script
 local player = Players.LocalPlayer
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
--- Cấu hình
-local outJson = "tdx/macros/x.json"
+local outJson = "tdx/macros/recorder_output.json"
+local recordedActions = {} -- Bảng lưu trữ tất cả các hành động dưới dạng table
+local hash2pos = {} -- Ánh xạ hash của tower tới vị trí Vector3
 
--- Tạo thư mục nếu cần
-if makefolder then
-    pcall(function() makefolder("tdx") end)
-    pcall(function() makefolder("tdx/macros") end)
-end
-
---==============================================================================
--- Chức năng Ghi File (Ghi nối tiếp, không cache)
---==============================================================================
-
--- Hàm này sẽ nối các log mới vào file JSON mà không cần đọc/ghi lại toàn bộ file.
-local function appendLogsToFile(entries)
-    if not entries or #entries == 0 or not writefile or not HttpService then return end
-
-    -- 1. Chuyển các entry mới thành chuỗi JSON.
-    local newJsonStrings = {}
-    for _, entry in ipairs(entries) do
-        table.insert(newJsonStrings, HttpService:JSONEncode(entry))
-    end
-    if #newJsonStrings == 0 then return end
-    
-    -- Nối các chuỗi JSON mới lại với nhau, mỗi chuỗi trên một dòng
-    local newJsonBlock = table.concat(newJsonStrings, ",\n")
-
-    -- 2. Đọc nội dung file hiện tại (nếu có).
-    local currentContent = ""
-    if isfile and isfile(outJson) then
-        local success, content = pcall(readfile, outJson)
-        if success and content then
-            currentContent = content
-        end
-    end
-
-    local finalJson
-
-    -- 3. Xác định cách thêm nội dung mới vào file.
-    if #currentContent > 2 then -- Nếu file đã có nội dung (ví dụ: "[]")
-        -- Tìm vị trí của dấu ngoặc vuông đóng ']' cuối cùng.
-        local lastBracketPos = #currentContent
-        while currentContent:sub(lastBracketPos, lastBracketPos) ~= ']' and lastBracketPos > 1 do
-            lastBracketPos = lastBracketPos - 1
-        end
-
-        if lastBracketPos > 1 then
-            -- Lấy phần nội dung trước dấu ']'
-            local contentBeforeBracket = currentContent:sub(1, lastBracketPos - 1)
-            -- Thêm dấu phẩy và dòng mới, sau đó thêm khối JSON mới, và cuối cùng là đóng ngoặc.
-            finalJson = contentBeforeBracket .. ",\n" .. newJsonBlock .. "\n]"
-        else
-            -- Trường hợp file bị lỗi, tạo file mới
-            finalJson = "[\n" .. newJsonBlock .. "\n]"
-        end
-    else
-        -- Nếu file mới hoặc rỗng, tạo một mảng JSON mới.
-        finalJson = "[\n" .. newJsonBlock .. "\n]"
-    end
-
-    -- 4. Ghi lại nội dung cuối cùng vào file.
-    pcall(writefile, outJson, finalJson)
-end
-
--- Hàm thêm nhiều log entries và lưu lại
-local function addLogEntries(entries)
-    appendLogsToFile(entries)
-end
-
---==============================================================================
--- Logic Game & Lấy Dữ Liệu (Giữ nguyên từ bản gốc)
---==============================================================================
-
+-- Hàng đợi và cấu hình cho việc ghi nhận
 local pendingQueue = {}
 local timeout = 2
-local lastKnownLevels = {}
-local lastUpgradeTime = {}
+local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
+local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upgrade sinh đôi
 
+-- Lấy TowerClass một cách an toàn
 local TowerClass
-pcall(function() TowerClass = require(PlayerScripts:WaitForChild("Client"):WaitForChild("GameClass"):WaitForChild("TowerClass")) end)
+pcall(function()
+    local client = PlayerScripts:WaitForChild("Client")
+    local gameClass = client:WaitForChild("GameClass")
+    local towerModule = gameClass:WaitForChild("TowerClass")
+    TowerClass = require(towerModule)
+end)
 
+-- Tạo thư mục nếu chưa tồn tại
+if makefolder then
+    pcall(makefolder, "tdx")
+    pcall(makefolder, "tdx/macros")
+end
+
+--==============================================================================
+--=                           HÀM TIỆN ÍCH (HELPERS)                           =
+--==============================================================================
+
+-- Hàm ghi file an toàn
+local function safeWriteFile(path, content)
+    if writefile then
+        local success, err = pcall(writefile, path, content)
+        if not success then
+            warn("Lỗi khi ghi file: " .. tostring(err))
+        end
+    end
+end
+
+-- Hàm đọc file an toàn
+local function safeReadFile(path)
+    if isfile and isfile(path) and readfile then
+        local success, content = pcall(readfile, path)
+        if success then
+            return content
+        end
+    end
+    return ""
+end
+
+-- Lấy vị trí của một tower
 local function GetTowerPosition(tower)
     if not TowerClass or not tower then return nil end
-    if tower.CFrame and typeof(tower.CFrame) == "CFrame" then return tower.CFrame.Position end
-    if tower.GetPosition and pcall(tower.GetPosition, tower) then return tower:GetPosition() end
-    if tower.GetTorsoPosition and pcall(tower.GetTorsoPosition, tower) then return tower:GetTorsoPosition() end
-    if tower.Character and tower.Character.PrimaryPart then return tower.Character.PrimaryPart.Position end
+
+    -- Thử nhiều phương thức để có được vị trí chính xác
+    local success, cframe = pcall(function() return tower.CFrame end)
+    if success and typeof(cframe) == "CFrame" then return cframe.Position end
+
+    if tower.GetPosition then
+        local posSuccess, position = pcall(tower.GetPosition, tower)
+        if posSuccess and typeof(position) == "Vector3" then return position end
+    end
+
+    if tower.Character and tower.Character:GetCharacterModel() and tower.Character:GetCharacterModel().PrimaryPart then
+        return tower.Character:GetCharacterModel().PrimaryPart.Position
+    end
+
     return nil
 end
 
+-- Lấy chi phí đặt tower dựa trên tên
 local function GetTowerPlaceCostByName(name)
-    local playerGui = player:FindFirstChild("PlayerGui")
-    local costText = playerGui and playerGui:FindFirstChild("Interface.BottomBar.TowersBar." .. name .. ".CostFrame.CostText", true)
-    if costText then return tonumber(tostring(costText.Text):gsub("%D", "")) or 0 end
+    local playerGui = player:FindFirstChildOfClass("PlayerGui")
+    if not playerGui then return 0 end
+    local towersBar = playerGui:FindFirstDescendant("TowersBar")
+    if not towersBar then return 0 end
+
+    for _, towerButton in ipairs(towersBar:GetChildren()) do
+        if towerButton.Name == name and towerButton:FindFirstDescendant("CostText") then
+            local raw = tostring(towerButton.CostFrame.CostText.Text):gsub("%D", "")
+            return tonumber(raw) or 0
+        end
+    end
     return 0
 end
 
+-- Lấy thông tin wave và thời gian hiện tại
 local function getCurrentWaveAndTime()
-    local playerGui = player:FindFirstChild("PlayerGui")
-    local gameInfoBar = playerGui and playerGui:FindFirstChild("Interface.GameInfoBar", true)
-    if gameInfoBar then return gameInfoBar.Wave.WaveText.Text, gameInfoBar.TimeLeft.TimeLeftText.Text end
-    return nil, nil
+    local playerGui = player:FindFirstChildOfClass("PlayerGui")
+    if not playerGui then return nil, nil end
+    local gameInfoBar = playerGui:FindFirstDescendant("GameInfoBar")
+    if not gameInfoBar then return nil, nil end
+
+    local wave = gameInfoBar.Wave.WaveText.Text
+    local time = gameInfoBar.TimeLeft.TimeLeftText.Text
+    return wave, time
 end
 
+-- Chuyển đổi chuỗi thời gian (vd: "1:23") thành số (vd: 123)
 local function convertTimeToNumber(timeStr)
     if not timeStr then return nil end
     local mins, secs = timeStr:match("(%d+):(%d+)")
-    if mins and secs then return tonumber(mins) * 100 + tonumber(secs) end
+    if mins and secs then
+        return tonumber(mins) * 100 + tonumber(secs)
+    end
     return nil
 end
 
-local hash2pos = {}
-task.spawn(function()
-    while task.wait() do
-        if TowerClass and TowerClass.GetTowers then
-            for hash, tower in pairs(TowerClass.GetTowers() or {}) do
-                local pos = GetTowerPosition(tower)
-                if pos then hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z} end
+-- Cập nhật file JSON với dữ liệu mới
+local function updateJsonFile()
+    if not HttpService then return end
+    local jsonLines = {}
+    for i, entry in ipairs(recordedActions) do
+        local ok, jsonStr = pcall(HttpService.JSONEncode, HttpService, entry)
+        if ok then
+            if i < #recordedActions then
+                jsonStr = jsonStr .. ","
+            end
+            table.insert(jsonLines, jsonStr)
+        end
+    end
+    local finalJson = "[\n" .. table.concat(jsonLines, "\n") .. "\n]"
+    safeWriteFile(outJson, finalJson)
+end
+
+-- Đọc file JSON hiện có để bảo toàn các "SuperFunction"
+local function preserveSuperFunctions()
+    local content = safeReadFile(outJson)
+    if content == "" then return end
+
+    content = content:gsub("^%[%s*", ""):gsub("%s*%]$", "")
+    for line in content:gmatch("[^\r\n]+") do
+        line = line:gsub(",$", "")
+        if line:match("%S") then
+            local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
+            if ok and decoded and decoded.SuperFunction then
+                table.insert(recordedActions, decoded)
             end
         end
     end
-end)
-
-local function serialize(v)
-    if typeof(v) == "Vector3" then return "Vector3.new("..v.X..","..v.Y..","..v.Z..")"
-    elseif typeof(v) == "Vector2int16" then return "Vector2int16.new("..v.X..","..v.Y..")"
-    elseif type(v) == "table" then
-        local out = {}
-        for k, val in pairs(v) do out[#out+1] = "["..tostring(k).."]="..serialize(val) end
-        return "{"..table.concat(out, ",").."}"
-    else return tostring(v) end
+    if #recordedActions > 0 then
+        updateJsonFile() -- Cập nhật lại file để đảm bảo định dạng đúng
+    end
 end
 
-local function serializeArgs(...)
-    local args, out = {...}, {}
-    for i, v in ipairs(args) do out[i] = serialize(v) end
-    return table.concat(out, ", ")
-end
-
-function parseMacroLine(line)
+-- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
+local function parseMacroLine(line)
+    -- Phân tích lệnh đặt tower
     local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
     if a1 and name and x and y and z and rot then
         name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
         return {{
-            TowerPlaceCost = GetTowerPlaceCostByName(name), TowerPlaced = name,
-            TowerVector = string.format("%s, %s, %s", tonumber(x) or x, tonumber(y) or y, tonumber(z) or z),
-            Rotation = tonumber(rot), TowerA1 = tostring(a1)
+            TowerPlaceCost = GetTowerPlaceCostByName(name),
+            TowerPlaced = name,
+            TowerVector = string.format("%s, %s, %s", x, y, z),
+            Rotation = rot,
+            TowerA1 = a1
         }}
     end
+
+    -- Phân tích lệnh nâng cấp tower
     local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
     if hash and path and upgradeCount then
-        local pos, pathNum, count = hash2pos[tostring(hash)], tonumber(path), tonumber(upgradeCount)
-        if pos and pathNum and count > 0 then
+        local pos = hash2pos[tostring(hash)]
+        local pathNum, count = tonumber(path), tonumber(upgradeCount)
+        if pos and pathNum and count and count > 0 then
             local entries = {}
-            for _ = 1, count do table.insert(entries, {UpgradeCost = 0, UpgradePath = pathNum, TowerUpgraded = pos.x}) end
+            for _ = 1, count do
+                table.insert(entries, {
+                    UpgradeCost = 0, -- Chi phí nâng cấp sẽ được tính toán bởi trình phát lại
+                    UpgradePath = pathNum,
+                    TowerUpgraded = pos.x
+                })
+            end
             return entries
         end
     end
+
+    -- Phân tích lệnh thay đổi mục tiêu
     local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
     if hash and targetType then
         local pos = hash2pos[tostring(hash)]
         if pos then
             local currentWave, currentTime = getCurrentWaveAndTime()
-            return {{
-                TowerTargetChange = pos.x, TargetWanted = tonumber(targetType),
-                TargetWave = currentWave, TargetChangedAt = convertTimeToNumber(currentTime)
-            }}
+            local entry = {
+                TowerTargetChange = pos.x,
+                TargetWanted = tonumber(targetType),
+                TargetWave = currentWave,
+                TargetChangedAt = convertTimeToNumber(currentTime)
+            }
+            return {entry}
         end
     end
+
+    -- Phân tích lệnh bán tower
     local hash = line:match('TDX:sellTower%(([^%)]+)%)')
     if hash then
         local pos = hash2pos[tostring(hash)]
-        if pos then return {{SellTower = pos.x}} end
+        if pos then
+            return {{ SellTower = pos.x }}
+        end
     end
+
     return nil
 end
 
+-- Xử lý một dòng lệnh, phân tích và ghi vào file JSON
+local function processAndWriteAction(commandString)
+    local entries = parseMacroLine(commandString)
+    if entries then
+        for _, entry in ipairs(entries) do
+            table.insert(recordedActions, entry)
+        end
+        updateJsonFile()
+    end
+end
+
+
+--==============================================================================
+--=                      XỬ LÝ SỰ KIỆN & HOOKS                                 =
+--==============================================================================
+
+-- Thêm một yêu cầu vào hàng đợi chờ xác nhận
+local function setPending(typeStr, code, hash)
+    table.insert(pendingQueue, {
+        type = typeStr,
+        code = code,
+        created = tick(),
+        hash = hash
+    })
+end
+
+-- Xác nhận một yêu cầu từ hàng đợi và xử lý nó
 local function tryConfirm(typeStr, specificHash)
     for i = #pendingQueue, 1, -1 do
         local item = pendingQueue[i]
-        if item.type == typeStr and (not specificHash or string.find(item.code, tostring(specificHash))) then
-            local result = parseMacroLine(item.code)
-            if result then addLogEntries(result) end
-            table.remove(pendingQueue, i)
-            if not specificHash then return end
+        if item.type == typeStr then
+            if not specificHash or string.find(item.code, tostring(specificHash)) then
+                processAndWriteAction(item.code) -- Thay thế việc ghi file txt
+                table.remove(pendingQueue, i)
+                return
+            end
         end
     end
 end
 
-local function setPending(typeStr, code, hash)
-    table.insert(pendingQueue, {type = typeStr, code = code, created = tick(), hash = hash})
-end
-
---==============================================================================
--- Hook và Lắng nghe Sự kiện Remote (Giữ nguyên từ bản gốc)
---==============================================================================
-
+-- Xử lý sự kiện đặt/bán tower
 ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
-    if data and data[1] then if data[1].Creation then tryConfirm("Place") else tryConfirm("Sell") end end
+    local d = data and data[1]
+    if not d then return end
+    if d.Creation then
+        tryConfirm("Place")
+    else
+        tryConfirm("Sell")
+    end
 end)
 
+-- Xử lý sự kiện nâng cấp tower
 ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
     if not data or not data[1] then return end
-    local towerData, hash, newLevels = data[1], data[1].Hash, data[1].LevelReplicationData
+
+    local towerData = data[1]
+    local hash = towerData.Hash
+    local newLevels = towerData.LevelReplicationData
     local currentTime = tick()
-    if lastUpgradeTime[hash] and (currentTime - lastUpgradeTime[hash]) < 0.01 then return end
+
+    -- Chống upgrade sinh đôi
+    if lastUpgradeTime[hash] and (currentTime - lastUpgradeTime[hash]) < 0.0001 then
+        return
+    end
     lastUpgradeTime[hash] = currentTime
+
     local upgradedPath, upgradeCount = nil, 0
     if lastKnownLevels[hash] then
         for path = 1, 2 do
-            if (newLevels[path] or 0) > (lastKnownLevels[hash][path] or 0) then
-                upgradedPath, upgradeCount = path, newLevels[path] - lastKnownLevels[hash][path]
+            local oldLevel = lastKnownLevels[hash][path] or 0
+            local newLevel = newLevels[path] or 0
+            if newLevel > oldLevel then
+                upgradedPath = path
+                upgradeCount = newLevel - oldLevel
                 break
             end
         end
     end
+
     if upgradedPath and upgradeCount > 0 then
         local code = string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), upgradedPath, upgradeCount)
-        local result = parseMacroLine(code)
-        if result then addLogEntries(result) end
+        processAndWriteAction(code) -- Thay thế việc ghi file txt
+
+        -- Xóa các yêu cầu nâng cấp đang chờ cho tower này
         for i = #pendingQueue, 1, -1 do
-            if pendingQueue[i].type == "Upgrade" and pendingQueue[i].hash == hash then table.remove(pendingQueue, i) end
+            if pendingQueue[i].type == "Upgrade" and pendingQueue[i].hash == hash then
+                table.remove(pendingQueue, i)
+            end
         end
     else
         tryConfirm("Upgrade", hash)
     end
+
     lastKnownLevels[hash] = newLevels or {}
 end)
 
+-- Xử lý sự kiện thay đổi mục tiêu
 ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
-    if data and data[1] then tryConfirm("Target") end
+    if data and data[1] then
+        tryConfirm("Target")
+    end
 end)
 
+-- Xử lý các lệnh gọi remote
+local function handleRemote(name, args)
+    if name == "TowerUpgradeRequest" then
+        local hash, path, count = unpack(args)
+        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
+            setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
+        end
+    elseif name == "PlaceTower" then
+        local a1, towerName, vec, rot = unpack(args)
+        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
+            local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
+            setPending("Place", code)
+        end
+    elseif name == "SellTower" then
+        setPending("Sell", "TDX:sellTower("..tostring(args[1])..")")
+    elseif name == "ChangeQueryType" then
+        setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
+    end
+end
+
+-- Hook các hàm remote
+local function setupHooks()
+    if not hookfunction or not hookmetamethod or not checkcaller then
+        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
+        return
+    end
+
+    -- Hook FireServer
+    local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+        handleRemote(self.Name, {...})
+        return oldFireServer(self, ...)
+    end)
+
+    -- Hook InvokeServer
+    local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+        handleRemote(self.Name, {...})
+        return oldInvokeServer(self, ...)
+    end)
+
+    -- Hook namecall
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        if checkcaller() then return oldNamecall(self, ...) end
+        local method = getnamecallmethod()
+        if method == "FireServer" or method == "InvokeServer" then
+            handleRemote(self.Name, {...})
+        end
+        return oldNamecall(self, ...)
+    end)
+end
+
+--==============================================================================
+--=                         VÒNG LẶP & KHỞI TẠO                               =
+--==============================================================================
+
+-- Vòng lặp dọn dẹp hàng đợi chờ
 task.spawn(function()
     while task.wait(0.05) do
         local now = tick()
         for i = #pendingQueue, 1, -1 do
             if now - pendingQueue[i].created > timeout then
-                warn("❌ Hết thời gian chờ xác nhận: " .. pendingQueue[i].type)
+                warn("❌ Không xác thực được: " .. pendingQueue[i].type .. " | Code: " .. pendingQueue[i].code)
                 table.remove(pendingQueue, i)
             end
         end
     end
 end)
 
-local function handleRemote(name, args)
-    if name == "TowerUpgradeRequest" then
-        local hash, path, count = unpack(args)
-        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" then
-            setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
+-- Vòng lặp cập nhật vị trí tower
+task.spawn(function()
+    while task.wait(0.5) do
+        if TowerClass and TowerClass.GetTowers then
+            for hash, tower in pairs(TowerClass.GetTowers()) do
+                local pos = GetTowerPosition(tower)
+                if pos then
+                    hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+                end
+            end
         end
-    elseif name == "PlaceTower" then
-        local a1, towerName, vec, rot = unpack(args)
-        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
-            local code = string.format('TDX:placeTower(%d, "%s", Vector3.new(%s, %s, %s), %d)', a1, towerName, vec.X, vec.Y, vec.Z, rot)
-            setPending("Place", code)
-        end
-    elseif name == "SellTower" then
-        setPending("Sell", "TDX:sellTower("..serializeArgs(unpack(args))..")")
-    elseif name == "ChangeQueryType" then
-        setPending("Target", "TDX:changeQueryType("..serializeArgs(unpack(args))..")")
     end
-end
+end)
 
-if hookfunction and hookmetamethod and getnamecallmethod and checkcaller then
-    local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-        handleRemote(self.Name, {...})
-        return oldFireServer(self, ...)
-    end)
-    local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-        handleRemote(self.Name, {...})
-        return oldInvokeServer(self, ...)
-    end)
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if not checkcaller() then
-            local method = getnamecallmethod()
-            if method == "FireServer" or method == "InvokeServer" then handleRemote(self.Name, {...}) end
-        end
-        return oldNamecall(self, ...)
-    end)
-else
-    warn("Executor này không hỗ trợ các hàm hook cần thiết.")
-end
+-- Khởi tạo
+preserveSuperFunctions()
+setupHooks()
 
-print("✅ TDX JSON Recorder (Định dạng gốc) đã khởi động!")
-print("📁 Ghi trực tiếp vào file: " .. outJson)
+print("✅ TDX Recorder Hợp nhất đã hoạt động!")
+print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 
