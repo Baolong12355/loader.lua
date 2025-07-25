@@ -274,7 +274,7 @@ local function UpgradeTowerRetry(axisValue, path)
 
         local before = tower.LevelHandler:GetLevelOnPath(path)
         local cost = GetCurrentUpgradeCost(tower, path)
-        if not cost then return end
+        if not cost then return true end -- Đã max level, return success
 
         WaitForCash(cost)
 
@@ -287,13 +287,14 @@ local function UpgradeTowerRetry(axisValue, path)
             repeat
                 task.wait(0.1)
                 local _, t = GetTowerByAxis(axisValue)
-                if t and t.LevelHandler:GetLevelOnPath(path) > before then return end
+                if t and t.LevelHandler:GetLevelOnPath(path) > before then return true end -- Return success
             until tick() - startTime > 3
         end
 
         attempts = attempts + 1
         task.wait()
     end
+    return false -- Return false nếu không upgrade được
 end
 
 local function ChangeTargetRetry(axisValue, targetType)
@@ -437,6 +438,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                             end
 
                         elseif action.TowerUpgraded then
+                            -- Đảm bảo upgrade thành công, nếu fail thì retry
                             if not UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath) then
                                 rebuildSuccess = false
                                 break
@@ -479,8 +481,14 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                     local hash, tower = GetTowerByAxis(x)
                     
                     if not hash or not tower then
-                        -- Tower chết
+                        -- Tower không tồn tại (chết HOẶC bị bán)
                         if not activeJobs[x] then -- Chưa có job rebuild
+                            -- Kiểm tra xem tower có bị bán không
+                            if soldPositions[x] and not config.ForceRebuildEvenIfSold then
+                                -- Tower đã bị bán và không force rebuild
+                                continue
+                            end
+                            
                             recordTowerDeath(x)
                             
                             local towerType = nil
@@ -507,29 +515,27 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                                 end
 
                                 if not shouldSkip then
-                                    if not (soldPositions[x] and not config.ForceRebuildEvenIfSold) then
-                                        rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
-                                        local maxRetry = config.MaxRebuildRetry
+                                    rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                                    local maxRetry = config.MaxRebuildRetry
+                                    
+                                    if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                                        -- Add to queue với priority
+                                        activeJobs[x] = true
+                                        local priority = GetTowerPriority(towerType)
+                                        table.insert(jobQueue, { 
+                                            x = x, 
+                                            records = records, 
+                                            priority = priority,
+                                            deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick()
+                                        })
                                         
-                                        if not maxRetry or rebuildAttempts[x] <= maxRetry then
-                                            -- Add to queue với priority
-                                            activeJobs[x] = true
-                                            local priority = GetTowerPriority(towerType)
-                                            table.insert(jobQueue, { 
-                                                x = x, 
-                                                records = records, 
-                                                priority = priority,
-                                                deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick()
-                                            })
-                                            
-                                            -- Sort by priority, then by death time (older first)
-                                            table.sort(jobQueue, function(a, b) 
-                                                if a.priority == b.priority then
-                                                    return a.deathTime < b.deathTime
-                                                end
-                                                return a.priority < b.priority 
-                                            end)
-                                        end
+                                        -- Sort by priority, then by death time (older first)
+                                        table.sort(jobQueue, function(a, b) 
+                                            if a.priority == b.priority then
+                                                return a.deathTime < b.deathTime
+                                            end
+                                            return a.priority < b.priority 
+                                        end)
                                     end
                                 end
                             end
