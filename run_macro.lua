@@ -297,21 +297,29 @@ local function UpgradeTowerRetry(axisValue, path)
     return false -- Return false nếu không upgrade được
 end
 
+
 local function ChangeTargetRetry(axisValue, targetType)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
+    
+    -- Xử lý cả số và chuỗi cho targetType
+    local target = targetType
+    if type(targetType) == "number" then
+        target = tostring(targetType) -- Hoặc dùng bảng ánh xạ nếu cần
+    end
 
     while attempts < maxAttempts do
         local hash = GetTowerByAxis(axisValue)
         if hash then
             pcall(function()
-                Remotes.ChangeQueryType:FireServer(hash, targetType)
+                Remotes.ChangeQueryType:FireServer(hash, target)
             end)
-            return
+            return true
         end
         attempts = attempts + 1
         task.wait(0.1)
     end
+    return false
 end
 
 local function SellTowerRetry(axisValue)
@@ -333,11 +341,15 @@ local function SellTowerRetry(axisValue)
     return false
 end
 
+
+
 local function shouldChangeTarget(entry, currentWave, currentTime)
-    if entry.TargetWave and entry.TargetWave ~= currentWave then
+    -- So sánh nguyên chuỗi wave (giữ nguyên định dạng "WAVE XX")
+    if entry.TargetWave and currentWave ~= entry.TargetWave then
         return false
     end
 
+    -- Xử lý thời gian (giữ nguyên)
     if entry.TargetChangedAt then
         local targetTimeStr = convertToTimeFormat(entry.TargetChangedAt)
         if currentTime ~= targetTimeStr then
@@ -349,27 +361,20 @@ local function shouldChangeTarget(entry, currentWave, currentTime)
 end
 
 local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
-    local processedEntries = {}
-
     task.spawn(function()
         while true do
-            local success, currentWave, currentTime = pcall(function()
-                return gameUI.waveText.Text, gameUI.timeText.Text
-            end)
-
-            if success then
-                for i, entry in ipairs(targetChangeEntries) do
-                    if not processedEntries[i] and shouldChangeTarget(entry, currentWave, currentTime) then
-                        local axisValue = entry.TowerTargetChange
-                        local targetType = entry.TargetWanted
-
-                        ChangeTargetRetry(axisValue, targetType)
-                        processedEntries[i] = true
-                    end
+            local currentWave = gameUI.waveText.Text
+            local currentTime = gameUI.timeText.Text
+            
+            for _, entry in ipairs(targetChangeEntries) do
+                if shouldChangeTarget(entry, currentWave, currentTime) then
+                    ChangeTargetRetry(
+                        tonumber(entry.ChangeTarget), 
+                        entry.TargetWanted -- Giữ nguyên kiểu dữ liệu (số/chuỗi)
+                    )
                 end
             end
-
-            task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay)
+            task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay or 0.1)
         end
     end)
 end
