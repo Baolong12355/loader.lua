@@ -297,41 +297,22 @@ local function UpgradeTowerRetry(axisValue, path)
     return false -- Return false nếu không upgrade được
 end
 
-
 local function ChangeTargetRetry(axisValue, targetType)
     local maxAttempts = getMaxAttempts()
-    local target = tostring(targetType)
-    
-    print(string.format("\n→ Bắt đầu đổi target (X: %.2f → %s)", axisValue, target))
-    
-    for attempt = 1, maxAttempts do
-        print(string.format("  Lần thử %d/%d", attempt, maxAttempts))
-        
-        local hash, tower, name = GetTowerByAxis(axisValue)
+    local attempts = 0
+
+    while attempts < maxAttempts do
+        local hash = GetTowerByAxis(axisValue)
         if hash then
-            print(string.format("  ✅ Tìm thấy tháp: %s (Hash: %s)", name or "Unknown", tostring(hash)))
-            
-            local success, err = pcall(function()
-                Remotes.ChangeQueryType:FireServer(hash, target)
+            pcall(function()
+                Remotes.ChangeQueryType:FireServer(hash, targetType)
             end)
-            
-            if success then
-                print("  ✅ Gọi remote thành công")
-                return true
-            else
-                print("  ❌ Lỗi gọi remote:", err)
-            end
-        else
-            print("  ❌ Không tìm thấy tháp tại X:", axisValue)
+            return
         end
-        
+        attempts = attempts + 1
         task.wait(0.1)
     end
-    
-    print("  ⚠️ Đổi target THẤT BẠI sau", maxAttempts, "lần thử")
-    return false
 end
-
 
 local function SellTowerRetry(axisValue)
     local maxAttempts = getMaxAttempts()
@@ -352,15 +333,11 @@ local function SellTowerRetry(axisValue)
     return false
 end
 
-
-
 local function shouldChangeTarget(entry, currentWave, currentTime)
-    -- So sánh nguyên chuỗi wave (giữ nguyên định dạng "WAVE XX")
-    if entry.TargetWave and currentWave ~= entry.TargetWave then
+    if entry.TargetWave and entry.TargetWave ~= currentWave then
         return false
     end
 
-    -- Xử lý thời gian (giữ nguyên)
     if entry.TargetChangedAt then
         local targetTimeStr = convertToTimeFormat(entry.TargetChangedAt)
         if currentTime ~= targetTimeStr then
@@ -372,29 +349,27 @@ local function shouldChangeTarget(entry, currentWave, currentTime)
 end
 
 local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
+    local processedEntries = {}
+
     task.spawn(function()
-        print("\n=== BẮT ĐẦU THEO DÕI TARGET ===")
-        
         while true do
-            local currentWave = gameUI.waveText.Text
-            local currentTime = gameUI.timeText.Text
-            
-            for i, entry in ipairs(targetChangeEntries) do
-                local waveMatch = (currentWave == entry.TargetWave)
-                local timeMatch = not entry.TargetChangedAt or 
-                                (currentTime == convertToTimeFormat(entry.TargetChangedAt))
-                
-                if waveMatch and timeMatch then
-                    print(string.format(
-                        "\n🎯 Phát hiện điều kiện (Entry %d): Wave %s + Time %s",
-                        i, entry.TargetWave, entry.TargetChangedAt or "ANY"
-                    ))
-                    
-                    ChangeTargetRetry(entry.TowerTargetChange, entry.TargetWanted)
+            local success, currentWave, currentTime = pcall(function()
+                return gameUI.waveText.Text, gameUI.timeText.Text
+            end)
+
+            if success then
+                for i, entry in ipairs(targetChangeEntries) do
+                    if not processedEntries[i] and shouldChangeTarget(entry, currentWave, currentTime) then
+                        local axisValue = entry.TowerTargetChange
+                        local targetType = entry.TargetWanted
+
+                        ChangeTargetRetry(axisValue, targetType)
+                        processedEntries[i] = true
+                    end
                 end
             end
-            
-            task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay or 0.1)
+
+            task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay)
         end
     end)
 end
