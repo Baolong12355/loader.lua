@@ -58,7 +58,9 @@ local function saveLogs()
     end
 end
 
--- Biến theo dõi trạng thái
+-- Biến theo dõi trạng thái từ script gốc
+local pendingQueue = {}
+local timeout = 2
 local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
 local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upgrade sinh đôi
 
@@ -191,80 +193,142 @@ local function addLogEntries(entries)
     saveLogs()
 end
 
--- Xử lý Place Tower
-local function handlePlaceTower(a1, towerName, vec, rot)
-    if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
-        local cost = GetTowerPlaceCostByName(towerName)
-        local vector = string.format("%s, %s, %s", tostring(vec.X), tostring(vec.Y), tostring(vec.Z))
-        
-        addLogEntry({
+-- Hàm serialize từ script gốc
+local function serialize(v)
+    if typeof(v) == "Vector3" then
+        return "Vector3.new("..v.X..","..v.Y..","..v.Z..")"
+    elseif typeof(v) == "Vector2int16" then
+        return "Vector2int16.new("..v.X..","..v.Y..")"
+    elseif type(v) == "table" then
+        local out = {}
+        for k, val in pairs(v) do
+            out[#out+1] = "["..tostring(k).."]="..serialize(val)
+        end
+        return "{"..table.concat(out, ",").."}"
+    else
+        return tostring(v)
+    end
+end
+
+local function serializeArgs(...)
+    local args = {...}
+    local out = {}
+    for i, v in ipairs(args) do
+        out[i] = serialize(v)
+    end
+    return table.concat(out, ", ")
+end
+
+-- Hàm từ script gốc
+local function tryConfirm(typeStr, specificHash)
+    for i, item in ipairs(pendingQueue) do
+        if item.type == typeStr then
+            if not specificHash or string.find(item.code, tostring(specificHash)) then
+                -- Thay vì ghi vào file txt, ta convert trực tiếp
+                local result = parseMacroLine(item.code)
+                if result then
+                    addLogEntries(result)
+                end
+                table.remove(pendingQueue, i)
+                return
+            end
+        end
+    end
+end
+
+local function setPending(typeStr, code, hash)
+    table.insert(pendingQueue, {
+        type = typeStr,
+        code = code,
+        created = tick(),
+        hash = hash
+    })
+end
+
+-- Hàm parse macro line để convert sang JSON
+function parseMacroLine(line)
+    local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
+    if a1 and name and x and y and z and rot then
+        name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
+        local cost = GetTowerPlaceCostByName(name)
+        local vector = string.format("%s, %s, %s", tostring(tonumber(x) or x), tostring(tonumber(y) or y), tostring(tonumber(z) or z))
+        return {{
             TowerPlaceCost = tonumber(cost) or 0,
-            TowerPlaced = towerName,
+            TowerPlaced = name,
             TowerVector = vector,
             Rotation = rot,
             TowerA1 = tostring(a1)
-        })
+        }}
     end
-end
 
--- Xử lý Upgrade Tower
-local function handleUpgradeTower(hash, path, count)
-    local pos = hash2pos[tostring(hash)]
-    local pathNum = tonumber(path)
-    local upgradeCount = tonumber(count)
-    
-    if pos and pathNum and upgradeCount and upgradeCount > 0 then
-        local entries = {}
-        for _ = 1, upgradeCount do
-            table.insert(entries, {
-                UpgradeCost = 0,
-                UpgradePath = pathNum,
-                TowerUpgraded = pos.x
-            })
+    local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
+    if hash and path and upgradeCount then
+        local pos = hash2pos[tostring(hash)]
+        local pathNum = tonumber(path)
+        local count = tonumber(upgradeCount)
+        if pos and pathNum and count and count > 0 then
+            local entries = {}
+            for _ = 1, count do
+                table.insert(entries, {
+                    UpgradeCost = 0,
+                    UpgradePath = pathNum,
+                    TowerUpgraded = pos.x
+                })
+            end
+            return entries
         end
-        addLogEntries(entries)
     end
-end
 
--- Xử lý Change Target
-local function handleChangeTarget(hash, targetType)
-    local pos = hash2pos[tostring(hash)]
-    if pos then
-        local currentWave, currentTime = getCurrentWaveAndTime()
-        local timeNumber = convertTimeToNumber(currentTime)
+    local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
+    if hash and targetType then
+        local pos = hash2pos[tostring(hash)]
+        if pos then
+            local currentWave, currentTime = getCurrentWaveAndTime()
+            local timeNumber = convertTimeToNumber(currentTime)
 
-        local targetEntry = {
-            TowerTargetChange = pos.x,
-            TargetWanted = tonumber(targetType)
-        }
+            local targetEntry = {
+                TowerTargetChange = pos.x,
+                TargetWanted = tonumber(targetType)
+            }
 
-        if currentWave then
-            targetEntry.TargetWave = currentWave
+            if currentWave then
+                targetEntry.TargetWave = currentWave
+            end
+
+            if timeNumber then
+                targetEntry.TargetChangedAt = timeNumber
+            end
+
+            return {targetEntry}
         end
+    end
 
-        if timeNumber then
-            targetEntry.TargetChangedAt = timeNumber
+    local hash = line:match('TDX:sellTower%(([^%)]+)%)')
+    if hash then
+        local pos = hash2pos[tostring(hash)]
+        if pos then
+            return {{
+                SellTower = pos.x
+            }}
         end
-
-        addLogEntry(targetEntry)
     end
+
+    return nil
 end
 
--- Xử lý Sell Tower
-local function handleSellTower(hash)
-    local pos = hash2pos[tostring(hash)]
-    if pos then
-        addLogEntry({
-            SellTower = pos.x
-        })
-    end
-end
-
--- Xử lý các events từ server
+-- Xử lý TowerFactoryQueueUpdated (place/sell towers) - GIỮ NGUYÊN LOGIC CŨ
 ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
-    -- Không cần xử lý gì vì đã handle trực tiếp từ remote calls
+    local d = data[1]
+    if not d then return end
+
+    if d.Creation then
+        tryConfirm("Place")
+    else
+        tryConfirm("Sell")
+    end
 end)
 
+-- Xử lý TowerUpgradeQueueUpdated - GIỮ NGUYÊN LOGIC CŨ
 ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
     if not data or not data[1] then return end
 
@@ -297,41 +361,75 @@ ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(functio
         end
     end
 
-    -- Xử lý upgrade
+    -- Nếu tìm thấy path được nâng cấp
     if upgradedPath and upgradeCount > 0 then
-        handleUpgradeTower(hash, upgradedPath, upgradeCount)
+        local code = string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), upgradedPath, upgradeCount)
+        -- Convert trực tiếp thay vì ghi file
+        local result = parseMacroLine(code)
+        if result then
+            addLogEntries(result)
+        end
+
+        -- Xóa các yêu cầu đang chờ cho tower này
+        for i = #pendingQueue, 1, -1 do
+            if pendingQueue[i].type == "Upgrade" and pendingQueue[i].hash == hash then
+                table.remove(pendingQueue, i)
+            end
+        end
+    else
+        -- Nếu không tìm thấy path cụ thể, thử confirm từ pending queue
+        tryConfirm("Upgrade", hash)
     end
 
-    -- Cập nhật trạng thái
+    -- Cập nhật trạng thái mới nhất
     lastKnownLevels[hash] = newLevels or {}
 end)
 
+-- Xử lý TowerQueryTypeIndexChanged - GIỮ NGUYÊN LOGIC CŨ
 ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
-    -- Không cần xử lý gì vì đã handle trực tiếp từ remote calls
+    if data[1] then
+        tryConfirm("Target")
+    end
 end)
 
--- Xử lý remote calls
+-- Task cleanup pending queue - GIỮ NGUYÊN
+task.spawn(function()
+    while true do
+        task.wait(0.05)
+        local now = tick()
+        for i = #pendingQueue, 1, -1 do
+            if now - pendingQueue[i].created > timeout then
+                warn("❌ Không xác thực được: " .. pendingQueue[i].type)
+                table.remove(pendingQueue, i)
+            end
+        end
+    end
+end)
+
+-- Xử lý các remote calls - GIỮ NGUYÊN LOGIC CŨ
 local function handleRemote(name, args)
     if name == "TowerUpgradeRequest" then
         local hash, path, count = unpack(args)
         if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" then
             if path >= 0 and path <= 2 and count > 0 and count <= 5 then
-                -- Sẽ được xử lý khi TowerUpgradeQueueUpdated trigger
+                setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
             end
         end
     elseif name == "PlaceTower" then
         local a1, towerName, vec, rot = unpack(args)
-        handlePlaceTower(a1, towerName, vec, rot)
+        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
+            local code = string.format('TDX:placeTower(%d, "%s", Vector3.new(%s, %s, %s), %d)', 
+                a1, towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), rot)
+            setPending("Place", code)
+        end
     elseif name == "SellTower" then
-        local hash = unpack(args)
-        handleSellTower(hash)
+        setPending("Sell", "TDX:sellTower("..serializeArgs(unpack(args))..")")
     elseif name == "ChangeQueryType" then
-        local hash, targetType = unpack(args)
-        handleChangeTarget(hash, targetType)
+        setPending("Target", "TDX:changeQueryType("..serializeArgs(unpack(args))..")")
     end
 end
 
--- Hàm hook an toàn
+-- Hàm hook an toàn - GIỮ NGUYÊN
 local function safeHookFunction(originalFunc, hookFunc)
     if hookfunction then
         return hookfunction(originalFunc, hookFunc)
@@ -358,23 +456,23 @@ local function safeCheckCaller()
     end
 end
 
--- Hook FireServer
+-- Hook FireServer - GIỮ NGUYÊN CÁCH GỌI LẠI SERVER
 local oldFireServer = safeHookFunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
     local name = self.Name
     local args = {...}
     handleRemote(name, args)
-    return oldFireServer(self, ...)
+    return oldFireServer(self, ...)  -- GỌI LẠI SERVER ĐỂ TRÁNH LỖI GAME
 end)
 
--- Hook InvokeServer
+-- Hook InvokeServer - GIỮ NGUYÊN CÁCH GỌI LẠI SERVER
 local oldInvokeServer = safeHookFunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
     local name = self.Name
     local args = {...}
     handleRemote(name, args)
-    return oldInvokeServer(self, ...)
+    return oldInvokeServer(self, ...)  -- GỌI LẠI SERVER ĐỂ TRÁNH LỖI GAME
 end)
 
--- Hook namecall metamethod
+-- Hook namecall metamethod - GIỮ NGUYÊN CÁCH GỌI LẠI SERVER
 local oldNamecall
 oldNamecall = safeHookMetamethod(game, "__namecall", function(self, ...)
     if safeCheckCaller() then return oldNamecall(self, ...) end
@@ -389,7 +487,7 @@ oldNamecall = safeHookMetamethod(game, "__namecall", function(self, ...)
         handleRemote(name, args)
     end
 
-    return oldNamecall(self, ...)
+    return oldNamecall(self, ...)  -- GỌI LẠI SERVER ĐỂ TRÁNH LỖI GAME
 end)
 
 print("✅ TDX Direct JSON Recorder đã khởi động!")
