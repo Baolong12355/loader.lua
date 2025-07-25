@@ -300,23 +300,16 @@ end
 
 local function ChangeTargetRetry(axisValue, targetType)
     local maxAttempts = getMaxAttempts()
-    local attempts = 0
+    local target = tostring(targetType) -- Đảm bảo luôn là chuỗi
     
-    -- Xử lý cả số và chuỗi cho targetType
-    local target = targetType
-    if type(targetType) == "number" then
-        target = tostring(targetType) -- Hoặc dùng bảng ánh xạ nếu cần
-    end
-
-    while attempts < maxAttempts do
-        local hash = GetTowerByAxis(axisValue)
+    for attempt = 1, maxAttempts do
+        local hash, tower = GetTowerByAxis(axisValue)
         if hash then
             pcall(function()
                 Remotes.ChangeQueryType:FireServer(hash, target)
             end)
             return true
         end
-        attempts = attempts + 1
         task.wait(0.1)
     end
     return false
@@ -367,14 +360,16 @@ local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
             local currentTime = gameUI.timeText.Text
             
             for _, entry in ipairs(targetChangeEntries) do
-                if shouldChangeTarget(entry, currentWave, currentTime) then
-                    ChangeTargetRetry(
-                        tonumber(entry.ChangeTarget), 
-                        entry.TargetWanted -- Giữ nguyên kiểu dữ liệu (số/chuỗi)
-                    )
+                if currentWave == entry.TargetWave then
+                    local targetTimeOK = not entry.TargetChangedAt or 
+                                       (currentTime == convertToTimeFormat(entry.TargetChangedAt))
+                    
+                    if targetTimeOK then
+                        ChangeTargetRetry(entry.TowerTargetChange, entry.TargetWanted)
+                    end
                 end
             end
-            task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay or 0.1)
+            task.wait(0.1)
         end
     end)
 end
