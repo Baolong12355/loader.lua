@@ -1,4 +1,8 @@
--- TDX Macro Rebuild - Không dùng sai số khi so sánh X, cho phép truyền config từ ngoài vào (REBUILD_CONFIG/globalEnv.TDX_REBUILD_CONFIG)
+-- getgenv().TDX_REBUILD_CONFIG = {
+    ENABLED = true,
+    SKIP_TOWER_NAMES = {["Farm"] = true, ["Scout"] = true},
+    BE_SKIP_RULES = {["Farm"] = {beOnly=true, fromLine=15}}
+}
 -- Script dành cho executor/loadstring, config truyền vào qua biến toàn cục hoặc truyền trực tiếp ở đầu file
 
 local HttpService = game:GetService("HttpService")
