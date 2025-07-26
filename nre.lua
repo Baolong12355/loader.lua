@@ -411,7 +411,7 @@ end)
 
 -- Vòng lặp cập nhật vị trí tower
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait() do
         if TowerClass and TowerClass.GetTowers then
             for hash, tower in pairs(TowerClass.GetTowers()) do
                 local pos = GetTowerPosition(tower)
