@@ -1,4 +1,5 @@
--- note quang trọng không được sửa và xoá cũng như phải đọc trước khi làm TDX Recorder - đảm bảo tương thích executor & loadstring
+-- TDX Recorder - Tương thích mọi executor & loadstring
+-- Sử dụng: loadstring(game:HttpGet("your_url"))()
 
 local success, ReplicatedStorage = pcall(game.GetService, game, "ReplicatedStorage")
 if not success then warn("❌ Không thể truy cập ReplicatedStorage") return end
@@ -420,16 +421,19 @@ local function setupHooks()
     end
 
     local success = pcall(function()
+        -- Hook FireServer cho events (upgrade, sell, target)
         local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
             handleRemote(self.Name, {...})
             return oldFireServer(self, ...)
         end)
 
+        -- Hook InvokeServer cho place tower
         local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
             handleRemote(self.Name, {...})
             return oldInvokeServer(self, ...)
         end)
 
+        -- Hook namecall để catch cả FireServer và InvokeServer
         local oldNamecall
         oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             if checkcaller() then return oldNamecall(self, ...) end
@@ -442,7 +446,7 @@ local function setupHooks()
     end)
 
     if success then
-        print("✅ Hooks setup thành công")
+        print("✅ Hooks setup thành công (FireServer + InvokeServer)")
         return true
     else
         warn("❌ Lỗi setup hooks")
@@ -468,7 +472,7 @@ end)
 
 -- Update tower positions
 task.spawn(function()
-    while task.wait() do
+    while task.wait(0.5) do
         if TowerClass and TowerClass.GetTowers then
             local success, towers = pcall(TowerClass.GetTowers, TowerClass)
             if success then
