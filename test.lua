@@ -15,7 +15,17 @@ local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
+-- XÓA FILE CŨ NẾU ĐÃ TỒN TẠI TRƯỚC KHI GHI RECORD
 local outJson = "tdx/macros/recorder_output.json"
+
+-- Xóa file nếu đã tồn tại
+if isfile and isfile(outJson) and delfile then
+    local ok, err = pcall(delfile, outJson)
+    if not ok then
+        warn("Không thể xóa file cũ: " .. tostring(err))
+    end
+end
+
 local recordedActions = {} -- Bảng lưu trữ tất cả các hành động dưới dạng table
 local hash2pos = {} -- Ánh xạ hash của tower tới vị trí Vector3
 
