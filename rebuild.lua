@@ -1,6 +1,5 @@
--- TDX Macro Rebuild (No Sell, No Rebuild Sold) - Executor/loadstring ready
--- Không rebuild lại tower đã từng bị bán (theo record). Không thực hiện sell.
--- Không log hành động rebuild vào record nếu đã patch recorder (_G.TDX_REBUILD_RUNNING).
+-- TDX Macro Rebuild - Không dùng sai số khi so sánh X, cho phép truyền config từ ngoài vào (REBUILD_CONFIG/globalEnv.TDX_REBUILD_CONFIG)
+-- Script dành cho executor/loadstring, config truyền vào qua biến toàn cục hoặc truyền trực tiếp ở đầu file
 
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,16 +11,29 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
 local macroPath = "tdx/macros/recorder_output.json"
 
--- Đọc file an toàn
-local function safeReadFile(path)
-    if readfile and isfile and isfile(path) then
-        local ok, res = pcall(readfile, path)
-        if ok then return res end
+-- === CONFIG TOÀN CỤC: Ưu tiên biến globalEnv.TDX_REBUILD_CONFIG, tiếp theo là _G.REBUILD_CONFIG ===
+local globalEnv = (getgenv and getgenv()) or _G
+local config = globalEnv.TDX_REBUILD_CONFIG or globalEnv.REBUILD_CONFIG or {
+    ENABLED = true,
+    SKIP_TOWER_NAMES = {}, -- vd: {["Farm"]=true}
+    -- BE_SKIP_RULES = {["Farm"] = {beOnly=true, fromLine=15}}
+}
+
+-- Helper: Lấy tower hiện tại theo trục X (so sánh đúng tuyệt đối)
+local function GetTowerByAxis(axisX)
+    for _, tower in pairs(TowerClass.GetTowers()) do
+        local pos
+        pcall(function() pos = tower:GetPosition() end)
+        if pos and pos.X == axisX then
+            local hp = 1
+            pcall(function() hp = tower.HealthHandler and tower.HealthHandler:GetHealth() or 1 end)
+            if hp and hp > 0 then return tower end
+        end
     end
     return nil
 end
 
--- Lấy TowerClass
+-- SafeRequire, LoadTowerClass
 local function SafeRequire(path, timeout)
     timeout = timeout or 5
     local t0 = tick()
@@ -46,20 +58,6 @@ end
 
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể load TowerClass!") end
-
--- Helper: Lấy tower hiện tại theo trục X
-local function GetTowerByAxis(axisX)
-    for _, tower in pairs(TowerClass.GetTowers()) do
-        local pos
-        pcall(function() pos = tower:GetPosition() end)
-        if pos and math.abs(pos.X - axisX) < 0.1 then
-            local hp = 1
-            pcall(function() hp = tower.HealthHandler and tower.HealthHandler:GetHealth() or 1 end)
-            if hp and hp > 0 then return tower end
-        end
-    end
-    return nil
-end
 
 local function WaitForCash(amount)
     while cash.Value < amount do
@@ -117,8 +115,27 @@ end
 
 -- Không bán tower (bỏ qua SellTowerEntry)
 
+-- Hàm skip theo tên, BE_RULES và dòng record (nếu có)
+local function shouldSkipTower(towerName, x, allRecords, curLine)
+    if config.SKIP_TOWER_NAMES and config.SKIP_TOWER_NAMES[towerName] then return true end
+    local rule = config.BE_SKIP_RULES and config.BE_SKIP_RULES[towerName]
+    if rule then
+        if rule.beOnly and curLine < (rule.fromLine or 1) then
+            return true
+        elseif not rule.beOnly then
+            return true
+        end
+    end
+    return false
+end
+
 -- Hàm chính: Liên tục reload record + rebuild nếu phát hiện tower chết, không rebuild nếu đã từng bị bán
 task.spawn(function()
+    if config.ENABLED == false then
+        print("[TDX Macro Rebuild] Đã tắt trong config!")
+        return
+    end
+
     local lastMacroHash = ""
     local towersByAxis = {}
     local soldAxis = {}
@@ -145,19 +162,19 @@ task.spawn(function()
                             local x = tonumber(entry.TowerVector:match("^([%d%-%.]+),"))
                             if x then
                                 towersByAxis[x] = towersByAxis[x] or {}
-                                table.insert(towersByAxis[x], entry)
+                                table.insert(towersByAxis[x], {entry=entry, line=i})
                             end
                         elseif entry.TowerUpgraded and entry.UpgradePath then
                             local x = tonumber(entry.TowerUpgraded)
                             if x then
                                 towersByAxis[x] = towersByAxis[x] or {}
-                                table.insert(towersByAxis[x], entry)
+                                table.insert(towersByAxis[x], {entry=entry, line=i})
                             end
                         elseif entry.TowerTargetChange then
                             local x = tonumber(entry.TowerTargetChange)
                             if x then
                                 towersByAxis[x] = towersByAxis[x] or {}
-                                table.insert(towersByAxis[x], entry)
+                                table.insert(towersByAxis[x], {entry=entry, line=i})
                             end
                         end
                     end
@@ -169,13 +186,20 @@ task.spawn(function()
         -- Rebuild nếu phát hiện tower chết, nhưng KHÔNG rebuild nếu đã từng bị bán (có trong soldAxis)
         for x, records in pairs(towersByAxis) do
             if soldAxis[x] then
-                -- Vị trí này đã từng bị bán => không rebuild lại
                 continue
             end
+            local firstPlace = records[1] and records[1].entry
+            local firstLine = records[1] and records[1].line or 1
+            local towerName = firstPlace and firstPlace.TowerPlaced
+            if towerName and shouldSkipTower(towerName, x, records, firstLine) then
+                continue
+            end
+
             local tower = GetTowerByAxis(x)
             if not tower then
                 -- Rebuild: place + upgrade/target đúng thứ tự
-                for _, entry in ipairs(records) do
+                for _, rec in ipairs(records) do
+                    local entry = rec.entry
                     if entry.TowerPlaced then
                         PlaceTowerEntry(entry)
                     elseif entry.UpgradePath then
@@ -188,8 +212,8 @@ task.spawn(function()
             end
         end
 
-        task.wait(1.5) -- Luôn reload record mới mỗi 1.5 giây
+        task.wait(1.5)
     end
 end)
 
-print("[TDX Macro Rebuild (No Sell/No Rebuild Sold/No Log)] Đã hoạt động!")
+print("[TDX Macro Rebuild (NoDelta/Configurable)] Đã hoạt động! (So sánh X tuyệt đối, cho phép truyền config ngoài)")
