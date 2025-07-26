@@ -398,7 +398,7 @@ end
 
 -- Vòng lặp dọn dẹp hàng đợi chờ
 task.spawn(function()
-    while task.wait(0.05) do
+    while task.wait(0.5) do
         local now = tick()
         for i = #pendingQueue, 1, -1 do
             if now - pendingQueue[i].created > timeout then
