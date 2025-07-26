@@ -1,5 +1,4 @@
--- TDX Recorder - Tương thích mọi executor & loadstring
--- Sử dụng: loadstring(game:HttpGet("your_url"))()
+-- note quang trọng không được sửa và xoá cũng như phải đọc trước khi làm TDX Recorder - đảm bảo tương thích executor & loadstring
 
 local success, ReplicatedStorage = pcall(game.GetService, game, "ReplicatedStorage")
 if not success then warn("❌ Không thể truy cập ReplicatedStorage") return end
@@ -469,7 +468,7 @@ end)
 
 -- Update tower positions
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait() do
         if TowerClass and TowerClass.GetTowers then
             local success, towers = pcall(TowerClass.GetTowers, TowerClass)
             if success then
