@@ -1,6 +1,6 @@
--- TDX Macro Rebuild - Không sell, không log hành động của rebuild vào record (bảo hiểm tower chết)
--- Dành cho executor/loadstring - Đảm bảo không bị recorder log lại các hành động rebuild
--- Để hoạt động tốt nhất, bạn nên thêm kiểm tra _G.TDX_REBUILD_RUNNING vào recorder của mình!
+-- TDX Macro Rebuild (No Sell, No Rebuild Sold) - Executor/loadstring ready
+-- Không rebuild lại tower đã từng bị bán (theo record). Không thực hiện sell.
+-- Không log hành động rebuild vào record nếu đã patch recorder (_G.TDX_REBUILD_RUNNING).
 
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -115,12 +115,13 @@ local function ChangeTargetEntry(entry)
     return true
 end
 
--- KHÔNG bán tower (bỏ qua SellTowerEntry)
+-- Không bán tower (bỏ qua SellTowerEntry)
 
--- Hàm chính: Liên tục reload record + rebuild nếu phát hiện tower chết
+-- Hàm chính: Liên tục reload record + rebuild nếu phát hiện tower chết, không rebuild nếu đã từng bị bán
 task.spawn(function()
     local lastMacroHash = ""
     local towersByAxis = {}
+    local soldAxis = {}
 
     while true do
         -- Reload macro record nếu có thay đổi/new data
@@ -133,8 +134,14 @@ task.spawn(function()
                 local ok, macro = pcall(function() return HttpService:JSONDecode(macroContent) end)
                 if ok and type(macro) == "table" then
                     towersByAxis = {}
+                    soldAxis = {}
                     for i, entry in ipairs(macro) do
-                        if entry.TowerPlaced and entry.TowerVector then
+                        if entry.SellTower then
+                            local x = tonumber(entry.SellTower)
+                            if x then
+                                soldAxis[x] = true
+                            end
+                        elseif entry.TowerPlaced and entry.TowerVector then
                             local x = tonumber(entry.TowerVector:match("^([%d%-%.]+),"))
                             if x then
                                 towersByAxis[x] = towersByAxis[x] or {}
@@ -159,8 +166,12 @@ task.spawn(function()
             end
         end
 
-        -- Rebuild nếu phát hiện tower chết
+        -- Rebuild nếu phát hiện tower chết, nhưng KHÔNG rebuild nếu đã từng bị bán (có trong soldAxis)
         for x, records in pairs(towersByAxis) do
+            if soldAxis[x] then
+                -- Vị trí này đã từng bị bán => không rebuild lại
+                continue
+            end
             local tower = GetTowerByAxis(x)
             if not tower then
                 -- Rebuild: place + upgrade/target đúng thứ tự
@@ -181,4 +192,4 @@ task.spawn(function()
     end
 end)
 
-print("[TDX Macro Rebuild (No Sell/No Log)] Đã hoạt động!")
+print("[TDX Macro Rebuild (No Sell/No Rebuild Sold/No Log)] Đã hoạt động!")
