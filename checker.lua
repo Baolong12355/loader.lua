@@ -1,79 +1,52 @@
 -- Webhook sender dành riêng cho executor, không chạy trên Roblox server/Studio
 -- Tự động tương thích với loadstring và mọi executor phổ biến
--- FIX: Chỉ cho phép HTTPS requests
+-- FIX: Chỉ cho phép HTTPS requests (method 2: http_request)
+-- Đã loại bỏ debug log, gửi format đẹp
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
 -- FORCE ENABLE HTTP SERVICE
-HttpService.HttpEnabled = true
-print("WEBHOOK: Force enabled HttpService")
+pcall(function() HttpService.HttpEnabled = true end)
 
 -- Chỉ cho phép trên executor, kiểm tra cả server-side và client-side
 local function isExecutor()
-    -- Synapse, KRNL, Fluxus, ScriptWare, v.v.
     local hasExecutor = typeof(getgenv) == "function" or 
-                       typeof(syn) == "table" or 
-                       typeof(is_synapse_function) == "function"
-    
-    -- Kiểm tra nếu đang chạy trên server
+                        typeof(syn) == "table" or 
+                        typeof(is_synapse_function) == "function" or
+                        typeof(http_request) == "function"
     local RunService = game:GetService("RunService")
     local isServer = RunService:IsServer()
-    
-    print("WEBHOOK: IsExecutor =", hasExecutor, "IsServer =", isServer)
-    
-    return hasExecutor
+    return hasExecutor and not isServer
 end
 
 local function canSend()
-    -- Force enable trước khi check
-    pcall(function() HttpService.HttpEnabled = true end)
-    
-    -- Roblox chỉ cho phép PostAsync client-side, https luôn bắt buộc
     local ok, httpEnabled = pcall(function() return HttpService.HttpEnabled end)
-    local executorCheck = isExecutor()
-    
-    print("WEBHOOK DEBUG:")
-    print("- HttpEnabled:", httpEnabled)
-    print("- IsExecutor:", executorCheck)
-    print("- CanSend:", ok and httpEnabled and executorCheck)
-    
-    return ok and httpEnabled and executorCheck
+    return ok and httpEnabled and isExecutor()
+end
+
+local function formatDiscordEmbed(data, title)
+    -- Format theo Discord Embed cho đẹp, chỉ gửi json nếu không có embed
+    title = title or (data.type == "game" and "Kết quả trận đấu" or "Thông tin Lobby")
+    return HttpService:JSONEncode({
+        embeds = {{
+            title = title,
+            description = "```json\n" .. HttpService:JSONEncode(data) .. "\n```",
+            color = 0x5B9DFF
+        }}
+    })
 end
 
 local function sendToWebhook(data)
     if not canSend() then
-        print("WEBHOOK: Không thể gửi - HttpEnabled hoặc Executor không hợp lệ")
         return
     end
-    
     local url = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
-    local body = HttpService:JSONEncode({content = "```json\n"..HttpService:JSONEncode(data).."\n```"})
-    
-    print("WEBHOOK: Đang test các methods...")
-    
-    -- Method 1: syn.request (Synapse)
-    if typeof(syn) == "table" and syn.request then
-        local success1, result1 = pcall(function()
-            return syn.request({
-                Url = url,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = body
-            })
-        end)
-        if success1 then
-            print("WEBHOOK: syn.request thành công!")
-            return
-        else
-            print("WEBHOOK: syn.request thất bại:", result1)
-        end
-    end
-    
-    -- Method 2: http_request (Universal)
+    local body = formatDiscordEmbed(data)
+    -- Method 2: http_request (Universal/Executor)
     if typeof(http_request) == "function" then
-        local success2, result2 = pcall(function()
+        local success, result = pcall(function()
             return http_request({
                 Url = url,
                 Method = "POST",
@@ -81,43 +54,13 @@ local function sendToWebhook(data)
                 Body = body
             })
         end)
-        if success2 then
-            print("WEBHOOK: http_request thành công!")
-            return
-        else
-            print("WEBHOOK: http_request thất bại:", result2)
-        end
+        -- Không log gì thêm
+        return
     end
-    
-    -- Method 3: request (KRNL/Fluxus)
-    if typeof(request) == "function" then
-        local success3, result3 = pcall(function()
-            return request({
-                Url = url,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = body
-            })
-        end)
-        if success3 then
-            print("WEBHOOK: request thành công!")
-            return
-        else
-            print("WEBHOOK: request thất bại:", result3)
-        end
-    end
-    
-    -- Method 4: HttpService PostAsync (fallback)
-    local success4, result4 = pcall(function()
-        return HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
+    -- Nếu executor không hỗ trợ, thử fallback (rất hiếm)
+    pcall(function()
+        HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
     end)
-    
-    if success4 then
-        print("WEBHOOK: HttpService thành công!")
-    else
-        print("WEBHOOK: Tất cả methods đều thất bại. Lỗi cuối:", result4)
-        print("WEBHOOK: Có thể executor không hỗ trợ HTTP hoặc Discord block IP")
-    end
 end
 
 local function checkLobby()
@@ -201,9 +144,7 @@ local function isLobby()
 end
 
 if isLobby() then
-    print("WEBHOOK: Phát hiện lobby, đang check stats...")
     checkLobby()
 else
-    print("WEBHOOK: Không trong lobby, đang check game over...")
     checkGameOver()
 end
