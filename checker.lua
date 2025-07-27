@@ -95,16 +95,12 @@ local function waitForGameOverScreen()
     return gos
 end
 
--- Helper: hợp nhất giá trị gốc với bonus (nếu đều là số)
-local function mergeWithBonus(value, bonus)
-    local n1 = tonumber((value or ""):gsub(",", ""))
-    local n2 = tonumber((bonus or ""):gsub(",", ""))
-    if n1 and n2 then
-        return tostring(n1 + n2)
-    elseif n1 then
-        return tostring(n1)
+-- Helper: Nếu có bonus visible, hiển thị "gốc + bonus", ngược lại chỉ trả về giá trị gốc
+local function valueWithBonus(value, bonus)
+    if bonus and tostring(bonus) ~= "" then
+        return tostring(value) .. " + " .. tostring(bonus)
     else
-        return value or "N/A"
+        return tostring(value)
     end
 end
 
@@ -127,12 +123,12 @@ local function checkGameOver()
         -- Gold
         local gold = rewards.Gold and rewards.Gold.TextLabel and rewards.Gold.TextLabel.Text or "N/A"
         local goldBonus = (rewards.Gold and rewards.Gold.BonusTextLabel and rewards.Gold.BonusTextLabel.Visible) and rewards.Gold.BonusTextLabel.Text or nil
-        result.Gold = mergeWithBonus(gold, goldBonus)
+        result.Gold = goldBonus and valueWithBonus(gold, goldBonus) or gold
 
         -- XP
         local xp = rewards.XP and rewards.XP.TextLabel and rewards.XP.TextLabel.Text or "N/A"
         local xpBonus = (rewards.XP and rewards.XP.BonusTextLabel and rewards.XP.BonusTextLabel.Visible) and rewards.XP.BonusTextLabel.Text or nil
-        result.XP = mergeWithBonus(xp, xpBonus)
+        result.XP = xpBonus and valueWithBonus(xp, xpBonus) or xp
 
         -- Tokens (nếu có)
         if withTokens then
