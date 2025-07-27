@@ -1,10 +1,40 @@
+--[[ 
+    Script này chỉ gửi webhook khi chạy dưới executor (loadstring, synapse, etc)
+    và KHÔNG hoạt động trên Roblox server hoặc môi trường không hỗ trợ HTTP client-side.
+    Đảm bảo an toàn, không lỗi trên môi trường Roblox gốc!
+]]
+
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
+
+-- Kiểm tra có phải executor, có HTTP client-side và có thể gửi HTTPS request
+local function isExecutor()
+    -- Hầu hết executor đều có getgenv, is_synapse_function hoặc syn
+    if typeof(getgenv) == "function" then return true end
+    if typeof(is_synapse_function) == "function" then return true end
+    if typeof(syn) == "table" then return true end
+    -- Có thể bổ sung thêm các check đặc trưng executor khác ở đây nếu cần
+    return false
+end
+
+local function canSend()
+    -- Chỉ gửi nếu là executor, và HttpService cho phép, Roblox chỉ cho HTTPS
+    local ok, httpEnabled = pcall(function() return HttpService.HttpEnabled end)
+    return ok and httpEnabled and isExecutor()
+end
+
 local function sendToWebhook(data)
+    if not canSend() then
+        warn("[Webhook] Không phải executor hoặc HttpService không cho phép, dừng gửi.")
+        return
+    end
     local url = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
     local body = HttpService:JSONEncode({content = "```json\n"..HttpService:JSONEncode(data).."\n```"})
-    HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
+    -- Sử dụng pcall để không crash script nếu lỗi
+    pcall(function()
+        HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
+    end)
 end
 
 local function checkLobby()
@@ -27,6 +57,7 @@ end
 
 local function checkGameOver()
     local gos = waitForGameOverScreen()
+    if not gos then return end
     local main = gos.Main
     local rewards, withTokens = nil, false
     local result = {}
@@ -85,7 +116,6 @@ local function checkGameOver()
     sendToWebhook({type = "game", rewards = result})
 end
 
--- Xác định đang ở lobby hay trong trận
 local function isLobby()
     local gui = LocalPlayer.PlayerGui:FindFirstChild("GUI")
     return gui and gui:FindFirstChild("NewGoldDisplay")
