@@ -19,15 +19,16 @@ local function canSend()
     return ok and httpEnabled and isExecutor()
 end
 
+-- Chuyển table sang fields cho discord embed
 local function fieldsFromTable(tab, prefix)
     local fields = {}
     prefix = prefix and (prefix .. " ") or ""
-    for k,v in pairs(tab) do
+    for k, v in pairs(tab) do
         if typeof(v) == "table" then
             if #v > 0 then
                 table.insert(fields, {name = prefix .. tostring(k), value = table.concat(v, "\n"), inline = false})
             else
-                for _,f in ipairs(fieldsFromTable(v, prefix .. k)) do
+                for _, f in ipairs(fieldsFromTable(v, prefix .. k)) do
                     table.insert(fields, f)
                 end
             end
@@ -39,7 +40,7 @@ local function fieldsFromTable(tab, prefix)
 end
 
 local function formatDiscordEmbed(data, title)
-    title = title or (data.type == "game" and "Kết quả trận đấu" or "Thông tin Lobby")
+    title = title or (data.type == "game" and "Game Result" or "Lobby Info")
     local fields = {}
     if data.type == "lobby" and data.stats then
         fields = fieldsFromTable(data.stats)
@@ -60,10 +61,7 @@ end
 local function sendToWebhook(data)
     if not canSend() then return end
     local url = (_G.urlConfig and _G.urlConfig.url) or ""
-    if url == "" then
-        warn("Chưa cấu hình _G.urlConfig.url")
-        return
-    end
+    if url == "" then return end
     local body = formatDiscordEmbed(data)
     if typeof(http_request) == "function" then
         pcall(function()
@@ -82,6 +80,7 @@ local function sendToWebhook(data)
 end
 
 local function checkLobby()
+    -- Lấy thông tin lobby và gửi Discord
     local stats = {
         Level = LocalPlayer.leaderstats and LocalPlayer.leaderstats.Level and LocalPlayer.leaderstats.Level.Value or "N/A",
         Wins  = LocalPlayer.leaderstats and LocalPlayer.leaderstats.Wins and LocalPlayer.leaderstats.Wins.Value or "N/A",
@@ -92,6 +91,7 @@ local function checkLobby()
 end
 
 local function waitForGameOverScreen()
+    -- Đợi màn hình GameOver hiện ra
     local gui = LocalPlayer.PlayerGui:WaitForChild("Interface")
     local gos = gui:WaitForChild("GameOverScreen", 60)
     if not gos then return end
@@ -99,6 +99,7 @@ local function waitForGameOverScreen()
     return gos
 end
 
+-- Lấy số từ text, ví dụ "x3" => 3, không được thì trả về 1
 local function extractNumber(str)
     if not str then return 1 end
     local n = string.match(str, "%d+")
@@ -106,12 +107,14 @@ local function extractNumber(str)
 end
 
 local function checkGameOver()
+    -- Kiểm tra thông tin kết thúc trận và gửi Discord
     local gos = waitForGameOverScreen()
     if not gos then return end
     local main = gos.Main
     local rewards, withTokens = nil, false
     local result = {}
 
+    -- Lấy frame thưởng phù hợp
     if main:FindFirstChild("RewardsFrameWithTokens") and main.RewardsFrameWithTokens.Visible then
         rewards = main.RewardsFrameWithTokens.InnerFrame
         withTokens = true
@@ -121,10 +124,10 @@ local function checkGameOver()
     end
 
     if rewards then
-        -- Gold: chỉ lấy gốc, không cộng bonus
+        -- Gold: chỉ lấy số gốc, không bonus
         result.Gold = rewards.Gold and rewards.Gold.TextLabel and rewards.Gold.TextLabel.Text or "N/A"
 
-        -- XP: nếu có bonus visible thì lấy số bonus cộng với số gốc
+        -- XP: nếu có bonus visible thì cộng số bonus vào số gốc, chỉ lấy số
         local xp = rewards.XP and rewards.XP.TextLabel and rewards.XP.TextLabel.Text or "0"
         local xpBase = tonumber((xp or ""):gsub(",", ""):match("%d+")) or 0
         local xpBonus = 0
@@ -139,19 +142,23 @@ local function checkGameOver()
         end
     end
 
+    -- Thông tin phụ
     if main:FindFirstChild("InfoFrame") then
         result.Map = main.InfoFrame.Map and main.InfoFrame.Map.Text or "N/A"
         result.Time = main.InfoFrame.Time and main.InfoFrame.Time.Text or "N/A"
         result.Mode = main.InfoFrame.Mode and main.InfoFrame.Mode.Text or "N/A"
     end
 
+    -- Powerups: tìm mọi frame tên có "PowerUps", bỏ qua UIListLayout và ItemTemplate
     local powerups = {}
     local content = gos.Rewards and gos.Rewards.Content
     if content then
-        for _,v in pairs(content:GetChildren()) do
+        for _, v in pairs(content:GetChildren()) do
             if v.Name:find("PowerUps") then
-                for _,item in pairs(v.Items:GetChildren()) do
-                    if item:IsA("UIListLayout") then continue end
+                for _, item in pairs(v.Items:GetChildren()) do
+                    if item:IsA("UIListLayout") or item.Name == "ItemTemplate" then
+                        continue
+                    end
                     local count = 1
                     if item:FindFirstChild("CountText") then
                         count = extractNumber(item.CountText.Text)
@@ -163,6 +170,7 @@ local function checkGameOver()
     end
     result.PowerUps = powerups
 
+    -- Kết quả trận
     if main:FindFirstChild("VictoryText") and main.VictoryText.Visible then
         result.Result = "Victory"
     elseif main:FindFirstChild("DefeatText") and main.DefeatText.Visible then
@@ -174,6 +182,7 @@ local function checkGameOver()
     sendToWebhook({type = "game", rewards = result})
 end
 
+-- Nếu là lobby thì gửi lobby, không thì gửi kết quả trận
 local function isLobby()
     local gui = LocalPlayer.PlayerGui:FindFirstChild("GUI")
     return gui and gui:FindFirstChild("NewGoldDisplay")
