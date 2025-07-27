@@ -10,48 +10,44 @@ local skipWaveURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/r
 
 local HttpService = game:GetService("HttpService")
 
--- Prompt key input
-local function promptKey()
-    print("Enter your access key:")
-    local userKey = nil
-    repeat
-        userKey = rconsoleinput("> ")
-        if userKey then userKey = userKey:match("^%s*(.-)%s*$") end
-    until userKey and #userKey > 0
-    return userKey
+-- Function to validate key against server
+local function validateKey(key)
+    local success, response = pcall(function()
+        return game:HttpGet(keyURL)
+    end)
+    
+    if not success then
+        warn("[✘] Failed to fetch key list from server:", response)
+        return false
+    end
+    
+    -- Split the response into lines and check if key exists
+    for line in response:gmatch("[^\r\n]+") do
+        local cleanLine = line:match("^%s*(.-)%s*$") -- Trim whitespace
+        if cleanLine == key then
+            return true
+        end
+    end
+    
+    return false
 end
 
--- Validate key from config
+-- Validate key from config only
 local inputKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
 if not inputKey or inputKey == "" then
     warn("[✘] No key found in getgenv().TDX_Config.Key")
+    warn("[ℹ] Please set your key in getgenv().TDX_Config.Key before running this script")
     return
 end
 
+print("[ℹ] Validating key from config...")
 local valid = validateKey(inputKey)
 if not valid then
     warn("[✘] Invalid key provided in config:", inputKey)
+    warn("[ℹ] Please check your key and make sure it's correct")
     return
 else
     print("[✔] Key is valid. Continuing script...")
-end
--- Ask and validate key
-local valid = false
-local attempts = 3
-while not valid and attempts > 0 do
-    local inputKey = promptKey()
-    if validateKey(inputKey) then
-        print("[✔] Key is valid. Continuing script...")
-        valid = true
-    else
-        warn("[✘] Invalid key. Attempts left:", attempts - 1)
-        attempts -= 1
-    end
-end
-
-if not valid then
-    warn("[✘] Too many invalid attempts. Exiting script.")
-    return
 end
 
 -- Create folders if not exist
@@ -70,8 +66,6 @@ else
     warn("[✘] Failed to download macro:", result)
     return
 end
-
-
 
 repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
 
@@ -132,9 +126,3 @@ _G.WaveConfig = {
 
 -- Run auto skip script
 loadstring(game:HttpGet(skipWaveURL))()
-
-
-
-
-
-
