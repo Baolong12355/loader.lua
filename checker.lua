@@ -1,7 +1,3 @@
--- Webhook sender dành riêng cho executor, không chạy trên Roblox server/Studio
--- Tự động tương thích với loadstring và mọi executor phổ biến
--- Chỉ dùng http_request, format đẹp dạng fields Discord Embed
-
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
@@ -28,9 +24,9 @@ local function fieldsFromTable(tab, prefix)
     prefix = prefix and (prefix .. " ") or ""
     for k,v in pairs(tab) do
         if typeof(v) == "table" then
-            if #v > 0 then -- nếu là array, nối thành chuỗi
+            if #v > 0 then
                 table.insert(fields, {name = prefix .. tostring(k), value = table.concat(v, ", "), inline = true})
-            else -- nếu là bảng lồng, đệ quy
+            else
                 for _,f in ipairs(fieldsFromTable(v, prefix .. k)) do
                     table.insert(fields, f)
                 end
@@ -99,6 +95,19 @@ local function waitForGameOverScreen()
     return gos
 end
 
+-- Helper: hợp nhất giá trị gốc với bonus (nếu đều là số)
+local function mergeWithBonus(value, bonus)
+    local n1 = tonumber((value or ""):gsub(",", ""))
+    local n2 = tonumber((bonus or ""):gsub(",", ""))
+    if n1 and n2 then
+        return tostring(n1 + n2)
+    elseif n1 then
+        return tostring(n1)
+    else
+        return value or "N/A"
+    end
+end
+
 local function checkGameOver()
     local gos = waitForGameOverScreen()
     if not gos then return end
@@ -115,10 +124,17 @@ local function checkGameOver()
     end
 
     if rewards then
-        result.Gold = rewards.Gold and rewards.Gold.TextLabel and rewards.Gold.TextLabel.Text or "N/A"
-        result.GoldBonus = rewards.Gold and rewards.Gold.BonusTextLabel and rewards.Gold.BonusTextLabel.Text or "N/A"
-        result.XP = rewards.XP and rewards.XP.TextLabel and rewards.XP.TextLabel.Text or "N/A"
-        result.XPBonus = rewards.XP and rewards.XP.BonusTextLabel and rewards.XP.BonusTextLabel.Text or "N/A"
+        -- Gold
+        local gold = rewards.Gold and rewards.Gold.TextLabel and rewards.Gold.TextLabel.Text or "N/A"
+        local goldBonus = (rewards.Gold and rewards.Gold.BonusTextLabel and rewards.Gold.BonusTextLabel.Visible) and rewards.Gold.BonusTextLabel.Text or nil
+        result.Gold = mergeWithBonus(gold, goldBonus)
+
+        -- XP
+        local xp = rewards.XP and rewards.XP.TextLabel and rewards.XP.TextLabel.Text or "N/A"
+        local xpBonus = (rewards.XP and rewards.XP.BonusTextLabel and rewards.XP.BonusTextLabel.Visible) and rewards.XP.BonusTextLabel.Text or nil
+        result.XP = mergeWithBonus(xp, xpBonus)
+
+        -- Tokens (nếu có)
         if withTokens then
             result.Tokens = rewards.Tokens and rewards.Tokens.TextLabel and rewards.Tokens.TextLabel.Text or "N/A"
         end
