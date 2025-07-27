@@ -4,7 +4,7 @@
 local keyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key.txt" -- Replace with your actual key list URL
 local jsonURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/x.json"
 local macroFolder = "tdx/macros"
-local macroFile = macroFolder.."/xmastoken.json"
+local macroFile = macroFolder.."/x.json"
 local loaderURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/loader.lua"
 local skipWaveURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/auto_skip.lua"
 
