@@ -6,6 +6,10 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
+-- FORCE ENABLE HTTP SERVICE
+HttpService.HttpEnabled = true
+print("WEBHOOK: Force enabled HttpService")
+
 -- Chỉ cho phép trên executor, không bao giờ gửi trên Roblox server hoặc Studio
 local function isExecutor()
     -- Synapse, KRNL, Fluxus, ScriptWare, v.v.
@@ -13,6 +17,9 @@ local function isExecutor()
 end
 
 local function canSend()
+    -- Force enable trước khi check
+    pcall(function() HttpService.HttpEnabled = true end)
+    
     -- Roblox chỉ cho phép PostAsync client-side, https luôn bắt buộc
     local ok, httpEnabled = pcall(function() return HttpService.HttpEnabled end)
     local executorCheck = isExecutor()
