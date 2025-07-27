@@ -32,64 +32,31 @@ local function validateKey(key)
     return false
 end
 
--- Validate keys from config
-local configKeys = getgenv().TDX_Config and getgenv().TDX_Config.Keys
-if not configKeys then
-    warn("[✘] No keys found in getgenv().TDX_Config.Keys")
-    warn("[ℹ] Please set your keys in getgenv().TDX_Config.Keys = {'key1', 'key2', ...} before running this script")
+-- Validate key from config
+local inputKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
+if not inputKey or inputKey == "" then
+    warn("[✘] No key found in getgenv().TDX_Config.Key")
+    warn("[ℹ] Please set your key in getgenv().TDX_Config.Key before running this script")
     return
 end
 
--- Support both single key and multiple keys
-local keysToCheck = {}
-if type(configKeys) == "string" then
-    -- Single key as string
-    table.insert(keysToCheck, configKeys)
-elseif type(configKeys) == "table" then
-    -- Multiple keys as table
-    keysToCheck = configKeys
+-- Clean the input key
+local cleanKey = inputKey:match("^%s*(.-)%s*$")
+if not cleanKey or #cleanKey == 0 then
+    warn("[✘] Invalid key format in config")
+    return
+end
+
+print("[ℹ] Validating key from config...")
+print("[ℹ] Checking key:", cleanKey:sub(1, 8).."...")
+
+local valid = validateKey(cleanKey)
+if not valid then
+    warn("[✘] Invalid key provided in config:", cleanKey)
+    warn("[ℹ] Please check your key and make sure it's in the valid key list")
+    return
 else
-    warn("[✘] Invalid key format. Use string or table of strings")
-    return
-end
-
--- Remove empty keys
-local validKeys = {}
-for _, key in ipairs(keysToCheck) do
-    if type(key) == "string" and key ~= "" then
-        local trimmedKey = key:match("^%s*(.-)%s*$")
-        if trimmedKey and #trimmedKey > 0 then
-            table.insert(validKeys, trimmedKey)
-        end
-    end
-end
-
-if #validKeys == 0 then
-    warn("[✘] No valid keys found in config")
-    return
-end
-
-print("[ℹ] Validating", #validKeys, "key(s) from config...")
-
--- Check each key until one is valid
-local validKeyFound = false
-local validKey = nil
-for i, key in ipairs(validKeys) do
-    print("[ℹ] Checking key", i..":", key:sub(1, 8).."...")
-    if validateKey(key) then
-        print("[✔] Key", i, "is valid. Continuing script...")
-        validKeyFound = true
-        validKey = key
-        break
-    else
-        warn("[✘] Key", i, "is invalid")
-    end
-end
-
-if not validKeyFound then
-    warn("[✘] All provided keys are invalid")
-    warn("[ℹ] Please check your keys and make sure at least one is correct")
-    return
+    print("[✔] Key is valid. Continuing script...")
 end
 
 -- Create folders if not exist
@@ -112,7 +79,7 @@ end
 repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
 
 getgenv().TDX_Config = {
-    ["Keys"] = {"key1", "key2", "key3"}, -- Thêm nhiều key ở đây
+    ["Key"] = "your_access_key_here", -- Chỉ 1 key duy nhất
     ["mapvoting"] = "MILITARY BASE",
     ["Return Lobby"] = true,
     ["x1.5 Speed"] = true,
