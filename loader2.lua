@@ -21,26 +21,20 @@ local function promptKey()
     return userKey
 end
 
--- Validate key
-local function validateKey(userKey)
-    local success, data = pcall(function()
-        return game:HttpGet(keyURL)
-    end)
-
-    if not success then
-        warn("[✘] Failed to fetch key list:", data)
-        return false
-    end
-
-    for key in string.gmatch(data, "[^\r\n]+") do
-        if key == userKey then
-            return true
-        end
-    end
-
-    return false
+-- Validate key from config
+local inputKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
+if not inputKey or inputKey == "" then
+    warn("[✘] No key found in getgenv().TDX_Config.Key")
+    return
 end
 
+local valid = validateKey(inputKey)
+if not valid then
+    warn("[✘] Invalid key provided in config:", inputKey)
+    return
+else
+    print("[✔] Key is valid. Continuing script...")
+end
 -- Ask and validate key
 local valid = false
 local attempts = 3
