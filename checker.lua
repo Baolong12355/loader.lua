@@ -39,7 +39,7 @@ local function fieldsFromTable(tab, prefix)
 end
 
 local function formatDiscordEmbed(data, title)
-    title = title or (data.type == "game" and "Kết quả trận đấu" or "Thông tin Lobby")
+    title = title or (data.type == "game" and "match" or "stats")
     local fields = {}
     if data.type == "lobby" and data.stats then
         fields = fieldsFromTable(data.stats)
