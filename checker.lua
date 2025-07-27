@@ -10,10 +10,20 @@ local LocalPlayer = Players.LocalPlayer
 HttpService.HttpEnabled = true
 print("WEBHOOK: Force enabled HttpService")
 
--- Chỉ cho phép trên executor, không bao giờ gửi trên Roblox server hoặc Studio
+-- Chỉ cho phép trên executor, kiểm tra cả server-side và client-side
 local function isExecutor()
     -- Synapse, KRNL, Fluxus, ScriptWare, v.v.
-    return typeof(getgenv) == "function" or typeof(syn) == "table" or typeof(is_synapse_function) == "function"
+    local hasExecutor = typeof(getgenv) == "function" or 
+                       typeof(syn) == "table" or 
+                       typeof(is_synapse_function) == "function"
+    
+    -- Kiểm tra nếu đang chạy trên server
+    local RunService = game:GetService("RunService")
+    local isServer = RunService:IsServer()
+    
+    print("WEBHOOK: IsExecutor =", hasExecutor, "IsServer =", isServer)
+    
+    return hasExecutor
 end
 
 local function canSend()
@@ -44,26 +54,34 @@ local function sendToWebhook(data)
     
     print("WEBHOOK: Đang gửi data:", HttpService:JSONEncode(data))
     
-    -- FIXED: Thêm error handling để debug
-    local success, error = pcall(function()
-        local response = HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson, false, {
-            ["Content-Type"] = "application/json"
-        })
-        print("WEBHOOK: Gửi thành công! Response:", response)
-        return response
+    -- Method 1: Thử PostAsync (server-side)
+    local success, result = pcall(function()
+        return HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
     end)
     
-    if not success then
-        print("WEBHOOK: Lỗi gửi:", error)
-        -- Thử method backup
-        local backupSuccess, backupError = pcall(function()
-            HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
-        end)
-        if backupSuccess then
-            print("WEBHOOK: Backup method thành công!")
-        else
-            print("WEBHOOK: Backup method cũng thất bại:", backupError)
-        end
+    if success then
+        print("WEBHOOK: PostAsync thành công! Response:", result)
+        return
+    else
+        print("WEBHOOK: PostAsync thất bại:", result)
+    end
+    
+    -- Method 2: Thử RequestAsync (universal method)
+    local requestSuccess, requestResult = pcall(function()
+        return HttpService:RequestAsync({
+            Url = url,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = body
+        })
+    end)
+    
+    if requestSuccess then
+        print("WEBHOOK: RequestAsync thành công! Status:", requestResult.StatusCode)
+    else
+        print("WEBHOOK: RequestAsync cũng thất bại:", requestResult)
     end
 end
 
