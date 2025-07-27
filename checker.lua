@@ -1,37 +1,28 @@
---[[ 
-    Script này chỉ gửi webhook khi chạy dưới executor (loadstring, synapse, etc)
-    và KHÔNG hoạt động trên Roblox server hoặc môi trường không hỗ trợ HTTP client-side.
-    Đảm bảo an toàn, không lỗi trên môi trường Roblox gốc!
-]]
+-- Webhook sender dành riêng cho executor, không chạy trên Roblox server/Studio
+-- Tự động tương thích với loadstring và mọi executor phổ biến
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
--- Kiểm tra có phải executor, có HTTP client-side và có thể gửi HTTPS request
+-- Chỉ cho phép trên executor, không bao giờ gửi trên Roblox server hoặc Studio
 local function isExecutor()
-    -- Hầu hết executor đều có getgenv, is_synapse_function hoặc syn
-    if typeof(getgenv) == "function" then return true end
-    if typeof(is_synapse_function) == "function" then return true end
-    if typeof(syn) == "table" then return true end
-    -- Có thể bổ sung thêm các check đặc trưng executor khác ở đây nếu cần
-    return false
+    -- Synapse, KRNL, Fluxus, ScriptWare, v.v.
+    return typeof(getgenv) == "function" or typeof(syn) == "table" or typeof(is_synapse_function) == "function"
 end
 
 local function canSend()
-    -- Chỉ gửi nếu là executor, và HttpService cho phép, Roblox chỉ cho HTTPS
+    -- Roblox chỉ cho phép PostAsync client-side, https luôn bắt buộc
     local ok, httpEnabled = pcall(function() return HttpService.HttpEnabled end)
     return ok and httpEnabled and isExecutor()
 end
 
 local function sendToWebhook(data)
     if not canSend() then
-        warn("[Webhook] Không phải executor hoặc HttpService không cho phép, dừng gửi.")
         return
     end
     local url = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
     local body = HttpService:JSONEncode({content = "```json\n"..HttpService:JSONEncode(data).."\n```"})
-    -- Sử dụng pcall để không crash script nếu lỗi
     pcall(function()
         HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
     end)
@@ -62,7 +53,6 @@ local function checkGameOver()
     local rewards, withTokens = nil, false
     local result = {}
 
-    -- Kiểm tra RewardsFrameWithTokens hay RewardsFrame
     if main:FindFirstChild("RewardsFrameWithTokens") and main.RewardsFrameWithTokens.Visible then
         rewards = main.RewardsFrameWithTokens.InnerFrame
         withTokens = true
@@ -81,14 +71,12 @@ local function checkGameOver()
         end
     end
 
-    -- InfoFrame
     if main:FindFirstChild("InfoFrame") then
         result.Map = main.InfoFrame.Map and main.InfoFrame.Map.Text or "N/A"
         result.Time = main.InfoFrame.Time and main.InfoFrame.Time.Text or "N/A"
         result.Mode = main.InfoFrame.Mode and main.InfoFrame.Mode.Text or "N/A"
     end
 
-    -- PowerUps
     local powerups = {}
     local content = gos.Rewards and gos.Rewards.Content
     if content then
@@ -104,7 +92,6 @@ local function checkGameOver()
     end
     result.PowerUps = powerups
 
-    -- Win/Lose
     if main:FindFirstChild("VictoryText") and main.VictoryText.Visible then
         result.Result = "Victory"
     elseif main:FindFirstChild("DefeatText") and main.DefeatText.Visible then
