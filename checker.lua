@@ -15,23 +15,49 @@ end
 local function canSend()
     -- Roblox chỉ cho phép PostAsync client-side, https luôn bắt buộc
     local ok, httpEnabled = pcall(function() return HttpService.HttpEnabled end)
-    return ok and httpEnabled and isExecutor()
+    local executorCheck = isExecutor()
+    
+    print("WEBHOOK DEBUG:")
+    print("- HttpEnabled:", httpEnabled)
+    print("- IsExecutor:", executorCheck)
+    print("- CanSend:", ok and httpEnabled and executorCheck)
+    
+    return ok and httpEnabled and executorCheck
 end
 
 local function sendToWebhook(data)
     if not canSend() then
+        print("WEBHOOK: Không thể gửi - HttpEnabled hoặc Executor không hợp lệ")
         return
     end
+    
     -- FIXED: Đảm bảo URL là HTTPS
     local url = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
     local body = HttpService:JSONEncode({content = "```json\n"..HttpService:JSONEncode(data).."\n```"})
     
-    -- FIXED: Thêm proper headers và error handling cho HTTPS
-    pcall(function()
-        HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson, false, {
+    print("WEBHOOK: Đang gửi data:", HttpService:JSONEncode(data))
+    
+    -- FIXED: Thêm error handling để debug
+    local success, error = pcall(function()
+        local response = HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson, false, {
             ["Content-Type"] = "application/json"
         })
+        print("WEBHOOK: Gửi thành công! Response:", response)
+        return response
     end)
+    
+    if not success then
+        print("WEBHOOK: Lỗi gửi:", error)
+        -- Thử method backup
+        local backupSuccess, backupError = pcall(function()
+            HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
+        end)
+        if backupSuccess then
+            print("WEBHOOK: Backup method thành công!")
+        else
+            print("WEBHOOK: Backup method cũng thất bại:", backupError)
+        end
+    end
 end
 
 local function checkLobby()
@@ -115,7 +141,9 @@ local function isLobby()
 end
 
 if isLobby() then
+    print("WEBHOOK: Phát hiện lobby, đang check stats...")
     checkLobby()
 else
+    print("WEBHOOK: Không trong lobby, đang check game over...")
     checkGameOver()
 end
