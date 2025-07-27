@@ -1,16 +1,13 @@
 -- Webhook sender dành riêng cho executor, không chạy trên Roblox server/Studio
 -- Tự động tương thích với loadstring và mọi executor phổ biến
--- FIX: Chỉ cho phép HTTPS requests (method 2: http_request)
--- Đã loại bỏ debug log, gửi format đẹp
+-- Chỉ dùng http_request, format đẹp dạng fields Discord Embed
 
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
--- FORCE ENABLE HTTP SERVICE
 pcall(function() HttpService.HttpEnabled = true end)
 
--- Chỉ cho phép trên executor, kiểm tra cả server-side và client-side
 local function isExecutor()
     local hasExecutor = typeof(getgenv) == "function" or 
                         typeof(syn) == "table" or 
@@ -26,41 +23,62 @@ local function canSend()
     return ok and httpEnabled and isExecutor()
 end
 
+local function fieldsFromTable(tab, prefix)
+    local fields = {}
+    prefix = prefix and (prefix .. " ") or ""
+    for k,v in pairs(tab) do
+        if typeof(v) == "table" then
+            if #v > 0 then -- nếu là array, nối thành chuỗi
+                table.insert(fields, {name = prefix .. tostring(k), value = table.concat(v, ", "), inline = true})
+            else -- nếu là bảng lồng, đệ quy
+                for _,f in ipairs(fieldsFromTable(v, prefix .. k)) do
+                    table.insert(fields, f)
+                end
+            end
+        else
+            table.insert(fields, {name = prefix .. tostring(k), value = tostring(v), inline = true})
+        end
+    end
+    return fields
+end
+
 local function formatDiscordEmbed(data, title)
-    -- Format theo Discord Embed cho đẹp, chỉ gửi json nếu không có embed
     title = title or (data.type == "game" and "Kết quả trận đấu" or "Thông tin Lobby")
+    local fields = {}
+    if data.type == "lobby" and data.stats then
+        fields = fieldsFromTable(data.stats)
+    elseif data.type == "game" and data.rewards then
+        fields = fieldsFromTable(data.rewards)
+    else
+        fields = fieldsFromTable(data)
+    end
     return HttpService:JSONEncode({
         embeds = {{
             title = title,
-            description = "```json\n" .. HttpService:JSONEncode(data) .. "\n```",
-            color = 0x5B9DFF
+            color = 0x5B9DFF,
+            fields = fields
         }}
     })
 end
 
 local function sendToWebhook(data)
-    if not canSend() then
-        return
-    end
+    if not canSend() then return end
     local url = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
     local body = formatDiscordEmbed(data)
-    -- Method 2: http_request (Universal/Executor)
     if typeof(http_request) == "function" then
-        local success, result = pcall(function()
-            return http_request({
+        pcall(function()
+            http_request({
                 Url = url,
                 Method = "POST",
                 Headers = {["Content-Type"] = "application/json"},
                 Body = body
             })
         end)
-        -- Không log gì thêm
-        return
+    else
+        pcall(function()
+            HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
+        end)
     end
-    -- Nếu executor không hỗ trợ, thử fallback (rất hiếm)
-    pcall(function()
-        HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
-    end)
 end
 
 local function checkLobby()
