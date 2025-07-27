@@ -1,6 +1,6 @@
 [
 {"SuperFunction": "rebuild",
-  "Skip": ["Freezer", "Rocketeer", "Sniper"],
+  "Skip": [],
   "Be": true},
 {"TowerPlaceCost":325,"TowerPlaced":"Barracks","TowerVector":"303.3330383300781, 0.11421957612037659, 7.689844131469727","Rotation":"0","TowerA1":"2239"},
 {"TowerUpgraded":303.3330383300781,"UpgradeCost":0,"UpgradePath":1},
