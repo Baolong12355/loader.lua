@@ -1,226 +1,98 @@
-local loadstring = loadstring or load
-local http_request = http_request or request or (syn and syn.request) or (fluxus and fluxus.request) or http.request
-
-local WEBHOOK_URL = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
-
-local function sendToDiscord(data)
-    local success, err = pcall(function()
-        local payload = {
-            ["content"] = data.content,
-            ["embeds"] = data.embeds
-        }
-        
-        http_request({
-            Url = WEBHOOK_URL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
-            Body = game:GetService("HttpService"):JSONEncode(payload)
-        })
-    end)
-    
-    if not success then
-        warn("Failed to send to Discord:", err)
-    end
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local function sendToWebhook(data)
+    local url = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
+    local body = HttpService:JSONEncode({content = "```json\n"..HttpService:JSONEncode(data).."\n```"})
+    HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
 end
 
-local function getLobbyStats()
-    local player = game:GetService("Players").LocalPlayer
-    local stats = {}
-    
-    if player:FindFirstChild("leaderstats") then
-        stats.Level = player.leaderstats.Level.Value
-        stats.Wins = player.leaderstats.Wins.Value
-    end
-    
-    if player.PlayerGui:FindFirstChild("GUI") and player.PlayerGui.GUI:FindFirstChild("NewGoldDisplay") then
-        stats.Gold = player.PlayerGui.GUI.NewGoldDisplay.GoldText.Text
-    end
-    
-    return stats
+local function checkLobby()
+    local stats = {
+        Level = LocalPlayer.leaderstats and LocalPlayer.leaderstats.Level and LocalPlayer.leaderstats.Level.Value or "N/A",
+        Wins  = LocalPlayer.leaderstats and LocalPlayer.leaderstats.Wins and LocalPlayer.leaderstats.Wins.Value or "N/A",
+        Gold  = LocalPlayer.PlayerGui and LocalPlayer.PlayerGui.GUI and LocalPlayer.PlayerGui.GUI.NewGoldDisplay 
+            and LocalPlayer.PlayerGui.GUI.NewGoldDisplay.GoldText and LocalPlayer.PlayerGui.GUI.NewGoldDisplay.GoldText.Text or "N/A"
+    }
+    sendToWebhook({type = "lobby", stats = stats})
 end
 
-local function getMatchResults()
-    local player = game:GetService("Players").LocalPlayer
-    local results = {}
-    
-    -- Wait for GameOverScreen to be visible
-    while not (player.PlayerGui.Interface.GameOverScreen and player.PlayerGui.Interface.GameOverScreen.Visible) do
-        wait(1)
+local function waitForGameOverScreen()
+    local gui = LocalPlayer.PlayerGui:WaitForChild("Interface")
+    local gos = gui:WaitForChild("GameOverScreen", 60)
+    if not gos then return end
+    repeat wait() until gos.Visible
+    return gos
+end
+
+local function checkGameOver()
+    local gos = waitForGameOverScreen()
+    local main = gos.Main
+    local rewards, withTokens = nil, false
+    local result = {}
+
+    -- Kiểm tra RewardsFrameWithTokens hay RewardsFrame
+    if main:FindFirstChild("RewardsFrameWithTokens") and main.RewardsFrameWithTokens.Visible then
+        rewards = main.RewardsFrameWithTokens.InnerFrame
+        withTokens = true
+    elseif main:FindFirstChild("RewardsFrame") and main.RewardsFrame.Visible then
+        rewards = main.RewardsFrame.InnerFrame
+        withTokens = false
     end
-    
-    local gameOverScreen = player.PlayerGui.Interface.GameOverScreen
-    local rewardsFrame = gameOverScreen.Main.RewardsFrameWithTokens.Visible and 
-                         gameOverScreen.Main.RewardsFrameWithTokens or 
-                         gameOverScreen.Main.RewardsFrame
-    
-    -- Get rewards
-    if rewardsFrame:FindFirstChild("InnerFrame") then
-        local innerFrame = rewardsFrame.InnerFrame
-        
-        -- Gold
-        if innerFrame:FindFirstChild("Gold") then
-            results.Gold = innerFrame.Gold.TextLabel.Text
-            if innerFrame.Gold:FindFirstChild("BonusTextLabel") then
-                results.GoldBonus = innerFrame.Gold.BonusTextLabel.Text
-            end
-        end
-        
-        -- XP
-        if innerFrame:FindFirstChild("XP") then
-            results.XP = innerFrame.XP.TextLabel.Text
-            if innerFrame.XP:FindFirstChild("BonusTextLabel") then
-                results.XPBonus = innerFrame.XP.BonusTextLabel.Text
-            end
-        end
-        
-        -- Tokens (only if WithTokens frame)
-        if rewardsFrame.Name == "RewardsFrameWithTokens" and innerFrame:FindFirstChild("Tokens") then
-            results.Tokens = innerFrame.Tokens.TextLabel.Text
-            if innerFrame.Tokens:FindFirstChild("BonusTextLabel") then
-                results.TokensBonus = innerFrame.Tokens.BonusTextLabel.Text
-            end
+
+    if rewards then
+        result.Gold = rewards.Gold and rewards.Gold.TextLabel and rewards.Gold.TextLabel.Text or "N/A"
+        result.GoldBonus = rewards.Gold and rewards.Gold.BonusTextLabel and rewards.Gold.BonusTextLabel.Text or "N/A"
+        result.XP = rewards.XP and rewards.XP.TextLabel and rewards.XP.TextLabel.Text or "N/A"
+        result.XPBonus = rewards.XP and rewards.XP.BonusTextLabel and rewards.XP.BonusTextLabel.Text or "N/A"
+        if withTokens then
+            result.Tokens = rewards.Tokens and rewards.Tokens.TextLabel and rewards.Tokens.TextLabel.Text or "N/A"
         end
     end
-    
-    -- Get match info
-    if gameOverScreen.Main:FindFirstChild("InfoFrame") then
-        local infoFrame = gameOverScreen.Main.InfoFrame
-        results.Map = infoFrame.Map.Text
-        results.Time = infoFrame.Time.Text
-        results.Mode = infoFrame.Mode.Text
+
+    -- InfoFrame
+    if main:FindFirstChild("InfoFrame") then
+        result.Map = main.InfoFrame.Map and main.InfoFrame.Map.Text or "N/A"
+        result.Time = main.InfoFrame.Time and main.InfoFrame.Time.Text or "N/A"
+        result.Mode = main.InfoFrame.Mode and main.InfoFrame.Mode.Text or "N/A"
     end
-    
-    -- Check win/lose
-    if gameOverScreen.Main:FindFirstChild("VictoryText") and gameOverScreen.Main.VictoryText.Visible then
-        results.Result = "Victory"
-    elseif gameOverScreen.Main:FindFirstChild("DefeatText") and gameOverScreen.Main.DefeatText.Visible then
-        results.Result = "Defeat"
-    else
-        results.Result = "Unknown"
-    end
-    
-    -- Get powerups
-    results.Powerups = {}
-    for i = 1, 5 do -- Assuming max 5 powerup sections
-        local powerupsContainer = gameOverScreen.Rewards.Content:FindFirstChild("PowerUps"..i)
-        if powerupsContainer then
-            for _, item in ipairs(powerupsContainer.Items:GetChildren()) do
-                if item.Name ~= "ItemTemplate" and item:IsA("Frame") then
-                    table.insert(results.Powerups, item.Name)
+
+    -- PowerUps
+    local powerups = {}
+    local content = gos.Rewards and gos.Rewards.Content
+    if content then
+        for _,v in pairs(content:GetChildren()) do
+            if v.Name:find("PowerUps") then
+                for _,item in pairs(v.Items:GetChildren()) do
+                    if item.Name ~= "ItemTemplate" then
+                        table.insert(powerups, item.Name)
+                    end
                 end
             end
         end
     end
-    
-    return results
-end
+    result.PowerUps = powerups
 
-local function createLobbyEmbed(stats)
-    local embed = {
-        title = "Lobby Stats",
-        color = 0x00FF00,
-        fields = {
-            {
-                name = "Level",
-                value = tostring(stats.Level or "N/A"),
-                inline = true
-            },
-            {
-                name = "Wins",
-                value = tostring(stats.Wins or "N/A"),
-                inline = true
-            },
-            {
-                name = "Gold",
-                value = tostring(stats.Gold or "N/A"),
-                inline = true
-            }
-        },
-        timestamp = DateTime.now():ToIsoDate()
-    }
-    
-    return embed
-end
-
-local function createMatchEmbed(results)
-    local embed = {
-        title = "Match Results - " .. results.Result,
-        color = results.Result == "Victory" and 0x00FF00 or 0xFF0000,
-        fields = {}
-    }
-    
-    -- Add basic info
-    table.insert(embed.fields, {
-        name = "Map",
-        value = results.Map or "N/A",
-        inline = true
-    })
-    table.insert(embed.fields, {
-        name = "Mode",
-        value = results.Mode or "N/A",
-        inline = true
-    })
-    table.insert(embed.fields, {
-        name = "Time",
-        value = results.Time or "N/A",
-        inline = true
-    })
-    
-    -- Add rewards
-    table.insert(embed.fields, {
-        name = "Gold",
-        value = (results.Gold or "0") .. (results.GoldBonus and (" (+" .. results.GoldBonus .. ")") or "",
-        inline = true
-    })
-    table.insert(embed.fields, {
-        name = "XP",
-        value = (results.XP or "0") .. (results.XPBonus and (" (+" .. results.XPBonus .. ")") or ""),
-        inline = true
-    })
-    
-    if results.Tokens then
-        table.insert(embed.fields, {
-            name = "Tokens",
-            value = results.Tokens .. (results.TokensBonus and (" (+" .. results.TokensBonus .. ")") or ""),
-            inline = true
-        })
-    end
-    
-    -- Add powerups if any
-    if #results.Powerups > 0 then
-        table.insert(embed.fields, {
-            name = "Powerups (" .. #results.Powerups .. ")",
-            value = table.concat(results.Powerups, "\n"),
-            inline = false
-        })
-    end
-    
-    embed.timestamp = DateTime.now():ToIsoDate()
-    
-    return embed
-end
-
--- Main logic
-local function main()
-    -- Check if we're in lobby or in match
-    local inLobby = game:GetService("Players").LocalPlayer.PlayerGui:FindFirstChild("GUI") ~= nil
-    
-    if inLobby then
-        local stats = getLobbyStats()
-        sendToDiscord({
-            content = "Lobby stats update",
-            embeds = {createLobbyEmbed(stats)}
-        })
+    -- Win/Lose
+    if main:FindFirstChild("VictoryText") and main.VictoryText.Visible then
+        result.Result = "Victory"
+    elseif main:FindFirstChild("DefeatText") and main.DefeatText.Visible then
+        result.Result = "Defeat"
     else
-        local results = getMatchResults()
-        sendToDiscord({
-            content = "Match completed: " .. results.Result,
-            embeds = {createMatchEmbed(results)}
-        })
+        result.Result = "Unknown"
     end
+
+    sendToWebhook({type = "game", rewards = result})
 end
 
--- Run the script
-main()
+-- Xác định đang ở lobby hay trong trận
+local function isLobby()
+    local gui = LocalPlayer.PlayerGui:FindFirstChild("GUI")
+    return gui and gui:FindFirstChild("NewGoldDisplay")
+end
+
+if isLobby() then
+    checkLobby()
+else
+    checkGameOver()
+end
