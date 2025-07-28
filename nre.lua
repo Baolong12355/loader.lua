@@ -1,20 +1,20 @@
---[[
-    TDX Recorder - Phiên bản Hợp nhất (Đã sửa lỗi)
-    - Sửa lỗi "FindFirstDescendant is not enabled" bằng cách thay thế bằng FindFirstChild.
-    - Hợp nhất hai script thành một.
-    - Loại bỏ việc sử dụng file "record.txt" trung gian.
-    - Ghi trực tiếp các hành động đã được xử lý vào file JSON.
-    - Giữ nguyên các chức năng cốt lõi về hook và xử lý sự kiện.
-]]
-
--- Dịch vụ và Biến Toàn cục
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
+-- XÓA FILE CŨ NẾU ĐÃ TỒN TẠI TRƯỚC KHI GHI RECORD
 local outJson = "tdx/macros/recorder_output.json"
+
+-- Xóa file nếu đã tồn tại
+if isfile and isfile(outJson) and delfile then
+    local ok, err = pcall(delfile, outJson)
+    if not ok then
+        warn("Không thể xóa file cũ: " .. tostring(err))
+    end
+end
+
 local recordedActions = {} -- Bảng lưu trữ tất cả các hành động dưới dạng table
 local hash2pos = {} -- Ánh xạ hash của tower tới vị trí Vector3
 
@@ -66,29 +66,23 @@ end
 
 -- Lấy vị trí của một tower
 local function GetTowerPosition(tower)
-    if not TowerClass or not tower then return nil end
-
-    -- Thử nhiều phương thức để có được vị trí chính xác
-    local success, cframe = pcall(function() return tower.CFrame end)
-    if success and typeof(cframe) == "CFrame" then return cframe.Position end
-
-    if tower.GetPosition then
-        local posSuccess, position = pcall(tower.GetPosition, tower)
-        if posSuccess and typeof(position) == "Vector3" then return position end
+    for hash, tower in pairs(TowerClass.GetTowers()) do
+        local spawnCFrame = tower.SpawnCFrame
+        if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+            local pos = spawnCFrame.Position
+            if pos.X == targetX then
+                return hash, tower, pos
+            end
+        end
     end
-
-    if tower.Character and tower.Character:GetCharacterModel() and tower.Character:GetCharacterModel().PrimaryPart then
-        return tower.Character:GetCharacterModel().PrimaryPart.Position
-    end
-
-    return nil
+    return nil, nil, nil
 end
 
 -- [SỬA LỖI] Lấy chi phí đặt tower dựa trên tên, sử dụng FindFirstChild
 local function GetTowerPlaceCostByName(name)
     local playerGui = player:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return 0 end
-    
+
     -- Sử dụng chuỗi FindFirstChild thay vì FindFirstDescendant để đảm bảo tương thích
     local interface = playerGui:FindFirstChild("Interface")
     if not interface then return 0 end
@@ -117,7 +111,7 @@ end
 local function getCurrentWaveAndTime()
     local playerGui = player:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return nil, nil end
-    
+
     -- Sử dụng chuỗi FindFirstChild thay vì FindFirstDescendant
     local interface = playerGui:FindFirstChild("Interface")
     if not interface then return nil, nil end
@@ -240,6 +234,11 @@ end
 
 -- Xử lý một dòng lệnh, phân tích và ghi vào file JSON
 local function processAndWriteAction(commandString)
+    -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
+    if _G and _G.TDX_REBUILD_RUNNING then
+        return
+    end
+    -- ==================================================
     local entries = parseMacroLine(commandString)
     if entries then
         for _, entry in ipairs(entries) do
@@ -343,6 +342,12 @@ end)
 
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
+    -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
+    if _G and _G.TDX_REBUILD_RUNNING then
+        return
+    end
+    -- ==================================================
+
     if name == "TowerUpgradeRequest" then
         local hash, path, count = unpack(args)
         if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
@@ -427,6 +432,5 @@ end)
 preserveSuperFunctions()
 setupHooks()
 
-print("✅ TDX Recorder Hợp nhất (Đã sửa lỗi) đã hoạt động!")
+print("✅ TDX Recorder Hợp nhất (Đã sửa lỗi, có điều kiện skip log _G.TDX_REBUILD_RUNNING) đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
-
