@@ -199,6 +199,24 @@ local function getBestMedicTarget(medicTower, ownedTowers)
 	return bestHash
 end
 
+-- Tìm enemy có HP cao nhất trong range
+local function getHighestHpEnemyInRange(pos, range)
+	local maxHP, chosen = -1, nil
+	for _, e in ipairs(getEnemies()) do
+		if e.GetPosition and e.HealthHandler then
+			local ePos = e:GetPosition()
+			if (ePos - pos).Magnitude <= range then
+				local hp = e.HealthHandler:GetMaxHealth()
+				if hp > maxHP then
+					maxHP = hp
+					chosen = e
+				end
+			end
+		end
+	end
+	return chosen
+end
+
 local function SendSkill(hash, index, pos, targetHash)
 	if useFireServer then
 		TowerUseAbilityRequest:FireServer(hash, index, pos, targetHash)
@@ -251,18 +269,39 @@ RunService.Heartbeat:Connect(function()
 			local targetPos = nil
 			local allowUse = true
 
+			-- Jet Trooper không dùng skill 1
+			if tower.Type == "Jet Trooper" and index == 1 then
+				allowUse = false
+			end
+
+			-- Ghost: skip nếu path 2 > 2
 			if tower.Type == "Ghost" then
-				local maxHP, chosen = -1, nil
-				for _, e in ipairs(getEnemies()) do
-					if e.Type ~= "Arrow" and e.HealthHandler then
-						local hp = e.HealthHandler:GetMaxHealth()
-						if hp > maxHP then
-							maxHP = hp
-							chosen = e
+				if p2 > 2 then
+					allowUse = false
+					break
+				else
+					-- giữ logic cũ: target enemy có max HP
+					local maxHP, chosen = -1, nil
+					for _, e in ipairs(getEnemies()) do
+						if e.Type ~= "Arrow" and e.HealthHandler then
+							local hp = e.HealthHandler:GetMaxHealth()
+							if hp > maxHP then
+								maxHP = hp
+								chosen = e
+							end
 						end
 					end
+					if chosen then SendSkill(hash, index, chosen:GetPosition()) end
+					break
 				end
-				if chosen then SendSkill(hash, index, chosen:GetPosition()) end
+			end
+
+			-- Toxicnator: dùng skill lên enemy có HP cao nhất trong range, nếu có
+			if tower.Type == "Toxicnator" then
+				local targetEnemy = getHighestHpEnemyInRange(pos, range)
+				if targetEnemy then
+					SendSkill(hash, index, targetEnemy:GetPosition())
+				end
 				break
 			end
 
