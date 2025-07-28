@@ -356,9 +356,6 @@ local function RebuildIfNeeded(axisX, placeArgs)
         end
         if ok then
             soldConvertedX[axisX] = nil
-            print("✅ Rebuild thành công tại X =", axisX)
-        else
-            print("❌ Rebuild thất bại tại X =", axisX)
         end
     end
 end
