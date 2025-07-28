@@ -320,39 +320,39 @@ local function SellTowerRetry(axisValue)
     return false
 end
 
+
+
 local function shouldChangeTarget(entry, currentWave, currentTime)
-    if entry.TargetWave and entry.TargetWave ~= currentWave then
-        return false
-    end
+    if entry.TargetWave and entry.TargetWave ~= currentWave then return false end
     if entry.TargetChangedAt then
         local targetTimeStr = convertToTimeFormat(entry.TargetChangedAt)
-        if currentTime ~= targetTimeStr then
-            return false
-        end
+        if currentTime ~= targetTimeStr then return false end
     end
     return true
 end
 
 local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
     local processedEntries = {}
-
     task.spawn(function()
         while true do
             local success, currentWave, currentTime = pcall(function()
                 return gameUI.waveText.Text, gameUI.timeText.Text
             end)
-
             if success then
                 for i, entry in ipairs(targetChangeEntries) do
                     if not processedEntries[i] and shouldChangeTarget(entry, currentWave, currentTime) then
                         local axisValue = entry.TowerTargetChange
                         local targetType = entry.TargetWanted
-
                         ChangeTargetRetry(axisValue, targetType)
                         processedEntries[i] = true
                     end
                 end
             end
+            task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay)
+        end
+    end)
+end
+
 
             task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay)
         end
