@@ -75,7 +75,7 @@ end
 
 -- ===================== CONFIG SYSTEM =====================
 local defaultConfig = {
-    ["Macro Name"] = "x",
+    ["Macro Name"] = "xmastoken",
     ["PlaceMode"] = "Rewrite",
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
