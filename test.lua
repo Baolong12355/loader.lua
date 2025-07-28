@@ -333,6 +333,32 @@ local function shouldChangeTarget(entry, currentWave, currentTime)
     return true
 end
 
+local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
+    local processedEntries = {}
+
+    task.spawn(function()
+        while true do
+            local success, currentWave, currentTime = pcall(function()
+                return gameUI.waveText.Text, gameUI.timeText.Text
+            end)
+
+            if success then
+                for i, entry in ipairs(targetChangeEntries) do
+                    if not processedEntries[i] and shouldChangeTarget(entry, currentWave, currentTime) then
+                        local axisValue = entry.TowerTargetChange
+                        local targetType = entry.TargetWanted
+
+                        ChangeTargetRetry(axisValue, targetType)
+                        processedEntries[i] = true
+                    end
+                end
+            end
+
+            task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay)
+        end
+    end)
+end
+
 -- Hàm rebuild lại tower nếu bị convert auto sell
 local function RebuildIfNeeded(axisX, placeArgs)
     local hash, tower = GetTowerByAxis(axisX)
