@@ -48,7 +48,7 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["Macro Name"] = "xmastoken",
+    ["Macro Name"] = "x",
     ["PlaceMode"] = "Rewrite",
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
@@ -331,6 +331,29 @@ local function shouldChangeTarget(entry, currentWave, currentTime)
         end
     end
     return true
+end
+
+-- THÊM FUNCTION StartTargetChangeMonitor (đây là function bị thiếu)
+local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
+    if not targetChangeEntries or #targetChangeEntries == 0 then return end
+    
+    task.spawn(function()
+        while true do
+            local currentWave = tonumber(gameUI.waveText.Text:match("%d+")) or 1
+            local currentTime = gameUI.timeText.Text or "00:00"
+            
+            for _, entry in ipairs(targetChangeEntries) do
+                if shouldChangeTarget(entry, currentWave, currentTime) then
+                    local axis = tonumber(entry.TowerTargetChange)
+                    if axis then
+                        ChangeTargetRetry(axis, entry.TargetType)
+                    end
+                end
+            end
+            
+            task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay or 0.1)
+        end
+    end)
 end
 
 -- Hàm rebuild lại tower nếu bị convert auto sell
