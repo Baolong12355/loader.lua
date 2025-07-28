@@ -360,7 +360,294 @@ local function RebuildIfNeeded(axisX, placeArgs)
     end
 end
 
--- Các hàm hệ thống macro, worker,... của bạn gọi RebuildIfNeeded(axisX, args) khi cần rebuild vị trí bị convert
--- Các phần macro runner, worker, automation phía sau giữ nguyên, chỉ cần đảm bảo mã hóa vị trí X tuyệt đối và gọi RebuildIfNeeded khi muốn rebuild vị trí đã bị convert.
+local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
+    local config = globalEnv.TDX_Config
+    local rebuildAttempts = {}
+    local soldPositions = {}
 
--- Phần dưới đây bạn giữ nguyên hoặc bổ sung hệ thống macro, worker, logic tự động của bạn.
+    -- Tracking system cho towers đã chết (từ v19)
+    local deadTowerTracker = {
+        deadTowers = {},
+        nextDeathId = 1
+    }
+
+    local function recordTowerDeath(x)
+        if not deadTowerTracker.deadTowers[x] then
+            deadTowerTracker.deadTowers[x] = {
+                deathTime = tick(),
+                deathId = deadTowerTracker.nextDeathId
+            }
+            deadTowerTracker.nextDeathId = deadTowerTracker.nextDeathId + 1
+        end
+    end
+
+    local function clearTowerDeath(x)
+        deadTowerTracker.deadTowers[x] = nil
+    end
+
+    -- Worker system (từ v20) với cải tiến
+    local jobQueue = {}
+    local activeJobs = {}
+
+    -- Worker function - Optimized rebuild
+    local function RebuildWorker()
+        task.spawn(function()
+            while true do
+                if #jobQueue > 0 then
+                    local job = table.remove(jobQueue, 1)
+                    local x = job.x
+                    local records = job.records
+
+                    local rebuildSuccess = true
+                    for _, record in ipairs(records) do
+                        local action = record.entry
+
+                        if action.TowerPlaced then
+                            local vecTab = {}
+                            for coord in action.TowerVector:gmatch("[^,%s]+") do
+                                table.insert(vecTab, tonumber(coord))
+                            end
+                            if #vecTab == 3 then
+                                local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
+                                local args = {
+                                    tonumber(action.TowerA1), 
+                                    action.TowerPlaced, 
+                                    pos, 
+                                    tonumber(action.Rotation or 0)
+                                }
+                                WaitForCash(action.TowerPlaceCost)
+                                if not PlaceTowerRetry(args, pos.X, action.TowerPlaced) then
+                                    rebuildSuccess = false
+                                    break
+                                end
+                            end
+
+                        elseif action.TowerUpgraded then
+                            -- Đảm bảo upgrade thành công, nếu fail thì retry
+                            if not UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath) then
+                                rebuildSuccess = false
+                                break
+                            end
+
+                        elseif action.ChangeTarget then
+                            ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
+
+                        elseif action.SellTower then
+                            if SellTowerRetry(tonumber(action.SellTower)) then
+                                soldPositions[tonumber(action.SellTower)] = true
+                            end
+                        end
+                    end
+
+                    -- Cleanup sau khi rebuild
+                    if rebuildSuccess then
+                        rebuildAttempts[x] = 0
+                        clearTowerDeath(x)
+                    end
+
+                    activeJobs[x] = nil
+                else
+                    RunService.Heartbeat:Wait() -- Sử dụng heartbeat thay vì task.wait
+                end
+            end
+        end)
+    end
+
+    -- Khởi tạo workers
+    for i = 1, config.MaxConcurrentRebuilds do
+        RebuildWorker()
+    end
+
+    -- Producer - Fast detection system
+    task.spawn(function()
+        while true do
+            if next(towerRecords) then
+                for x, records in pairs(towerRecords) do
+                    local hash, tower = GetTowerByAxis(x)
+
+                    if not hash or not tower then
+                        -- Tower không tồn tại (chết HOẶC bị bán)
+                        if not activeJobs[x] then -- Chưa có job rebuild
+                            -- Kiểm tra xem tower có bị bán không
+                            if soldPositions[x] and not config.ForceRebuildEvenIfSold then
+                                -- Tower đã bị bán và không force rebuild
+                                continue
+                            end
+
+                            recordTowerDeath(x)
+
+                            local towerType = nil
+                            local firstPlaceRecord = nil
+
+                            for _, record in ipairs(records) do
+                                if record.entry.TowerPlaced then 
+                                    towerType = record.entry.TowerPlaced
+                                    firstPlaceRecord = record
+                                    break
+                                end
+                            end
+
+                            if towerType then
+                                local skipRule = skipTypesMap[towerType]
+                                local shouldSkip = false
+
+                                if skipRule then
+                                    if skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine then
+                                        shouldSkip = true
+                                    elseif not skipRule.beOnly then
+                                        shouldSkip = true
+                                    end
+                                end
+
+                                if not shouldSkip then
+                                    rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                                    local maxRetry = config.MaxRebuildRetry
+
+                                    if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                                        -- Add to queue với priority
+                                        activeJobs[x] = true
+                                        local priority = GetTowerPriority(towerType)
+                                        table.insert(jobQueue, { 
+                                            x = x, 
+                                            records = records, 
+                                            priority = priority,
+                                            deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick()
+                                        })
+
+                                        -- Sort by priority, then by death time (older first)
+                                        table.sort(jobQueue, function(a, b) 
+                                            if a.priority == b.priority then
+                                                return a.deathTime < b.deathTime
+                                            end
+                                            return a.priority < b.priority 
+                                        end)
+                                    end
+                                end
+                            end
+                        end
+                    else
+                        -- Tower sống, cleanup
+                        clearTowerDeath(x)
+                        if activeJobs[x] then
+                            activeJobs[x] = nil
+                            -- Remove from queue if exists
+                            for i = #jobQueue, 1, -1 do
+                                if jobQueue[i].x == x then
+                                    table.remove(jobQueue, i)
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            RunService.Heartbeat:Wait() -- Sử dụng heartbeat để response nhanh nhất
+        end
+    end)
+end
+
+local function RunMacroRunner()
+    local config = globalEnv.TDX_Config
+    local macroName = config["Macro Name"] or "event"
+    local macroPath = "tdx/macros/" .. macroName .. ".json"
+
+    if not safeIsFile(macroPath) then 
+        error("Không tìm thấy file macro: " .. macroPath)
+    end
+
+    local macroContent = safeReadFile(macroPath)
+    if not macroContent then
+        error("Không thể đọc file macro")
+    end
+
+    local ok, macro = pcall(function() 
+        return HttpService:JSONDecode(macroContent) 
+    end)
+
+    if not ok or type(macro) ~= "table" then 
+        error("Lỗi parse macro file")
+    end
+
+    local gameUI = getGameUI()
+    local towerRecords = {}
+    local skipTypesMap = {}
+    local targetChangeEntries = {}
+    local rebuildSystemActive = false
+
+    for i, entry in ipairs(macro) do
+        if entry.TowerTargetChange then
+            table.insert(targetChangeEntries, entry)
+        end
+    end
+
+    if #targetChangeEntries > 0 then
+        StartTargetChangeMonitor(targetChangeEntries, gameUI)
+    end
+
+    for i, entry in ipairs(macro) do
+        if entry.SuperFunction == "sell_all" then
+            SellAllTowers(entry.Skip)
+
+        elseif entry.SuperFunction == "rebuild" then
+            if not rebuildSystemActive then
+                for _, skip in ipairs(entry.Skip or {}) do
+                    skipTypesMap[skip] = { beOnly = entry.Be == true, fromLine = i }
+                end
+
+                StartRebuildSystem(entry, towerRecords, skipTypesMap)
+                rebuildSystemActive = true
+            end
+
+        elseif entry.TowerPlaced and entry.TowerVector and entry.TowerPlaceCost then
+            local vecTab = {}
+            for coord in entry.TowerVector:gmatch("[^,%s]+") do
+                table.insert(vecTab, tonumber(coord))
+            end
+
+            if #vecTab == 3 then
+                local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
+                local args = {
+                    tonumber(entry.TowerA1),
+                    entry.TowerPlaced,
+                    pos,
+                    tonumber(entry.Rotation or 0)
+                }
+
+                WaitForCash(entry.TowerPlaceCost)
+                PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
+
+                towerRecords[pos.X] = towerRecords[pos.X] or {}
+                table.insert(towerRecords[pos.X], { line = i, entry = entry })
+            end
+
+        elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
+            local axis = tonumber(entry.TowerUpgraded)
+            UpgradeTowerRetry(axis, entry.UpgradePath)
+
+            towerRecords[axis] = towerRecords[axis] or {}
+            table.insert(towerRecords[axis], { line = i, entry = entry })
+
+        elseif entry.ChangeTarget and entry.TargetType then
+            local axis = tonumber(entry.ChangeTarget)
+            ChangeTargetRetry(axis, entry.TargetType)
+
+            towerRecords[axis] = towerRecords[axis] or {}
+            table.insert(towerRecords[axis], { line = i, entry = entry })
+
+        elseif entry.SellTower then
+            local axis = tonumber(entry.SellTower)
+            SellTowerRetry(axis)
+
+            towerRecords[axis] = towerRecords[axis] or {}
+            table.insert(towerRecords[axis], { line = i, entry = entry })
+        end
+
+        task.wait(globalEnv.TDX_Config.MacroStepDelay)
+    end
+end
+
+local success, err = pcall(RunMacroRunner)
+if not success then
+    error("Lỗi Macro Runner: " .. tostring(err))
+end
