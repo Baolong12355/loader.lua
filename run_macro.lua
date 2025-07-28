@@ -363,7 +363,6 @@ end
 local function RebuildIfNeeded(axisX, placeArgs)
     local hash, tower = GetTowerByAxis(axisX)
     if not hash and soldConvertedX[axisX] then
-        print("Đang rebuild lại tower tại X =", axisX)
         local ok = false
         for i = 1, getMaxAttempts() do
             ok = pcall(function()
