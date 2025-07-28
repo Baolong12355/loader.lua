@@ -64,19 +64,30 @@ local function safeReadFile(path)
     return ""
 end
 
--- Lấy vị trí của một tower
+-- Hàm lấy vị trí tower chỉ sử dụng SpawnCFrame (method mới nhất)
 local function GetTowerPosition(tower)
+    if not tower then return nil end
+    if typeof(tower.SpawnCFrame) == "CFrame" then
+        return tower.SpawnCFrame.Position
+    end
+    return nil
+end
+
+-- Hàm tìm tower theo vị trí X chính xác (không sai số)
+local function FindTowerByExactX(targetX)
+    if not TowerClass or not TowerClass.GetTowers then return nil, nil, nil end
+    
     for hash, tower in pairs(TowerClass.GetTowers()) do
-        local spawnCFrame = tower.SpawnCFrame
-        if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-            local pos = spawnCFrame.Position
-            if pos.X == targetX then
-                return hash, tower, pos
-            end
+        local pos = GetTowerPosition(tower)
+        if pos and pos.X == targetX then
+            return hash, tower, pos
         end
     end
+    
     return nil, nil, nil
 end
+
+
 
 -- [SỬA LỖI] Lấy chi phí đặt tower dựa trên tên, sử dụng FindFirstChild
 local function GetTowerPlaceCostByName(name)
