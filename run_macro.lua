@@ -335,23 +335,27 @@ end
 
 -- THÊM FUNCTION StartTargetChangeMonitor (đây là function bị thiếu)
 local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
-    if not targetChangeEntries or #targetChangeEntries == 0 then return end
-    
+    local processedEntries = {}
+
     task.spawn(function()
         while true do
-            local currentWave = tonumber(gameUI.waveText.Text:match("%d+")) or 1
-            local currentTime = gameUI.timeText.Text or "00:00"
-            
-            for _, entry in ipairs(targetChangeEntries) do
-                if shouldChangeTarget(entry, currentWave, currentTime) then
-                    local axis = tonumber(entry.TowerTargetChange)
-                    if axis then
-                        ChangeTargetRetry(axis, entry.TargetType)
+            local success, currentWave, currentTime = pcall(function()
+                return gameUI.waveText.Text, gameUI.timeText.Text
+            end)
+
+            if success then
+                for i, entry in ipairs(targetChangeEntries) do
+                    if not processedEntries[i] and shouldChangeTarget(entry, currentWave, currentTime) then
+                        local axisValue = entry.TowerTargetChange
+                        local targetType = entry.TargetWanted
+
+                        ChangeTargetRetry(axisValue, targetType)
+                        processedEntries[i] = true
                     end
                 end
             end
-            
-            task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay or 0.1)
+
+            task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay)
         end
     end)
 end
