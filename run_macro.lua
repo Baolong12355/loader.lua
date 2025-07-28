@@ -125,7 +125,6 @@ task.spawn(function()
                             Remotes.SellTower:FireServer(hash)
                         end)
                         soldConvertedX[x] = true
-                        print("Đã auto sell tower convert tại X =", x)
                     end
                 end
             end
