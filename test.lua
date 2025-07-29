@@ -1,5 +1,5 @@
 -- Script: recorder_moving_skill.lua
--- Mục đích: Ghi log các lần sử dụng skill di chuyển (moving skill) cho các tower Helio, Helio Cryo, Jet Trooper (skill 1,3), Cryo Helio (skill 1)
+-- Mục đích: Ghi log các lần sử dụng skill di chuyển (moving skill) cho các tower Helio, Cryo Helio, Jet Trooper (skill 1,3), Cryo Helio (skill 1)
 -- Format xuất ra:
 -- towermoving = <hash>
 -- <skill_index>
