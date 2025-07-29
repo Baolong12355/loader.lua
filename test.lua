@@ -166,7 +166,7 @@ local function setupMovingSkillHook()
         local entry = {
             TowerMoving = towerPos and towerPos.X or 0,
             SkillIndex = skillIndex,
-            Location = string.format("%s, %s, %s", tostring(targetPos.X), tostring(targetPos.Y), tostring(targetPos.Z)),
+            Location = string.format("%s, %s, %s", targetPos.X, targetPos.Y, targetPos.Z),
             Wave = currentWave,
             Time = convertTimeToNumber(currentTime)
         }
@@ -177,7 +177,16 @@ local function setupMovingSkillHook()
         print("🎯 Đã ghi moving skill: " .. towerType .. " skill " .. skillIndex)
     end
 
-    -- Hook namecall method (chỉ dùng namecall cho RemoteFunction)
+    -- Hook InvokeServer (giống pattern recorder.lua)
+    local oldInvokeServer = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
+        local args = {...}
+        -- CHỈ QUAN SÁT, KHÔNG SỬA ĐỔI
+        handleMovingSkill(args[1], args[2], args[3])
+        -- GỌI GỐC VÀ RETURN
+        return oldInvokeServer(self, ...)
+    end)
+
+    -- Hook namecall method (backup)
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         if checkcaller() then return oldNamecall(self, ...) end
