@@ -1,42 +1,70 @@
--- TDX FULL RECORDER (method hook version)
--- Ghi place, upgrade, sell, target, moving skill (Helicopter, Cryo Helicopter 1/3, Jet Trooper 1)
--- Author: Copilot (2024)
+-- TDX FULL RECORDER (method hook, tận dụng handleRemote cho mọi remote, không patch từng remote riêng)
+-- Author: Copilot (2024), hỗ trợ macro, moving skill, các remote chính, logic thống nhất
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
-local LocalPlayer = Players.LocalPlayer
-local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
+local player = Players.LocalPlayer
+local PlayerScripts = player:WaitForChild("PlayerScripts")
+
+-- File macro
 local outJson = "tdx/macros/recorder_output.json"
 
--- Tạo folder nếu chưa có
-if makefolder then pcall(makefolder, "tdx") pcall(makefolder, "tdx/macros") end
+-- Xóa file nếu đã tồn tại
 if isfile and isfile(outJson) and delfile then pcall(delfile, outJson) end
 
-local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
 local recordedActions = {}
 local hash2pos = {}
-
 local pendingQueue = {}
 local timeout = 2
 local lastKnownLevels = {}
 local lastUpgradeTime = {}
 
-local function safeWriteFile(path, content) if writefile then pcall(writefile, path, content) end end
-local function safeReadFile(path) if isfile and isfile(path) and readfile then local ok, c = pcall(readfile, path) if ok then return c end end return "" end
+-- TowerClass safe require
+local TowerClass
+pcall(function()
+    local client = PlayerScripts:WaitForChild("Client")
+    local gameClass = client:WaitForChild("GameClass")
+    local towerModule = gameClass:WaitForChild("TowerClass")
+    TowerClass = require(towerModule)
+end)
 
-local function GetTowerPosition(tower) -- Chuẩn hóa lấy vị trí
+if makefolder then
+    pcall(makefolder, "tdx")
+    pcall(makefolder, "tdx/macros")
+end
+
+-- Helpers
+local function safeWriteFile(path, content)
+    if writefile then pcall(writefile, path, content) end
+end
+local function safeReadFile(path)
+    if isfile and isfile(path) and readfile then
+        local ok, content = pcall(readfile, path)
+        if ok then return content end
+    end
+    return ""
+end
+
+local function GetTowerPosition(tower)
     if not TowerClass or not tower then return nil end
     local ok, cframe = pcall(function() return tower.CFrame end)
     if ok and typeof(cframe) == "CFrame" then return cframe.Position end
-    if tower.GetPosition then local ok2, pos = pcall(tower.GetPosition, tower) if ok2 and typeof(pos) == "Vector3" then return pos end end
-    if tower.Model and tower.Model:FindFirstChild("Root") then return tower.Model.Root.Position end
-    if tower.Character and tower.Character:GetCharacterModel() and tower.Character:GetCharacterModel().PrimaryPart then return tower.Character:GetCharacterModel().PrimaryPart.Position end
+    if tower.GetPosition then
+        local ok2, pos = pcall(tower.GetPosition, tower)
+        if ok2 and typeof(pos) == "Vector3" then return pos end
+    end
+    if tower.Model and tower.Model:FindFirstChild("Root") then
+        return tower.Model.Root.Position
+    end
+    if tower.Character and tower.Character:GetCharacterModel() and tower.Character:GetCharacterModel().PrimaryPart then
+        return tower.Character:GetCharacterModel().PrimaryPart.Position
+    end
     return nil
 end
 
 local function GetTowerPlaceCostByName(name)
-    local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    local playerGui = player:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return 0 end
     local interface = playerGui:FindFirstChild("Interface")
     if not interface then return 0 end
@@ -60,7 +88,7 @@ local function GetTowerPlaceCostByName(name)
 end
 
 local function getCurrentWaveAndTime()
-    local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    local playerGui = player:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return nil, nil end
     local interface = playerGui:FindFirstChild("Interface")
     if not interface then return nil, nil end
@@ -74,7 +102,9 @@ end
 local function convertTimeToNumber(timeStr)
     if not timeStr then return nil end
     local mins, secs = timeStr:match("(%d+):(%d+)")
-    if mins and secs then return tonumber(mins)*100+tonumber(secs) end
+    if mins and secs then
+        return tonumber(mins) * 100 + tonumber(secs)
+    end
     return nil
 end
 
@@ -89,6 +119,22 @@ local function updateJsonFile()
     end
     local finalJson = "[\n" .. table.concat(jsonLines, "\n") .. "\n]"
     safeWriteFile(outJson, finalJson)
+end
+
+local function preserveSuperFunctions()
+    local content = safeReadFile(outJson)
+    if content == "" then return end
+    content = content:gsub("^%[%s*", ""):gsub("%s*%]$", "")
+    for line in content:gmatch("[^\r\n]+") do
+        line = line:gsub(",$", "")
+        if line:match("%S") then
+            local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
+            if ok and decoded and decoded.SuperFunction then
+                table.insert(recordedActions, decoded)
+            end
+        end
+    end
+    if #recordedActions > 0 then updateJsonFile() end
 end
 
 local function parseMacroLine(line)
@@ -154,35 +200,25 @@ local function processAndWriteAction(commandString)
     end
 end
 
--- MOVING SKILL macro record logic
+-- MOVING SKILL: chỉ đúng các tower/skill đặc biệt
 local movingTowerSkills = {
     ["Helicopter"] = { [1]=true, [3]=true },
     ["Cryo Helicopter"] = { [1]=true, [3]=true },
     ["Jet Trooper"] = { [1]=true }
 }
-local function getCurrentWaveNum()
-    local wave, _ = getCurrentWaveAndTime()
-    if wave then local num = tonumber(wave:match("(%d+)")) return num or 0 end
-    return 0
-end
-local function getCurrentTimeNum()
-    local _, t = getCurrentWaveAndTime()
-    if t then
-        local mins, secs = t:match("(%d+):(%d+)")
-        mins, secs = tonumber(mins or 0), tonumber(secs or 0)
-        return mins * 60 + secs
-    end
-    return 0
-end
-
-local function recordMovingSkill(tower, skillIndex)
+local function recordMovingSkillByHash(hash, skillIndex)
+    local towers = TowerClass and TowerClass.GetTowers and TowerClass.GetTowers() or {}
+    local tower = towers and towers[hash]
+    if not tower then return end
+    if not (movingTowerSkills[tower.Type] and movingTowerSkills[tower.Type][skillIndex]) then return end
     local pos = GetTowerPosition(tower)
     if not pos then return end
     local x = math.floor(pos.X * 100) / 100
-    local wave = getCurrentWaveNum()
-    local t = getCurrentTimeNum()
-    local entry = string.format(":%s,%d,%d,%d", tostring(x), skillIndex, wave, t)
-    -- Đọc, append, ghi lại file
+    local wave, t = getCurrentWaveAndTime()
+    wave = wave and tonumber(wave:match("(%d+)")) or 0
+    local mins, secs = t and t:match("(%d+):(%d+)") or 0,0
+    local timeNum = (tonumber(mins) or 0) * 60 + (tonumber(secs) or 0)
+    local entry = string.format(":%s,%d,%d,%d", tostring(x), skillIndex, wave, timeNum)
     local macroTable = {}
     local content = safeReadFile(outJson)
     if content and #content > 3 then
@@ -202,67 +238,70 @@ local function recordMovingSkill(tower, skillIndex)
     safeWriteFile(outJson, macroStr)
 end
 
--- Method hook: record moving skill như các action khác
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    local method = getnamecallmethod()
-    if not checkcaller() then
-        -- Moving skill: chỉ hook đúng remote, type, skill index
-        if method == "InvokeServer" and self.Name == "TowerUseAbilityRequest" then
-            local hash, skill, pos, targetHash = ...
-            local towers = TowerClass.GetTowers and TowerClass.GetTowers() or {}
-            local tower = towers and towers[hash]
-            if tower and movingTowerSkills[tower.Type] and movingTowerSkills[tower.Type][skill] then
-                recordMovingSkill(tower, skill)
-            end
-        end
-        -- Các remote khác (place, upgrade, sell, target) xử lý như cũ:
-        if method == "FireServer" or method == "InvokeServer" then
-            local args = {...}
-            local name = self.Name
-            if name == "TowerUpgradeRequest" then
-                local hash, path, count = unpack(args)
-                if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number"
-                    and path >= 0 and path <= 2 and count > 0 and count <= 5 then
-                    table.insert(pendingQueue, {
-                        type = "Upgrade",
-                        code = string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count),
-                        created = tick(),
-                        hash = hash
-                    })
-                end
-            elseif name == "PlaceTower" then
-                local a1, towerName, vec, rot = unpack(args)
-                if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
-                    local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
-                    table.insert(pendingQueue, {
-                        type = "Place",
-                        code = code,
-                        created = tick(),
-                        hash = a1
-                    })
-                end
-            elseif name == "SellTower" then
-                table.insert(pendingQueue, {
-                    type = "Sell",
-                    code = "TDX:sellTower("..tostring(args[1])..")",
-                    created = tick(),
-                    hash = args[1]
-                })
-            elseif name == "ChangeQueryType" then
-                table.insert(pendingQueue, {
-                    type = "Target",
-                    code = string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])),
-                    created = tick(),
-                    hash = args[1]
-                })
-            end
-        end
+-- handleRemote: gom mọi remote logic về một mối, phân biệt action
+local function handleRemote(name, args)
+    if _G and _G.TDX_REBUILD_RUNNING then return end
+    if name == "TowerUseAbilityRequest" then
+        local hash, skillIndex = args[1], args[2]
+        recordMovingSkillByHash(hash, skillIndex)
+        return
     end
-    return oldNamecall(self, ...)
-end)
+    if name == "TowerUpgradeRequest" then
+        local hash, path, count = unpack(args)
+        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
+            table.insert(pendingQueue, {
+                type = "Upgrade",
+                code = string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count),
+                created = tick(),
+                hash = hash
+            })
+        end
+    elseif name == "PlaceTower" then
+        local a1, towerName, vec, rot = unpack(args)
+        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
+            local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
+            table.insert(pendingQueue, {
+                type = "Place",
+                code = code,
+                created = tick(),
+                hash = a1
+            })
+        end
+    elseif name == "SellTower" then
+        table.insert(pendingQueue, {
+            type = "Sell",
+            code = "TDX:sellTower("..tostring(args[1])..")",
+            created = tick(),
+            hash = args[1]
+        })
+    elseif name == "ChangeQueryType" then
+        table.insert(pendingQueue, {
+            type = "Target",
+            code = string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])),
+            created = tick(),
+            hash = args[1]
+        })
+    end
+end
 
--- Confirm pending macro action qua remote phản hồi:
+-- method hook: duy nhất, không patch từng remote
+local function setupHooks()
+    if not hookfunction or not hookmetamethod or not checkcaller then
+        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
+        return
+    end
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        if checkcaller() then return oldNamecall(self, ...) end
+        local method = getnamecallmethod()
+        if method == "FireServer" or method == "InvokeServer" then
+            handleRemote(self.Name, {...})
+        end
+        return oldNamecall(self, ...)
+    end)
+end
+
+-- Xác nhận pending và cập nhật hash2pos
 ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
     local d = data and data[1]
     if not d then return end
@@ -324,7 +363,7 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
-task.spawn(function() -- Timeout clear pending
+task.spawn(function()
     while task.wait(0.5) do
         local now = tick()
         for i = #pendingQueue, 1, -1 do
@@ -335,7 +374,7 @@ task.spawn(function() -- Timeout clear pending
     end
 end)
 
-task.spawn(function() -- Hash-pos update
+task.spawn(function()
     while task.wait() do
         if TowerClass and TowerClass.GetTowers then
             for hash, tower in pairs(TowerClass.GetTowers()) do
@@ -348,5 +387,7 @@ task.spawn(function() -- Hash-pos update
     end
 end)
 
-print("✅ TDX FULL RECORDER (method hook) hoạt động!")
+preserveSuperFunctions()
+setupHooks()
+print("✅ TDX FULL RECORDER (method hook + handleRemote) hoạt động!")
 print("📁 Ghi vào: " .. outJson)
