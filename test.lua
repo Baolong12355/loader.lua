@@ -311,9 +311,9 @@ local function recordMovingSkill(hash, skillIndex, targetPos)
     local currentWave, currentTime = getCurrentWaveAndTime()
     
     local skillRecord = {
-        x = spawnPos.X,
+        towermoving = spawnPos.X, -- vị trí tower (tower moving position)
         skill_index = skillIndex,
-        pos = string.format("%.6f, %.6f, %.6f", targetPos.X, targetPos.Y, targetPos.Z),
+        location = string.format("%.6f, %.6f, %.6f", targetPos.X, targetPos.Y, targetPos.Z), -- vị trí đích (target location)
         wave = currentWave,
         time = currentTime
     }
@@ -321,7 +321,7 @@ local function recordMovingSkill(hash, skillIndex, targetPos)
     table.insert(recordedActions, skillRecord)
     updateJsonFile()
     
-    print(string.format("[Moving Skill] %s (x=%.1f) skill %d -> (%.1f, %.1f, %.1f) | Wave: %s Time: %s", 
+    print(string.format("[Moving Skill] %s (tower x=%.1f) skill %d -> target pos(%.1f, %.1f, %.1f) | Wave: %s Time: %s", 
         towerType, spawnPos.X, skillIndex, targetPos.X, targetPos.Y, targetPos.Z, currentWave or "?", currentTime or "?"))
 end
 
@@ -461,7 +461,7 @@ local function setupHooks()
         return oldFireServer(self, ...)
     end)
 
-    -- Hook InvokeServer
+    -- Hook InvokeServer (TowerUseAbilityRequest sử dụng InvokeServer)
     local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
         handleRemote(self.Name, {...})
         return oldInvokeServer(self, ...)
@@ -515,3 +515,7 @@ preserveSuperFunctions()
 setupHooks()
 
 print("✅ TDX Full Recorder (với Moving Skills) đã hoạt động!")
+print("🎯 Ghi: Place, Upgrade, Target, Sell + Moving Skills (Helicopter 1,3 | Cryo Helicopter 1,3 | Jet Trooper 1)")
+print("📍 Format Moving Skills: x=tower position, pos=target location")
+print("🔧 TowerUseAbilityRequest sử dụng InvokeServer")
+print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
