@@ -1,235 +1,203 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
-local RunService = game:GetService("RunService")
-local player = Players.LocalPlayer
-
--- Remote setup
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local replStorage = game:GetService("ReplicatedStorage")
+local remotes = replStorage:WaitForChild("Remotes")
 local TowerUseAbilityRequest = remotes:WaitForChild("TowerUseAbilityRequest")
+local localPlayer = game:GetService("Players").LocalPlayer
 
--- Tower configuration
-local MOVING_SKILL_CONFIG = {
-    ["Helicopter"] = {1, 3},        -- Skill 1 (with vector), skill 3 (no vector)
-    ["Cryo Helicopter"] = {1, 3},   -- Skill 1 (with vector), skill 3 (no vector)
-    ["Jet Trooper"] = {1}           -- Skill 1 (with vector)
+-- Cache lưu trữ skill data
+local skillCache = {}
+local cacheIndex = 1
+
+-- Moving skills cần track (Helio skill 1,3 và Cryo Helio, Jet Trooper skill 1)
+local MOVING_SKILLS = {
+    [1] = "Helio Skill 1",
+    [3] = "Helio Skill 3", 
+    [1] = "Cryo Helio Skill 1",
+    [1] = "Jet Trooper Skill 1"
 }
 
--- Cache and file setup
-local outJson = "tdx/macros/recorder_output.json"
-local actionCache = {}
-local cacheLock = false
-local lastProcessTime = 0
-
--- Create directories if needed
-if makefolder then
-    pcall(makefolder, "tdx")
-    pcall(makefolder, "tdx/macros")
+-- Hàm lấy wave hiện tại
+local function getCurrentWave()
+    -- Logic lấy wave từ game (cần adapt theo game structure)
+    local gameState = replStorage:FindFirstChild("GameState")
+    if gameState and gameState:FindFirstChild("Wave") then
+        return gameState.Wave.Value
+    end
+    return 1
 end
 
--- ========================
--- CORE FUNCTIONALITY
--- ========================
-
-local function safeWriteFile(path, content)
-    if writefile then
-        local success, err = pcall(writefile, path, content)
-        if not success then
-            warn("File write error: "..tostring(err))
-        end
-    end
+-- Hàm lấy thời gian game
+local function getGameTime()
+    return tick()
 end
 
-local function safeReadFile(path)
-    if isfile and isfile(path) and readfile then
-        local success, content = pcall(readfile, path)
-        if success then return content end
-    end
-    return nil
+-- Hàm kiểm tra skill có phải moving skill không
+local function isMovingSkill(skillIndex, towerHash)
+    -- Logic kiểm tra dựa trên tower type và skill index
+    return MOVING_SKILLS[skillIndex] ~= nil
 end
 
-local function getCurrentWaveAndTime()
-    local playerGui = player:FindFirstChildOfClass("PlayerGui")
-    if not playerGui then return nil, nil end
-    
-    local interface = playerGui:FindFirstChild("Interface")
-    if not interface then return nil, nil end
-    
-    local gameInfoBar = interface:FindFirstChild("GameInfoBar")
-    if not gameInfoBar then return nil, nil end
-    
-    return gameInfoBar.Wave.WaveText.Text, gameInfoBar.TimeLeft.TimeLeftText.Text
-end
+-- Biến lưu hàm gốc
+local originalInvokeServer
 
-local function processCache()
-    if cacheLock or #actionCache == 0 then return end
-    cacheLock = true
-    
-    -- Load existing data
-    local existingData = {}
-    local fileContent = safeReadFile(outJson)
-    if fileContent then
-        local success, decoded = pcall(HttpService.JSONDecode, HttpService, fileContent)
-        if success and type(decoded) == "table" then
-            existingData = decoded
-        end
-    end
-    
-    -- Merge new actions
-    for _, action in ipairs(actionCache) do
-        table.insert(existingData, action)
-    end
-    
-    -- Save back to file
-    local success, json = pcall(HttpService.JSONEncode, HttpService, existingData)
-    if success then
-        safeWriteFile(outJson, json)
-        actionCache = {}
-        print(string.format("💾 Saved %d actions to file", #actionCache))
-    end
-    
-    cacheLock = false
-    lastProcessTime = os.time()
-end
-
--- ========================
--- HOOK IMPLEMENTATION
--- ========================
-
-local originalInvoke
-local originalNamecall
-
-local function shouldRecordSkill(towerType, skillIndex)
-    local config = MOVING_SKILL_CONFIG[towerType]
-    if not config then return false end
-    
-    for _, allowedSkill in ipairs(config) do
-        if skillIndex == allowedSkill then
-            return true
-        end
-    end
-    return false
-end
-
-local function createSkillRecord(hash, skillIndex, targetPos)
-    -- Get tower info
-    local towerType, towerX
-    if TowerClass and TowerClass.GetTowers then
-        local tower = TowerClass.GetTowers()[hash]
-        if tower then
-            towerType = tower.Type
-            if tower.SpawnCFrame then
-                towerX = tower.SpawnCFrame.Position.X
-            end
-        end
-    end
-    
-    if not towerType or not towerX then return nil end
-    
-    -- Get current game state
-    local wave, timeStr = getCurrentWaveAndTime()
-    local timeNum = nil
-    if timeStr then
-        local mins, secs = timeStr:match("(%d+):(%d+)")
-        if mins and secs then
-            timeNum = tonumber(mins) * 100 + tonumber(secs)
-        end
-    end
-    
-    -- Format position
-    local locationStr
-    if targetPos then
-        locationStr = string.format("%.2f, %.2f, %.2f", targetPos.X, targetPos.Y, targetPos.Z)
-    else
-        locationStr = "0, 0, 0"
-    end
-    
-    return {
-        TowerMoving = towerX,
-        SkillIndex = skillIndex,
-        Location = locationStr,
-        Wave = wave or "?",
-        Time = timeNum or 0,
-        Timestamp = os.time()
-    }
-end
-
-local function handleSkillInvocation(method, self, ...)
-    -- Skip if rebuild is running
-    if _G and _G.TDX_REBUILD_RUNNING then return end
-    
-    -- Only process TowerUseAbilityRequest
-    if self ~= TowerUseAbilityRequest then return end
-    
-    local args = {...}
-    if #args < 2 then return end
-    
-    local hash, skillIndex = args[1], args[2]
-    local targetPos = #args >= 3 and args[3] or nil
-    
-    -- Create record
-    local record = createSkillRecord(hash, skillIndex, targetPos)
-    if not record then return end
-    
-    -- Add to cache
-    table.insert(actionCache, record)
-    print(string.format("📝 [Skill Recorded] %s (X:%.1f) skill %d at %s", 
-        record.TowerType or "?", record.TowerMoving or 0, 
-        skillIndex, record.Location))
-    
-    -- Process cache periodically
-    if os.time() - lastProcessTime > 5 or #actionCache > 20 then
-        task.spawn(processCache)
-    end
-end
-
-local function setupHooks()
-    -- Hook InvokeServer
-    if TowerUseAbilityRequest:IsA("RemoteFunction") then
-        originalInvoke = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
-            handleSkillInvocation("InvokeServer", self, ...)
-            return originalInvoke(self, ...)
-        end)
-    end
-    
-    -- Hook namecall
+-- Hook function chính
+local function setupMovingSkillHook()
+    -- Hook namecall để bắt TowerUseAbilityRequest
+    local originalNamecall
     originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if getnamecallmethod() == "InvokeServer" and self == TowerUseAbilityRequest then
-            handleSkillInvocation("Namecall", self, ...)
+        local method = getnamecallmethod()
+        
+        if method == "InvokeServer" and self == TowerUseAbilityRequest then
+            local args = {...}
+            local towerHash = args[1]
+            local skillIndex = args[2] 
+            local targetPos = args[3]
+            
+            -- Kiểm tra nếu là moving skill
+            if isMovingSkill(skillIndex, towerHash) then
+                -- Lưu vào cache trước
+                local skillData = {
+                    towermoving = towerHash,
+                    skillIndex = skillIndex,
+                    location = targetPos,
+                    wave = getCurrentWave(),
+                    time = getGameTime(),
+                    timestamp = os.time()
+                }
+                
+                skillCache[cacheIndex] = skillData
+                cacheIndex = cacheIndex + 1
+                
+                -- In thông tin record
+                print(string.format("🎯 [Moving Skill Recorded] Tower: %d | Skill: %d | Pos: %s | Wave: %d | Time: %.2f",
+                    towerHash, skillIndex, tostring(targetPos), skillData.wave, skillData.time))
+                
+                -- Gọi hàm xử lý cache sau khi lưu
+                spawn(function()
+                    wait(0.1) -- Delay nhỏ để đảm bảo data đã lưu
+                    processSkillCache()
+                end)
+            end
+            
+            -- Return kết quả từ server
+            local result = originalNamecall(self, ...)
+            return result
         end
+        
         return originalNamecall(self, ...)
     end)
+    
+    print("✅ Moving Skill Hook với Recorder đã kích hoạt")
 end
 
--- ========================
--- INITIALIZATION
--- ========================
-
--- Load TowerClass
-local TowerClass
-local success, err = pcall(function()
-    local PlayerScripts = player:WaitForChild("PlayerScripts")
-    local client = PlayerScripts:WaitForChild("Client")
-    local gameClass = client:WaitForChild("GameClass")
-    local towerModule = gameClass:WaitForChild("TowerClass")
-    TowerClass = require(towerModule)
-end)
-
-if not TowerClass then
-    warn("Could not load TowerClass - limited functionality")
-end
-
--- Set up periodic cache processing
-task.spawn(function()
-    while true do
-        processCache()
-        task.wait(10) -- Process cache every 10 seconds
+-- Hàm xử lý cache đã lưu
+function processSkillCache()
+    if #skillCache == 0 then return end
+    
+    print(string.format("📊 [Processing Cache] Có %d skills trong cache", #skillCache))
+    
+    for i, skillData in pairs(skillCache) do
+        -- Format output như yêu cầu
+        print(string.format([[
+🎮 [Skill Record #%d]
+towermoving = %d
+skill index = %d  
+location = %s
+wave = %d
+time = %.2f
+        ]], i, skillData.towermoving, skillData.skillIndex, 
+            tostring(skillData.location), skillData.wave, skillData.time))
+        
+        -- Có thể thêm logic xử lý khác ở đây
+        -- Ví dụ: ghi vào file, gửi lên server, etc.
     end
-end)
+end
 
--- Initialize hooks
-setupHooks()
+-- Hàm replay skill từ cache
+function replaySkillFromCache(index)
+    if not skillCache[index] then
+        print("❌ Không tìm thấy skill data tại index: " .. tostring(index))
+        return false
+    end
+    
+    local skillData = skillCache[index]
+    local args = {
+        skillData.towermoving,
+        skillData.skillIndex,
+        skillData.location
+    }
+    
+    print(string.format("🔄 [Replaying Skill] Tower: %d | Skill: %d | Pos: %s", 
+        args[1], args[2], tostring(args[3])))
+    
+    -- Execute skill
+    local success, result = pcall(function()
+        return TowerUseAbilityRequest:InvokeServer(unpack(args))
+    end)
+    
+    if success then
+        print("✅ Skill replay thành công")
+        return result
+    else
+        print("❌ Skill replay thất bại: " .. tostring(result))
+        return false
+    end
+end
 
-print("🚀 Moving Skill Recorder Initialized")
-print("📌 Tracking:", table.concat(table.keys(MOVING_SKILL_CONFIG), ", "))
-print("💾 Output:", outJson)
+-- Hàm export cache thành script format
+function exportCacheAsScript()
+    if #skillCache == 0 then
+        print("📝 Cache trống - không có gì để export")
+        return
+    end
+    
+    print("📝 [Exporting Cache as Script Format]")
+    print("-- Generated Moving Skills Script --")
+    
+    for i, skillData in pairs(skillCache) do
+        print(string.format([[
+-- Skill Record #%d (Wave: %d, Time: %.2f)
+local args = {
+    %d, -- tower hash
+    %d, -- skill index  
+    Vector3.new(%.6f, %.6f, %.6f) -- target position
+}
+game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest"):InvokeServer(unpack(args))
+wait(0.1)
+        ]], i, skillData.wave, skillData.time,
+            skillData.towermoving, skillData.skillIndex,
+            skillData.location.X, skillData.location.Y, skillData.location.Z))
+    end
+end
+
+-- Utility functions
+function clearCache()
+    skillCache = {}
+    cacheIndex = 1
+    print("🗑️ Cache đã được xóa")
+end
+
+function getCacheSize()
+    return #skillCache
+end
+
+function printCacheStats()
+    print(string.format("📈 [Cache Stats] Size: %d | Last Index: %d", #skillCache, cacheIndex - 1))
+end
+
+-- Khởi tạo hook
+setupMovingSkillHook()
+
+-- Export các function để sử dụng
+_G.SkillRecorder = {
+    processCache = processSkillCache,
+    replaySkill = replaySkillFromCache,
+    exportScript = exportCacheAsScript,
+    clearCache = clearCache,
+    getCacheSize = getCacheSize,
+    printStats = printCacheStats,
+    getCache = function() return skillCache end
+}
+
+print("🚀 Moving Skill Recorder khởi tạo hoàn tất!")
+print("📋 Sử dụng: _G.SkillRecorder.exportScript() để export cache")
+print("🔄 Sử dụng: _G.SkillRecorder.replaySkill(index) để replay skill")
