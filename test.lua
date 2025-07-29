@@ -7,40 +7,92 @@ local PlayerScripts = player:WaitForChild("PlayerScripts")
 -- Tận dụng logic từ recorder.lua
 local outJson = "tdx/macros/moving_skills.json"
 
--- Xóa file cũ nếu tồn tại
-if isfile and isfile(outJson) and delfile then
-    local ok, err = pcall(delfile, outJson)
-    if not ok then
-        warn("Không thể xóa file cũ: " .. tostring(err))
+-- Xóa file cũ nếu tồn tại - Safe deletion
+if safeIsFile(outJson) then
+    local deleteResult = safeDelFile(outJson)
+    if deleteResult then
+        print("🗑️ Đã xóa file moving skills cũ")
     end
 end
 
 local recordedMovingSkills = {}
 local hash2pos = {} -- Tái sử dụng từ recorder.lua
 
--- Lấy TowerClass (tái sử dụng logic)
+-- Lấy TowerClass (tái sử dụng logic) - Safe loading cho executor
 local TowerClass
-pcall(function()
-    local client = PlayerScripts:WaitForChild("Client")
-    local gameClass = client:WaitForChild("GameClass")
-    local towerModule = gameClass:WaitForChild("TowerClass")
-    TowerClass = require(towerModule)
-end)
-
--- Tạo thư mục nếu chưa tồn tại
-if makefolder then
-    pcall(makefolder, "tdx")
-    pcall(makefolder, "tdx/macros")
+local function SafeRequire(path, timeout)
+    timeout = timeout or 5
+    local startTime = tick()
+    while tick() - startTime < timeout do
+        local success, result = pcall(function() return require(path) end)
+        if success and result then return result end
+        wait(0.1)
+    end
+    return nil
 end
 
--- Hàm ghi file an toàn (tái sử dụng)
+local function LoadTowerClass()
+    local ps = player:FindFirstChild("PlayerScripts")
+    if not ps then return nil end
+    local client = ps:FindFirstChild("Client")
+    if not client then return nil end
+    local gameClass = client:FindFirstChild("GameClass")
+    if not gameClass then return nil end
+    local towerModule = gameClass:FindFirstChild("TowerClass")
+    if not towerModule then return nil end
+    return SafeRequire(towerModule)
+end
+
+TowerClass = LoadTowerClass()
+if not TowerClass then 
+    warn("Không thể load TowerClass - đảm bảo bạn đang trong game TDX")
+    return
+end
+
+-- Tạo thư mục nếu chưa tồn tại - Safe folder creation
+local function safeMakeFolder(path)
+    if makefolder and typeof(makefolder) == "function" then
+        local success = pcall(makefolder, path)
+        return success
+    end
+    return false
+end
+
+safeMakeFolder("tdx")
+safeMakeFolder("tdx/macros")
+
+-- Hàm ghi file an toàn - Universal compatibility
 local function safeWriteFile(path, content)
-    if writefile then
+    if writefile and typeof(writefile) == "function" then
         local success, err = pcall(writefile, path, content)
         if not success then
             warn("Lỗi khi ghi file: " .. tostring(err))
         end
+        return success
     end
+    warn("writefile không được hỗ trợ bởi executor này")
+    return false
+end
+
+-- Kiểm tra file tồn tại - Universal compatibility  
+local function safeIsFile(path)
+    if isfile and typeof(isfile) == "function" then
+        local success, result = pcall(isfile, path)
+        return success and result or false
+    end
+    return false
+end
+
+-- Xóa file an toàn - Universal compatibility
+local function safeDelFile(path)
+    if delfile and typeof(delfile) == "function" then
+        local success, err = pcall(delfile, path)
+        if not success then
+            warn("Không thể xóa file: " .. tostring(err))
+        end
+        return success
+    end
+    return false
 end
 
 -- Lấy vị trí tower (tái sử dụng từ recorder.lua)
@@ -129,14 +181,33 @@ local function getTowerTypeFromHash(hash)
     return tower and tower.Type or nil
 end
 
--- Hook TowerUseAbilityRequest
+-- Hook TowerUseAbilityRequest - Universal executor compatibility
 local function setupMovingSkillHook()
-    if not hookfunction or not hookmetamethod or not checkcaller then
-        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
-        return
+    -- Kiểm tra khả năng hook của executor
+    if not hookmetamethod or typeof(hookmetamethod) ~= "function" then
+        warn("❌ Executor không hỗ trợ hookmetamethod - cần executor có hook functions")
+        return false
+    end
+    
+    if not checkcaller or typeof(checkcaller) ~= "function" then
+        warn("❌ Executor không hỗ trợ checkcaller - một số chức năng có thể không hoạt động")
+    end
+    
+    if not getnamecallmethod or typeof(getnamecallmethod) ~= "function" then
+        warn("❌ Executor không hỗ trợ getnamecallmethod - hook sẽ không hoạt động")
+        return false
     end
 
-    local TowerUseAbilityRequest = ReplicatedStorage.Remotes:WaitForChild("TowerUseAbilityRequest")
+    local success, TowerUseAbilityRequest = pcall(function()
+        return ReplicatedStorage.Remotes:WaitForChild("TowerUseAbilityRequest", 10)
+    end)
+    
+    if not success or not TowerUseAbilityRequest then
+        warn("❌ Không thể tìm thấy TowerUseAbilityRequest - đảm bảo bạn đang trong game TDX")
+        return false
+    end
+    
+    print("🔍 TowerUseAbilityRequest found:", TowerUseAbilityRequest)
     
     -- Hàm xử lý moving skill (giống handleRemote trong recorder.lua)
     local function handleMovingSkill(hash, skillIndex, targetPos)
@@ -166,7 +237,7 @@ local function setupMovingSkillHook()
         local entry = {
             TowerMoving = towerPos and towerPos.X or 0,
             SkillIndex = skillIndex,
-            Location = string.format("%s, %s, %s", targetPos.X, targetPos.Y, targetPos.Z),
+            Location = string.format("%s, %s, %s", tostring(targetPos.X), tostring(targetPos.Y), tostring(targetPos.Z)),
             Wave = currentWave,
             Time = convertTimeToNumber(currentTime)
         }
@@ -177,25 +248,22 @@ local function setupMovingSkillHook()
         print("🎯 Đã ghi moving skill: " .. towerType .. " skill " .. skillIndex)
     end
 
-    -- Hook InvokeServer (giống pattern recorder.lua)
-    local oldInvokeServer = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
-        local args = {...}
-        -- CHỈ QUAN SÁT, KHÔNG SỬA ĐỔI
-        handleMovingSkill(args[1], args[2], args[3])
-        -- GỌI GỐC VÀ RETURN
-        return oldInvokeServer(self, ...)
-    end)
-
-    -- Hook namecall method (backup)
+    -- Hook namecall method (universal compatibility)
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if checkcaller() then return oldNamecall(self, ...) end
+        -- Safe checkcaller
+        if checkcaller and checkcaller() then 
+            return oldNamecall(self, ...) 
+        end
         
         local method = getnamecallmethod()
         if method == "InvokeServer" and self == TowerUseAbilityRequest then
             local args = {...}
             -- CHỈ QUAN SÁT, KHÔNG SỬA ĐỔI
-            handleMovingSkill(args[1], args[2], args[3])
+            local success = pcall(handleMovingSkill, args[1], args[2], args[3])
+            if not success then
+                warn("Lỗi khi xử lý moving skill")
+            end
         end
         
         -- GỌI GỐC VÀ RETURN
@@ -203,25 +271,37 @@ local function setupMovingSkillHook()
     end)
     
     print("🪝 Hook setup completed!")
+    return true
 end
 
--- Vòng lặp cập nhật vị trí tower (tái sử dụng từ recorder.lua)
-task.spawn(function()
-    while task.wait() do
+-- Vòng lặp cập nhật vị trí tower - Safe spawn
+spawn(function()
+    while true do
         if TowerClass and TowerClass.GetTowers then
-            for hash, tower in pairs(TowerClass.GetTowers()) do
-                local pos = GetTowerPosition(tower)
-                if pos then
-                    hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+            local success = pcall(function()
+                for hash, tower in pairs(TowerClass.GetTowers()) do
+                    local pos = GetTowerPosition(tower)
+                    if pos then
+                        hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+                    end
                 end
+            end)
+            if not success then
+                wait(1) -- Chờ lâu hơn nếu có lỗi
             end
         end
+        wait(0.5) -- Tần suất cập nhật hợp lý
     end
 end)
 
--- Khởi tạo
-setupMovingSkillHook()
+-- Khởi tạo - Safe initialization
+local hookSuccess = setupMovingSkillHook()
 
-print("✅ TDX Moving Skill Recorder đã hoạt động!")
-print("📁 Dữ liệu moving skills sẽ được ghi vào: " .. outJson)
-print("🎯 Sẽ ghi lại: Helicopter (skill 1,3), Cryo Helicopter (skill 1), Jet Trooper (skill 1)")
+if hookSuccess then
+    print("✅ TDX Moving Skill Recorder đã hoạt động!")
+    print("📁 Dữ liệu moving skills sẽ được ghi vào: " .. outJson)
+    print("🎯 Sẽ ghi lại: Helicopter (skill 1,3), Cryo Helicopter (skill 1), Jet Trooper (skill 1)")
+    print("🔧 Executor compatibility: OK")
+else
+    warn("❌ Không thể khởi tạo Moving Skill Recorder - kiểm tra executor compatibility")
+end
