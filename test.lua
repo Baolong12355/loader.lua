@@ -239,10 +239,13 @@ local function parseMacroLine(line)
     if hash and skillIndex and posX and posY and posZ then
         local pos = hash2pos[tostring(hash)]
         if pos then
+            local currentWave, currentTime = getCurrentWaveAndTime()
             return {{
                 MovingSkillUsed = pos.x,
                 SkillIndex = tonumber(skillIndex),
-                TargetPosition = string.format("%s, %s, %s", posX, posY, posZ)
+                TargetPosition = string.format("%s, %s, %s", posX, posY, posZ),
+                SkillWave = currentWave,
+                SkillUsedAt = convertTimeToNumber(currentTime)
             }}
         end
     end
@@ -414,9 +417,22 @@ local function handleRemote(name, args)
                     -- Kiểm tra skill index có trong danh sách moving skill không
                     for _, validSkill in ipairs(movingSkills) do
                         if skillIndex == validSkill then
+                            local currentWave, currentTime = getCurrentWaveAndTime()
                             local code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
                                 tostring(hash), skillIndex, tostring(targetPos.X), tostring(targetPos.Y), tostring(targetPos.Z))
-                            setPending("MovingSkill", code, hash)
+                            -- Ghi nhận ngay lập tức với thông tin wave và time
+                            local pos = hash2pos[tostring(hash)]
+                            if pos then
+                                local entry = {
+                                    MovingSkillUsed = pos.x,
+                                    SkillIndex = skillIndex,
+                                    TargetPosition = string.format("%s, %s, %s", tostring(targetPos.X), tostring(targetPos.Y), tostring(targetPos.Z)),
+                                    SkillWave = currentWave,
+                                    SkillUsedAt = convertTimeToNumber(currentTime)
+                                }
+                                table.insert(recordedActions, entry)
+                                updateJsonFile()
+                            end
                             break
                         end
                     end
@@ -489,15 +505,14 @@ task.spawn(function()
 end)
 
 -- ===== THÊM: Xác nhận moving skill đã được sử dụng =====
--- (Không có event riêng cho moving skill, nên sẽ auto confirm sau 1 giây)
+-- (Moving skill giờ được ghi nhận ngay lập tức, không cần pending queue)
 task.spawn(function()
     while task.wait(1) do
-        -- Auto confirm các moving skill sau 1 giây
+        -- Auto confirm các action khác (không phải moving skill)
         for i = #pendingQueue, 1, -1 do
             local item = pendingQueue[i]
-            if item.type == "MovingSkill" and tick() - item.created > 1 then
-                processAndWriteAction(item.code)
-                table.remove(pendingQueue, i)
+            if item.type ~= "MovingSkill" and tick() - item.created > 1 then
+                -- Chỉ xử lý các action khác, moving skill đã được xử lý trực tiếp
             end
         end
     end
@@ -510,3 +525,4 @@ setupHooks()
 print("✅ TDX Recorder với Moving Skill Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🚁 Hỗ trợ moving skill cho: Helicopter (skill 1,3), Cryo Helicopter (skill 1,3), Jet Trooper (skill 1)")
+print("📊 Moving skill sẽ được ghi với thông tin Wave và Time")
