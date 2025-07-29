@@ -69,12 +69,12 @@ local function getTowerTypeByHash(hash)
     return nil
 end
 
--- Đoạn sau mới là quan trọng:
+-- Hook __namecall chuẩn, đảm bảo skill vẫn hoạt động
 local mt = getrawmetatable(game)
 local oldNamecall = mt.__namecall
 setreadonly(mt, false)
 mt.__namecall = function(self, ...)
-    if self == TowerUseAbilityRequest and getnamecallmethod() == "InvokeServer" and not checkcaller() then
+    if getnamecallmethod() == "InvokeServer" and self == TowerUseAbilityRequest and not checkcaller() then
         local args = {...}
         local hash = args[1]
         local skillIdx = args[2]
