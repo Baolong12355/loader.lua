@@ -1,156 +1,152 @@
+-- moving_skill_recorder.lua
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
+
 local player = Players.LocalPlayer
-local PlayerScripts = player:WaitForChild("PlayerScripts")
+local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
 
--- Load required classes
-local TowerClass, EnemyClass
-pcall(function()
-    local client = PlayerScripts:WaitForChild("Client")
-    local gameClass = client:WaitForChild("GameClass")
-    TowerClass = require(gameClass:WaitForChild("TowerClass"))
-    EnemyClass = require(gameClass:WaitForChild("EnemyClass"))
-end)
-
--- Configuration for moving skill towers
+-- Cấu hình các tower có skill di chuyển cần record
 local MOVING_SKILL_TOWERS = {
-    ["Helio"] = {skills = {1, 3}},
-    ["Cryo Helicopter"] = {skills = {1}},
-    ["Jet Trooper"] = {skills = {1}}
+    ["Helio"] = {skills = {1, 3}},       -- Helio skill 1 và 3
+    ["Cryo Helicopter"] = {skills = {1}}, -- Cryo Helio skill 1
+    ["Jet Trooper"] = {skills = {1}}     -- Jet Trooper skill 1
 }
 
--- Get current wave and time (reusing existing function from recorder)
-local function getCurrentWaveAndTime()
-    local playerGui = player:FindFirstChildOfClass("PlayerGui")
-    if not playerGui then return nil, nil end
-    local interface = playerGui:FindFirstChild("Interface")
-    if not interface then return nil, nil end
-    local gameInfoBar = interface:FindFirstChild("GameInfoBar")
-    if not gameInfoBar then return nil, nil end
-    local wave = gameInfoBar.Wave.WaveText.Text
-    local time = gameInfoBar.TimeLeft.TimeLeftText.Text
-    return wave, time
+-- Khởi tạo thư mục nếu chưa tồn tại
+if makefolder and not isfile("tdx/macros") then
+    pcall(makefolder, "tdx")
+    pcall(makefolder, "tdx/macros")
 end
 
--- Convert time string to number (reusing existing function)
-local function convertTimeToNumber(timeStr)
-    if not timeStr then return nil end
-    local mins, secs = timeStr:match("(%d+):(%d+)")
-    if mins and secs then
-        return tonumber(mins) * 100 + tonumber(secs)
-    end
-    return nil
-end
+local outputPath = "tdx/macros/moving_skills.json"
 
--- Safe write to file (reusing existing function)
-local function safeWriteFile(path, content)
-    if writefile then
-        local success, err = pcall(writefile, path, content)
-        if not success then
-            warn("Lỗi khi ghi file: " .. tostring(err))
+-- Hàm ghi dữ liệu vào file JSON
+local function saveToFile(data)
+    if not writefile then return end
+    
+    local existingData = {}
+    if isfile(outputPath) then
+        local success, content = pcall(function()
+            return HttpService:JSONDecode(readfile(outputPath))
+        end)
+        if success and type(content) == "table" then
+            existingData = content
         end
     end
+    
+    table.insert(existingData, data)
+    
+    pcall(function()
+        writefile(outputPath, HttpService:JSONEncode(existingData))
+    end)
 end
 
--- Main recording function for moving skills
-local function recordMovingSkill(hash, index, pos)
-    -- Skip if rebuild is running
-    if _G and _G.TDX_REBUILD_RUNNING then return end
+-- Hàm lấy thông tin wave hiện tại
+local function getCurrentWave()
+    local playerGui = player:FindFirstChildOfClass("PlayerGui")
+    if not playerGui then return "?" end
     
-    -- Get tower info
-    local tower = TowerClass.GetTowers()[hash]
-    if not tower then return end
+    local interface = playerGui:FindFirstChild("Interface")
+    if not interface then return "?" end
     
-    -- Check if this is a moving skill tower and skill
-    local config = MOVING_SKILL_TOWERS[tower.Type]
-    if not config or not table.find(config.skills, index) then return end
+    local gameInfoBar = interface:FindFirstChild("GameInfoBar")
+    if not gameInfoBar then return "?" end
     
-    -- Get current wave and time
-    local currentWave, currentTime = getCurrentWaveAndTime()
-    local timeNumber = convertTimeToNumber(currentTime)
-    
-    -- Create record entry
-    local entry = {
-        TowerMoving = tostring(hash),
-        SkillIndex = index,
-        Location = string.format("%.2f, %.2f, %.2f", pos.X, pos.Y, pos.Z),
-        Wave = currentWave,
-        Time = timeNumber
-    }
-    
-    -- Read existing file
-    local outJson = "tdx/macros/recorder_output.json"
-    local existingContent = ""
-    if isfile and isfile(outJson) and readfile then
-        existingContent = readfile(outJson)
-        -- Remove closing bracket if exists
-        existingContent = existingContent:gsub("%s*%]$", "")
-    end
-    
-    -- Prepare new content
-    local newEntry = HttpService:JSONEncode(entry)
-    local newContent = existingContent
-    if #existingContent > 0 and not existingContent:match(",%s*$") then
-        newContent = newContent .. ","
-    end
-    newContent = newContent .. "\n" .. newEntry .. "\n]"
-    
-    -- Write to file
-    safeWriteFile(outJson, newContent)
-    
-    print(string.format("Recorded moving skill: %s skill %d at %s (Wave %s, Time %s)",
-        tower.Type, index, tostring(pos), currentWave or "?", currentTime or "?"))
+    local waveText = gameInfoBar:FindFirstChild("Wave"):FindFirstChild("WaveText")
+    return waveText and waveText.Text or "?"
 end
 
--- Hook setup
-local function setupMovingSkillHooks()
-    if not hookfunction or not hookmetamethod then
-        warn("Executor doesn't support required hook functions")
-        return
-    end
-
-    -- Store original functions
-    local originalInvokeServer
-    
-    -- Hook InvokeServer for TowerUseAbilityRequest
-    local remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
-    if remote:IsA("RemoteFunction") then
-        originalInvokeServer = hookfunction(remote.InvokeServer, function(self, ...)
-            if self.Name == "TowerUseAbilityRequest" and not checkcaller() then
+-- Hook sự kiện sử dụng skill
+local function hookSkillUsage()
+    local originalInvoke
+    if TowerUseAbilityRequest:IsA("RemoteFunction") then
+        originalInvoke = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
+            if self == TowerUseAbilityRequest and not checkcaller() then
                 local args = {...}
                 if #args >= 3 and typeof(args[3]) == "Vector3" then
-                    recordMovingSkill(args[1], args[2], args[3])
+                    local hash, skillIndex, targetPos = args[1], args[2], args[3]
+                    
+                    -- Lấy thông tin tower
+                    local tower = require(player.PlayerScripts.Client.GameClass.TowerClass).GetTowers()[hash]
+                    if tower and MOVING_SKILL_TOWERS[tower.Type] then
+                        local validSkills = MOVING_SKILL_TOWERS[tower.Type].skills
+                        if table.find(validSkills, skillIndex) then
+                            -- Tạo bản ghi
+                            local record = {
+                                TowerType = tower.Type,
+                                TowerHash = hash,
+                                SkillIndex = skillIndex,
+                                Position = {
+                                    X = math.floor(targetPos.X * 100)/100,
+                                    Y = math.floor(targetPos.Y * 100)/100,
+                                    Z = math.floor(targetPos.Z * 100)/100
+                                },
+                                Wave = getCurrentWave(),
+                                Timestamp = os.time()
+                            }
+                            
+                            -- Lưu vào file
+                            saveToFile(record)
+                            print(string.format("[Recorder] Đã ghi %s skill %d tại vị trí %s", 
+                                tower.Type, skillIndex, tostring(targetPos)))
+                        end
+                    end
                 end
             end
-            return originalInvokeServer(self, ...)
+            return originalInvoke(self, ...)
         end)
     end
-
-    -- Hook __namecall for broader catching
+    
+    -- Hook namecall để bắt mọi trường hợp
     local originalNamecall
     originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if getnamecallmethod() == "InvokeServer" and self.Name == "TowerUseAbilityRequest" and not checkcaller() then
+        if getnamecallmethod() == "InvokeServer" and self == TowerUseAbilityRequest and not checkcaller() then
             local args = {...}
             if #args >= 3 and typeof(args[3]) == "Vector3" then
-                recordMovingSkill(args[1], args[2], args[3])
+                local hash, skillIndex, targetPos = args[1], args[2], args[3]
+                
+                -- Lấy thông tin tower
+                local tower = require(player.PlayerScripts.Client.GameClass.TowerClass).GetTowers()[hash]
+                if tower and MOVING_SKILL_TOWERS[tower.Type] then
+                    local validSkills = MOVING_SKILL_TOWERS[tower.Type].skills
+                    if table.find(validSkills, skillIndex) then
+                        -- Tạo bản ghi
+                        local record = {
+                            TowerType = tower.Type,
+                            TowerHash = hash,
+                            SkillIndex = skillIndex,
+                            Position = {
+                                X = math.floor(targetPos.X * 100)/100,
+                                Y = math.floor(targetPos.Y * 100)/100,
+                                Z = math.floor(targetPos.Z * 100)/100
+                            },
+                            Wave = getCurrentWave(),
+                            Timestamp = os.time()
+                        }
+                        
+                        -- Lưu vào file
+                        saveToFile(record)
+                        print(string.format("[Recorder] Đã ghi %s skill %d tại vị trí %s", 
+                            tower.Type, skillIndex, tostring(targetPos)))
+                    end
+                end
             end
         end
         return originalNamecall(self, ...)
     end)
-
-    print("Moving Skill Recorder hooks installed successfully!")
 end
 
--- Initialize
-if TowerClass then
-    setupMovingSkillHooks()
+-- Khởi động recorder
+if hookfunction and hookmetamethod then
+    hookSkillUsage()
+    print("Moving Skill Recorder đã khởi động! Đang ghi lại các skill di chuyển...")
 else
-    warn("Could not load TowerClass - moving skills won't be recorded")
+    warn("Không thể khởi động recorder do thiếu hàm hook")
 end
 
 return {
-    Setup = setupMovingSkillHooks,
-    Config = MOVING_SKILL_TOWERS
+    Config = MOVING_SKILL_TOWERS,
+    OutputPath = outputPath
 }
