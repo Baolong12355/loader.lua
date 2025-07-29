@@ -139,39 +139,94 @@ local function setupMovingSkillHook()
     local TowerUseAbilityRequest = ReplicatedStorage.Remotes:WaitForChild("TowerUseAbilityRequest")
     print("🔍 TowerUseAbilityRequest found:", TowerUseAbilityRequest)
     
-    -- Hook namecall method (đơn giản hơn và ổn định hơn)
+    -- Hook InvokeServer trực tiếp (giống recorder.lua)
+    local oldInvokeServer = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
+        local args = {...}
+        local hash, skillIndex, targetPos = args[1], args[2], args[3]
+        
+        -- DEBUG: In ra tất cả skill calls
+        print("🔧 Skill call detected:", hash, skillIndex, targetPos and "with pos" or "no pos")
+        
+        -- Lấy tower type
+        local towerType = getTowerTypeFromHash(hash)
+        print("🏗️ Tower type:", towerType)
+        
+        -- Kiểm tra moving skill
+        local isMoving = isMovingSkill(towerType, skillIndex)
+        print("🎯 Is moving skill:", isMoving)
+        
+        -- GỌI FUNCTION GỐC TRƯỚC (quan trọng!)
+        local result = oldInvokeServer(self, ...)
+        
+        -- XỬ LÝ SAU KHI GỌI GỐC
+        if towerType and isMoving and targetPos then
+            print("✅ Recording moving skill...")
+            
+            -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
+            if _G and _G.TDX_REBUILD_RUNNING then
+                print("⏸️ Skipped due to rebuild running")
+                return result
+            end
+            -- ==================================================
+            
+            local currentWave, currentTime = getCurrentWaveAndTime()
+            print("📊 Wave/Time:", currentWave, currentTime)
+            
+            -- Lấy vị trí tower
+            local towerPos = nil
+            if TowerClass and TowerClass.GetTowers then
+                local towers = TowerClass.GetTowers()
+                local tower = towers[hash]
+                if tower then
+                    towerPos = GetTowerPosition(tower)
+                    print("📍 Tower position:", towerPos)
+                end
+            end
+            
+            local entry = {
+                TowerMoving = towerPos and towerPos.X or 0,
+                SkillIndex = skillIndex,
+                Location = string.format("%s, %s, %s", targetPos.X, targetPos.Y, targetPos.Z),
+                Wave = currentWave,
+                Time = convertTimeToNumber(currentTime)
+            }
+            
+            table.insert(recordedMovingSkills, entry)
+            updateJsonFile()
+            
+            print("🎯 ✅ Đã ghi moving skill: " .. towerType .. " skill " .. skillIndex)
+            print("📄 Total entries:", #recordedMovingSkills)
+        end
+        
+        -- Return kết quả từ function gốc
+        return result
+    end)
+
+    -- Hook namecall method (backup)
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         if checkcaller() then return oldNamecall(self, ...) end
         
         local method = getnamecallmethod()
-        if (method == "InvokeServer" or method == "FireServer") and self == TowerUseAbilityRequest then
+        if method == "InvokeServer" and self == TowerUseAbilityRequest then
             local args = {...}
             local hash, skillIndex, targetPos = args[1], args[2], args[3]
             
-            -- DEBUG: In ra tất cả skill calls
-            print("🔧 Skill call detected:", hash, skillIndex, targetPos and "with pos" or "no pos")
-            
             -- Lấy tower type
             local towerType = getTowerTypeFromHash(hash)
-            print("🏗️ Tower type:", towerType)
             
-            -- Kiểm tra moving skill
-            local isMoving = isMovingSkill(towerType, skillIndex)
-            print("🎯 Is moving skill:", isMoving)
+            -- GỌI FUNCTION GỐC TRƯỚC
+            local result = oldNamecall(self, ...)
             
-            if towerType and isMoving and targetPos then
-                print("✅ Recording moving skill...")
-                
+            -- XỬ LÝ SAU KHI GỌI GỐC
+            if towerType and isMovingSkill(towerType, skillIndex) and targetPos then
                 -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
                 if _G and _G.TDX_REBUILD_RUNNING then
-                    print("⏸️ Skipped due to rebuild running")
-                    return oldNamecall(self, ...)
+                    return result
                 end
                 -- ==================================================
                 
                 local currentWave, currentTime = getCurrentWaveAndTime()
-                print("📊 Wave/Time:", currentWave, currentTime)
                 
                 -- Lấy vị trí tower
                 local towerPos = nil
@@ -180,7 +235,6 @@ local function setupMovingSkillHook()
                     local tower = towers[hash]
                     if tower then
                         towerPos = GetTowerPosition(tower)
-                        print("📍 Tower position:", towerPos)
                     end
                 end
                 
@@ -195,12 +249,10 @@ local function setupMovingSkillHook()
                 table.insert(recordedMovingSkills, entry)
                 updateJsonFile()
                 
-                print("🎯 ✅ Đã ghi moving skill: " .. towerType .. " skill " .. skillIndex)
-                print("📄 Total entries:", #recordedMovingSkills)
+                print("🎯 Đã ghi moving skill: " .. towerType .. " skill " .. skillIndex)
             end
             
-            -- Return kết quả gốc
-            return oldNamecall(self, ...)
+            return result
         end
         
         return oldNamecall(self, ...)
