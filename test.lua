@@ -463,8 +463,11 @@ local function setupHooks()
     -- Hook InvokeServer
     local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
         local args = {...}
+        -- Gọi server TRƯỚC khi xử lý để đảm bảo skill được thực thi
+        local result = oldInvokeServer(self, ...)
+        -- Chỉ ghi nhận sau khi skill đã được thực thi thành công
         handleRemote(self.Name, args)
-        return oldInvokeServer(self, ...)
+        return result
     end)
 
     -- Hook namecall
@@ -472,9 +475,17 @@ local function setupHooks()
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         if checkcaller() then return oldNamecall(self, ...) end
         local method = getnamecallmethod()
-        if method == "FireServer" or method == "InvokeServer" then
+        if method == "FireServer" then
             local args = {...}
             handleRemote(self.Name, args)
+            return oldNamecall(self, ...)
+        elseif method == "InvokeServer" then
+            local args = {...}
+            -- Gọi server TRƯỚC khi xử lý để đảm bảo skill được thực thi
+            local result = oldNamecall(self, ...)
+            -- Chỉ ghi nhận sau khi skill đã được thực thi thành công
+            handleRemote(self.Name, args)
+            return result
         end
         return oldNamecall(self, ...)
     end)
@@ -533,4 +544,4 @@ print("✅ TDX Recorder với Moving Skill Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🚁 Hỗ trợ moving skill cho: Helicopter (skill 1,3), Cryo Helicopter (skill 1,3), Jet Trooper (skill 1)")
 print("📊 Moving skill sẽ được ghi với thông tin Wave và Time")
-print("🔒 Hook an toàn với return value cho RemoteFunction")
+print("🔒 Hook an toàn - Skill được thực thi TRƯỚC khi ghi nhận")
