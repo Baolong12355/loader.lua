@@ -19,9 +19,9 @@ end)
 
 -- Cấu hình các tower và skill cần ghi lại
 local MOVING_SKILL_CONFIG = {
-    ["Helicopter"] = {1, 3},        -- Skill 1 và 3
-    ["Cryo Helicopter"] = {1, 3},   -- Skill 1 và 3  
-    ["Jet Trooper"] = {1}           -- Chỉ skill 1
+    ["Helicopter"] = {1, 3},        -- Skill 1 (có vector), skill 3 (không có vector)
+    ["Cryo Helicopter"] = {1, 3},   -- Skill 1 (có vector), skill 3 (không có vector)
+    ["Jet Trooper"] = {1}           -- Skill 1 (có vector)
 }
 
 -- File output và dữ liệu
@@ -127,6 +127,20 @@ local function getTowerInfo(hash)
     return towerType, towerX
 end
 
+-- Lấy vị trí hiện tại của tower (để ghi lại cho skill không có vector)
+local function getTowerCurrentPosition(hash)
+    if not TowerClass then return nil end
+    local towers = TowerClass.GetTowers()
+    local tower = towers[hash]
+    if not tower then return nil end
+    
+    local success, pos = pcall(function() return tower:GetPosition() end)
+    if success and typeof(pos) == "Vector3" then
+        return pos
+    end
+    return nil
+end
+
 -- Ghi lại moving skill
 local function recordMovingSkill(hash, skillIndex, targetPos)
     -- Skip nếu đang rebuild
@@ -152,14 +166,31 @@ local function recordMovingSkill(hash, skillIndex, targetPos)
     -- Lấy wave và time
     local currentWave, currentTime = getCurrentWaveAndTime()
     
+    -- Xử lý position - nếu không có targetPos thì dùng vị trí hiện tại của tower
+    local locationStr
+    if targetPos and typeof(targetPos) == "Vector3" then
+        locationStr = string.format("%s, %s, %s", 
+            tostring(targetPos.X), 
+            tostring(targetPos.Y), 
+            tostring(targetPos.Z))
+    else
+        -- Skill không có vector (như Helicopter skill 3) - dùng vị trí hiện tại
+        local currentPos = getTowerCurrentPosition(hash)
+        if currentPos then
+            locationStr = string.format("%s, %s, %s", 
+                tostring(currentPos.X), 
+                tostring(currentPos.Y), 
+                tostring(currentPos.Z))
+        else
+            locationStr = "0, 0, 0" -- Fallback
+        end
+    end
+    
     -- Tạo entry
     local entry = {
         TowerMoving = towerX,
         SkillIndex = skillIndex,
-        Location = string.format("%s, %s, %s", 
-            tostring(targetPos.X), 
-            tostring(targetPos.Y), 
-            tostring(targetPos.Z)),
+        Location = locationStr,
         Wave = currentWave,
         Time = convertTimeToNumber(currentTime)
     }
@@ -167,24 +198,34 @@ local function recordMovingSkill(hash, skillIndex, targetPos)
     table.insert(recordedActions, entry)
     updateJsonFile()
     
-    print(string.format("✅ [Moving Skill] %s (X: %s) | Skill: %d | Wave: %s",
-        towerType, tostring(towerX), skillIndex, currentWave or "N/A"))
+    print(string.format("✅ [Moving Skill] %s (X: %s) | Skill: %d | Location: %s | Wave: %s",
+        towerType, tostring(towerX), skillIndex, locationStr, currentWave or "N/A"))
 end
 
 -- Biến lưu hàm gốc
 local originalInvokeServer
 
--- Hook function - Sử dụng cấu trúc giống script hoạt động của bạn
+-- Hook function - Hook thô trước, xử lý sau
 local function setupAbilityHook()
     if TowerUseAbilityRequest:IsA("RemoteFunction") then
         originalInvokeServer = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
             local args = {...}
             
-            -- Ghi lại moving skill nếu có Vector3 position
-            if #args >= 3 and typeof(args[1]) == "number" and typeof(args[2]) == "number" and typeof(args[3]) == "Vector3" then
-                recordMovingSkill(args[1], args[2], args[3])
+            -- Hook thô - in ra console để debug
+            print(string.format("🔍 [Raw Hook] Hash: %s | Skill: %s | Args count: %d", 
+                tostring(args[1]), tostring(args[2]), #args))
+            if args[3] then
+                print(string.format("   Arg3 type: %s | Value: %s", typeof(args[3]), tostring(args[3])))
             end
             
+            -- Xử lý ghi lại skill
+            if #args >= 2 and typeof(args[1]) == "number" and typeof(args[2]) == "number" then
+                -- args[3] có thể là Vector3 hoặc nil/khác
+                local targetPos = (typeof(args[3]) == "Vector3") and args[3] or nil
+                recordMovingSkill(args[1], args[2], targetPos)
+            end
+            
+            -- Trả về kết quả gốc
             return originalInvokeServer(self, ...)
         end)
     end
@@ -195,9 +236,17 @@ local function setupAbilityHook()
         if getnamecallmethod() == "InvokeServer" and self == TowerUseAbilityRequest then
             local args = {...}
             
-            -- Ghi lại moving skill nếu có Vector3 position  
-            if #args >= 3 and typeof(args[1]) == "number" and typeof(args[2]) == "number" and typeof(args[3]) == "Vector3" then
-                recordMovingSkill(args[1], args[2], args[3])
+            -- Hook thô - in ra console để debug
+            print(string.format("🔸 [Namecall Hook] Hash: %s | Skill: %s | Args count: %d", 
+                tostring(args[1]), tostring(args[2]), #args))
+            if args[3] then
+                print(string.format("   Arg3 type: %s | Value: %s", typeof(args[3]), tostring(args[3])))
+            end
+            
+            -- Xử lý ghi lại skill
+            if #args >= 2 and typeof(args[1]) == "number" and typeof(args[2]) == "number" then
+                local targetPos = (typeof(args[3]) == "Vector3") and args[3] or nil
+                recordMovingSkill(args[1], args[2], targetPos)
             end
         end
         return originalNamecall(self, ...)
@@ -209,5 +258,8 @@ preserveExistingData()
 setupAbilityHook()
 
 print("✅ TDX Moving Skill Recorder Hook đã hoạt động!")
-print("🎯 Đang theo dõi: Helicopter (skill 1,3), Cryo Helicopter (skill 1,3), Jet Trooper (skill 1)")
+print("🎯 Đang theo dõi:")
+print("   - Helicopter: skill 1 (có vector), skill 3 (không vector)")
+print("   - Cryo Helicopter: skill 1 (có vector), skill 3 (không vector)")  
+print("   - Jet Trooper: skill 1 (có vector)")
 print("📁 Dữ liệu sẽ được ghi vào: " .. outJson)
