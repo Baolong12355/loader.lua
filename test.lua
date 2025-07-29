@@ -215,4 +215,4 @@ setupMovingSkillHook()
 
 print("✅ TDX Moving Skill Recorder đã hoạt động!")
 print("📁 Dữ liệu moving skills sẽ được ghi vào: " .. outJson)
-print("🎯 Sẽ ghi lại: Helicopter (skill 1,3), Cryo Helicopter (skill 1), Jet Trooper (skill 1)")f
+print("🎯 Sẽ ghi lại: Helicopter (skill 1,3), Cryo Helicopter (skill 1), Jet Trooper (skill 1)")
