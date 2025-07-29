@@ -2,14 +2,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
-local PlayerScripts = player:WaitForChild("PlayerScripts")
 
--- Lấy các service cần thiết
-local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local TowerUseAbilityRequest = Remotes:WaitForChild("TowerUseAbilityRequest")
+-- Lấy remote
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local TowerUseAbilityRequest = remotes:WaitForChild("TowerUseAbilityRequest")
 
--- Lấy TowerClass để xác định loại tower
+-- Lấy TowerClass
 local TowerClass
+local PlayerScripts = player:WaitForChild("PlayerScripts")
 pcall(function()
     local client = PlayerScripts:WaitForChild("Client")
     local gameClass = client:WaitForChild("GameClass")
@@ -24,57 +24,43 @@ local MOVING_SKILL_CONFIG = {
     ["Jet Trooper"] = {1}           -- Chỉ skill 1
 }
 
--- File output
+-- File output và dữ liệu
 local outJson = "tdx/macros/recorder_output.json"
 local recordedActions = {}
 
--- Tạo thư mục nếu chưa tồn tại
+-- Tạo thư mục
 if makefolder then
     pcall(makefolder, "tdx")
     pcall(makefolder, "tdx/macros")
 end
 
---==============================================================================
---=                           HÀM TIỆN ÍCH (HELPERS)                           =
---==============================================================================
-
--- Hàm ghi file an toàn
+-- Hàm tiện ích
 local function safeWriteFile(path, content)
     if writefile then
-        local success, err = pcall(writefile, path, content)
-        if not success then
-            warn("Lỗi khi ghi file: " .. tostring(err))
-        end
+        pcall(writefile, path, content)
     end
 end
 
--- Hàm đọc file an toàn
 local function safeReadFile(path)
     if isfile and isfile(path) and readfile then
         local success, content = pcall(readfile, path)
-        if success then
-            return content
-        end
+        if success then return content end
     end
     return ""
 end
 
--- Lấy thông tin wave và thời gian hiện tại
 local function getCurrentWaveAndTime()
     local playerGui = player:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return nil, nil end
-
     local interface = playerGui:FindFirstChild("Interface")
     if not interface then return nil, nil end
     local gameInfoBar = interface:FindFirstChild("GameInfoBar")
     if not gameInfoBar then return nil, nil end
-
     local wave = gameInfoBar.Wave.WaveText.Text
     local time = gameInfoBar.TimeLeft.TimeLeftText.Text
     return wave, time
 end
 
--- Chuyển đổi chuỗi thời gian (vd: "1:23") thành số (vd: 123)
 local function convertTimeToNumber(timeStr)
     if not timeStr then return nil end
     local mins, secs = timeStr:match("(%d+):(%d+)")
@@ -84,7 +70,6 @@ local function convertTimeToNumber(timeStr)
     return nil
 end
 
--- Cập nhật file JSON với dữ liệu mới
 local function updateJsonFile()
     if not HttpService then return end
     local jsonLines = {}
@@ -101,11 +86,10 @@ local function updateJsonFile()
     safeWriteFile(outJson, finalJson)
 end
 
--- Đọc file JSON hiện có để bảo toàn dữ liệu
+-- Đọc dữ liệu hiện có
 local function preserveExistingData()
     local content = safeReadFile(outJson)
     if content == "" then return end
-
     content = content:gsub("^%[%s*", ""):gsub("%s*%]$", "")
     for line in content:gmatch("[^\r\n]+") do
         line = line:gsub(",$", "")
@@ -121,53 +105,41 @@ local function preserveExistingData()
     end
 end
 
--- Lấy loại tower từ hash
-local function getTowerTypeFromHash(hash)
-    if not TowerClass then return nil end
-    
+-- Lấy tower info
+local function getTowerInfo(hash)
+    if not TowerClass then return nil, nil end
     local towers = TowerClass.GetTowers()
     local tower = towers[hash]
-    return tower and tower.Type or nil
-end
-
--- Lấy vị trí X của tower từ hash (để tương thích với format hiện có)
-local function getTowerXFromHash(hash)
-    if not TowerClass then return nil end
+    if not tower then return nil, nil end
     
-    local towers = TowerClass.GetTowers()
-    local tower = towers[hash]
-    if not tower then return nil end
+    local towerType = tower.Type
+    local towerX = nil
     
-    -- Thử lấy vị trí spawn
     if tower.SpawnCFrame and typeof(tower.SpawnCFrame) == "CFrame" then
-        return tower.SpawnCFrame.Position.X
+        towerX = tower.SpawnCFrame.Position.X
+    else
+        local success, pos = pcall(function() return tower:GetPosition() end)
+        if success and typeof(pos) == "Vector3" then
+            towerX = pos.X
+        end
     end
     
-    -- Thử lấy vị trí hiện tại
-    local success, pos = pcall(function() return tower:GetPosition() end)
-    if success and typeof(pos) == "Vector3" then
-        return pos.X
-    end
-    
-    return nil
+    return towerType, towerX
 end
 
--- Xử lý và ghi lại moving skill
+-- Ghi lại moving skill
 local function recordMovingSkill(hash, skillIndex, targetPos)
-    -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
-    if _G and _G.TDX_REBUILD_RUNNING then
-        return
-    end
-    -- ==================================================
+    -- Skip nếu đang rebuild
+    if _G and _G.TDX_REBUILD_RUNNING then return end
     
-    local towerType = getTowerTypeFromHash(hash)
-    if not towerType then return end
+    local towerType, towerX = getTowerInfo(hash)
+    if not towerType or not towerX then return end
     
-    -- Kiểm tra xem có phải tower cần ghi lại không
+    -- Kiểm tra tower có cần ghi lại không
     local skillsToRecord = MOVING_SKILL_CONFIG[towerType]
     if not skillsToRecord then return end
     
-    -- Kiểm tra xem skill index có trong danh sách cần ghi lại không
+    -- Kiểm tra skill index
     local shouldRecord = false
     for _, allowedSkill in ipairs(skillsToRecord) do
         if skillIndex == allowedSkill then
@@ -175,16 +147,12 @@ local function recordMovingSkill(hash, skillIndex, targetPos)
             break
         end
     end
-    
     if not shouldRecord then return end
     
-    -- Lấy thông tin wave và time
+    -- Lấy wave và time
     local currentWave, currentTime = getCurrentWaveAndTime()
-    local towerX = getTowerXFromHash(hash)
     
-    if not towerX or not targetPos then return end
-    
-    -- Tạo entry theo format yêu cầu
+    -- Tạo entry
     local entry = {
         TowerMoving = towerX,
         SkillIndex = skillIndex,
@@ -196,65 +164,49 @@ local function recordMovingSkill(hash, skillIndex, targetPos)
         Time = convertTimeToNumber(currentTime)
     }
     
-    -- Thêm vào recordedActions và cập nhật file
     table.insert(recordedActions, entry)
     updateJsonFile()
     
-    print(string.format("✅ [Moving Skill Recorded] %s (X: %s) | Skill: %d | Pos: %s | Wave: %s | Time: %s",
-        towerType, tostring(towerX), skillIndex, entry.Location, 
-        currentWave or "N/A", currentTime or "N/A"))
+    print(string.format("✅ [Moving Skill] %s (X: %s) | Skill: %d | Wave: %s",
+        towerType, tostring(towerX), skillIndex, currentWave or "N/A"))
 end
 
---==============================================================================
---=                      SETUP HOOKS                                           =
---==============================================================================
+-- Biến lưu hàm gốc
+local originalInvokeServer
 
-local function setupMovingSkillHooks()
-    if not hookfunction or not hookmetamethod or not checkcaller then
-        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
-        return
-    end
-
-    -- Hook InvokeServer cho TowerUseAbilityRequest
+-- Hook function - Sử dụng cấu trúc giống script hoạt động của bạn
+local function setupAbilityHook()
     if TowerUseAbilityRequest:IsA("RemoteFunction") then
-        local originalInvokeServer = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
+        originalInvokeServer = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
             local args = {...}
             
-            -- Ghi lại moving skill nếu cần
+            -- Ghi lại moving skill nếu có Vector3 position
             if #args >= 3 and typeof(args[1]) == "number" and typeof(args[2]) == "number" and typeof(args[3]) == "Vector3" then
                 recordMovingSkill(args[1], args[2], args[3])
             end
             
-            -- Trả về kết quả gốc
             return originalInvokeServer(self, ...)
         end)
     end
     
-    -- Hook namecall để bắt mọi trường hợp
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if not checkcaller() and getnamecallmethod() == "InvokeServer" and self == TowerUseAbilityRequest then
+    -- Hook namecall
+    local originalNamecall
+    originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        if getnamecallmethod() == "InvokeServer" and self == TowerUseAbilityRequest then
             local args = {...}
             
-            -- Ghi lại moving skill nếu cần
+            -- Ghi lại moving skill nếu có Vector3 position  
             if #args >= 3 and typeof(args[1]) == "number" and typeof(args[2]) == "number" and typeof(args[3]) == "Vector3" then
                 recordMovingSkill(args[1], args[2], args[3])
             end
         end
-        
-        return oldNamecall(self, ...)
+        return originalNamecall(self, ...)
     end)
 end
 
---==============================================================================
---=                         KHỞI TẠO                                           =
---==============================================================================
-
--- Bảo toàn dữ liệu hiện có
+-- Khởi tạo
 preserveExistingData()
-
--- Thiết lập hooks
-setupMovingSkillHooks()
+setupAbilityHook()
 
 print("✅ TDX Moving Skill Recorder Hook đã hoạt động!")
 print("🎯 Đang theo dõi: Helicopter (skill 1,3), Cryo Helicopter (skill 1,3), Jet Trooper (skill 1)")
