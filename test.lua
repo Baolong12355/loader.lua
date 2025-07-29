@@ -1,9 +1,9 @@
--- Recorder Moving Skill (TDX)
--- Log skill di chuyển cho Helio (1,3), Cryo Helio (1), Jet Trooper (1)
--- Format record:
--- towermoving=<hash>
+-- Script: recorder_moving_skill.lua
+-- Mục đích: Ghi log các lần sử dụng skill di chuyển (moving skill) cho các tower Helio, Cryo Helio, Jet Trooper (skill 1,3), Cryo Helio (skill 1)
+-- Format xuất ra:
+-- towermoving = <hash>
 -- <skill_index>
--- location=<pos>
+-- location = <pos>
 -- wave
 -- time
 
@@ -11,33 +11,18 @@ local replStorage = game:GetService("ReplicatedStorage")
 local remotes = replStorage:WaitForChild("Remotes")
 local TowerUseAbilityRequest = remotes:WaitForChild("TowerUseAbilityRequest")
 local localPlayer = game:GetService("Players").LocalPlayer
+local HttpService = game:GetService("HttpService")
 
--- Cấu hình skill cần ghi
-local MOVING_SKILL = {
+-- Cấu hình các tower và skill index cần log
+local TOWER_MOVING_SKILL = {
     ["Helicopter"] = {1, 3},
     ["Cryo Helicopter"] = {1},
     ["Jet Trooper"] = {1},
 }
-local LOG_PATH = "tdx/moving_skill_log.txt"
 
--- Xác định loại tower từ hash
-local function getTowerTypeByHash(hash)
-    local TowerClass
-    pcall(function()
-        local ps = localPlayer:FindFirstChild("PlayerScripts")
-        local client = ps and ps:FindFirstChild("Client")
-        local gameClass = client and client:FindFirstChild("GameClass")
-        local towerModule = gameClass and gameClass:FindFirstChild("TowerClass")
-        TowerClass = towerModule and require(towerModule)
-    end)
-    if TowerClass and TowerClass.GetTowers then
-        local towers = TowerClass.GetTowers()
-        local tw = towers and towers[hash]
-        return tw and (tw.Type or tw.Name)
-    end
-end
+-- File log (có thể chỉnh lại đường dẫn)
+local outFile = "tdx/moving_skill_log.txt"
 
--- Lấy wave và time hiện tại
 local function getWaveAndTime()
     local gui = localPlayer:FindFirstChildOfClass("PlayerGui")
     if not gui then return "?", "?" end
@@ -53,7 +38,6 @@ local function getWaveAndTime()
     return waveText and waveText.Text or "?", timeText and timeText.Text or "?"
 end
 
--- Ghi log
 local function writeLog(hash, skillIdx, pos, wave, time)
     local logLine = (
         "towermoving=" .. tostring(hash) .. "\n" ..
@@ -63,21 +47,41 @@ local function writeLog(hash, skillIdx, pos, wave, time)
         "time=" .. tostring(time) .. "\n\n"
     )
     if appendfile then
-        appendfile(LOG_PATH, logLine)
+        appendfile(outFile, logLine)
     else
         print("[MovingSkillLog]", logLine)
     end
 end
 
--- # HOOK invokeServer/namecall và cache/log ngay khi gọi, không delay xác nhận!
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+-- Lấy type tower theo hash (dựa vào TowerClass nếu có)
+local function getTowerTypeByHash(hash)
+    local success, TowerClass = pcall(function()
+        local ps = localPlayer:FindFirstChild("PlayerScripts")
+        local client = ps and ps:FindFirstChild("Client")
+        local gameClass = client and client:FindFirstChild("GameClass")
+        local towerModule = gameClass and gameClass:FindFirstChild("TowerClass")
+        return require(towerModule)
+    end)
+    if success and TowerClass and TowerClass.GetTowers then
+        local towers = TowerClass.GetTowers()
+        local tower = towers and towers[hash]
+        if tower then return tower.Type or tower.Name end
+    end
+    return nil
+end
+
+-- Hook namecall để log khi sử dụng moving skill
+local originalNamecall
+originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     if getnamecallmethod() == "InvokeServer" and self == TowerUseAbilityRequest and not checkcaller() then
         local args = {...}
-        local hash, skillIdx, pos = args[1], args[2], args[3]
+        local hash = args[1]
+        local skillIdx = args[2]
+        local pos = args[3]
+        -- Xác định tower type & có phải skill di chuyển không
         local ttype = getTowerTypeByHash(hash)
-        if ttype and MOVING_SKILL[ttype] then
-            for _, idx in ipairs(MOVING_SKILL[ttype]) do
+        if ttype and TOWER_MOVING_SKILL[ttype] then
+            for _, idx in ipairs(TOWER_MOVING_SKILL[ttype]) do
                 if skillIdx == idx then
                     local wave, time = getWaveAndTime()
                     writeLog(hash, skillIdx, pos, wave, time)
@@ -86,7 +90,7 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             end
         end
     end
-    return oldNamecall(self, ...)
+    return originalNamecall(self, ...)
 end)
 
-print("✅ Recorder Moving Skill HOOKED - Ghi log skill di chuyển Helio/Cryo Helio/Jet Trooper (dùng namecall, record tức thì)")
+print("✅ Recorder Moving Skill đã hoạt động - Sẽ log các lần dùng skill di chuyển của Helio, Cryo Helio, Jet Trooper!")
