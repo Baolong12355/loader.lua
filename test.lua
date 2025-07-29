@@ -1,27 +1,21 @@
--- Recorder Moving Skill (Axis X) cho TowerUseAbilityRequest, hook chuẩn như hook.lua của bạn
--- Chỉ ghi lại: Helio (1,3), Cryo Helio (1), Jet Trooper (1)
--- Định dạng log chuẩn cho recorder/runner: 
--- towermoving=<X>
--- <skill_index>
--- location=<x>,<y>,<z>
--- <wave>
--- <time>
+-- Recorder Moving Skill (Axis X, chuẩn hookfunction + namecall như main)
+-- Chỉ log Helio (1,3), Cryo Helio (1), Jet Trooper (1)
+-- Định dạng log chuẩn recorder/runner
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local localPlayer = Players.LocalPlayer
-local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local TowerUseAbilityRequest = Remotes:WaitForChild("TowerUseAbilityRequest")
 
 local outFile = "tdx/moving_skill_log.txt"
 
--- Các tower và index skill cần log
 local TOWER_MOVING_SKILL = {
     ["Helicopter"] = {1, 3},
     ["Cryo Helicopter"] = {1},
     ["Jet Trooper"] = {1},
 }
 
--- Lấy wave/time hiện tại
 local function getWaveAndTime()
     local gui = localPlayer:FindFirstChildOfClass("PlayerGui")
     if not gui then return "?", "?" end
@@ -37,7 +31,6 @@ local function getWaveAndTime()
     return waveText and waveText.Text or "?", timeText and timeText.Text or "?"
 end
 
--- Serialize vị trí thành x,y,z
 local function serializePos(pos)
     if typeof(pos) == "Vector3" then
         return string.format("%0.6f,%0.6f,%0.6f", pos.X, pos.Y, pos.Z)
@@ -48,7 +41,6 @@ local function serializePos(pos)
     return tostring(pos)
 end
 
--- Lấy tower type và object từ hash
 local function getTowerTypeAndObjByHash(hash)
     local TowerClass
     local success = pcall(function()
@@ -68,7 +60,6 @@ local function getTowerTypeAndObjByHash(hash)
     return nil
 end
 
--- Lấy trục X (axis X) của tower từ hash
 local function getAxisXByHash(hash)
     local _, tower = getTowerTypeAndObjByHash(hash)
     if tower then
@@ -86,7 +77,6 @@ local function getAxisXByHash(hash)
     return "?"
 end
 
--- Ghi file đúng format
 local function writeLog(axisX, skillIdx, pos, wave, time)
     local logLine =
         "towermoving=" .. tostring(axisX) .. "\n" ..
@@ -101,10 +91,31 @@ local function writeLog(axisX, skillIdx, pos, wave, time)
     end
 end
 
--- HOOK theo chuẩn hook.lua: chỉ hook namecall, không dùng hookfunction lên Remote
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    if not checkcaller() 
+-- HOOKFUNCTION lên RemoteFunction để giữ đúng logic game!
+local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+    -- Chỉ log, không can thiệp trả về
+    if self == TowerUseAbilityRequest then
+        local args = {...}
+        local hash, skillIdx, pos = args[1], args[2], args[3]
+        local ttype = getTowerTypeAndObjByHash(hash)
+        if ttype and TOWER_MOVING_SKILL[ttype] then
+            for _, idx in ipairs(TOWER_MOVING_SKILL[ttype]) do
+                if skillIdx == idx then
+                    local axisX = getAxisXByHash(hash)
+                    local wave, time = getWaveAndTime()
+                    writeLog(axisX, skillIdx, pos, wave, time)
+                    break
+                end
+            end
+        end
+    end
+    return oldInvokeServer(self, ...)
+end)
+
+-- HOOKMETAMETHOD namecall như trong hook.lua
+local oldNameCall
+oldNameCall = hookmetamethod(game, "__namecall", function(self, ...)
+    if not checkcaller()
         and self == TowerUseAbilityRequest
         and getnamecallmethod() == "InvokeServer"
     then
@@ -122,7 +133,7 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             end
         end
     end
-    return oldNamecall(self, ...)
+    return oldNameCall(self, ...)
 end)
 
-print("✅ Recorder Moving Skill (axis X) HOOK chuẩn runner/recorder đã hoạt động!")
+print("✅ Recorder Moving Skill (axis X, hookfunction + namecall CHUẨN main) đã hoạt động!")
