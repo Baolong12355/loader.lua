@@ -271,25 +271,6 @@ if TowerUseAbilityRequest and TowerUseAbilityRequest.InvokeServer and not TowerU
     end
 end
 
--- ========== REMOTE DEBUG HOOK (MOVING SKILL ONLY) ==========
--- (Chỉ log moving skill, format hash,skill,x,y,z, không log các tower khác)
-local function movingSkillRemoteDebugHook()
-    local oldInvokeServerDbg = TowerUseAbilityRequest.InvokeServer
-    TowerUseAbilityRequest.InvokeServer = function(self, hash, skill, pos, targetHash, ...)
-        local towers = TowerClass and TowerClass.GetTowers and TowerClass.GetTowers() or {}
-        local tower = towers and towers[hash]
-        if tower and movingTowerSkills[tower.Type] and movingTowerSkills[tower.Type][skill] then
-            if typeof(pos) == "Vector3" then
-                local entry = string.format("%s,%s,%.8f,%.8f,%.8f", tostring(hash), tostring(skill), pos.X, pos.Y, pos.Z)
-                print("[MOVING SKILL HOOK]", entry)
-            end
-        end
-        return oldInvokeServerDbg(self, hash, skill, pos, targetHash, ...)
-    end
-end
--- Uncomment this to enable debug remote log:
--- movingSkillRemoteDebugHook()
-
 -- ========== RECORDER HOOKS ==========
 
 local function setPending(typeStr, code, hash)
