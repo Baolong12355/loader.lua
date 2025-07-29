@@ -64,7 +64,7 @@ end
 
 -- Read existing recorded actions
 local function readRecordedActions()
-    if not isfile or not readfile or not isfile(outJson) then return {} end
+    if not isfile or not isfile(outJson) or not readfile then return {} end
     
     local content = readfile(outJson)
     if content == "" then return {} end
@@ -117,11 +117,11 @@ local function recordMovingSkill(hash, index, position)
     -- Get current wave and time
     local wave, time = getCurrentWaveAndTime()
     
-    -- Create the action record
+    -- Create the action record with X position only
     local action = {
-        TowerMoving = hash,
+        TowerMoving = position.X,  -- Using X position as requested
         SkillIndex = index,
-        Location = string.format("%s, %s, %s", position.X, position.Y, position.Z),
+        Location = string.format("%s, %s, %s", position.X, position.Y, position.Z),  -- Still keep full position for reference
         Wave = wave,
         Time = convertTimeToNumber(time)
     }
@@ -131,8 +131,8 @@ local function recordMovingSkill(hash, index, position)
     table.insert(recordedActions, action)
     updateJsonFile(recordedActions)
     
-    print(string.format("📢 [Moving Skill Recorded] %s (Hash: %d) | Skill %d | Position: %s", 
-        tower.Type, hash, index, tostring(position)))
+    print(string.format("📢 [Moving Skill Recorded] %s (Hash: %d) | Skill %d | X Position: %.2f", 
+        tower.Type, hash, index, position.X))
 end
 
 -- Hook setup
@@ -141,7 +141,7 @@ local function setupHooks()
     local originalNamecall
     
     -- Hook InvokeServer directly
-    if TowerUseAbilityRequest:IsA("RemoteFunction") then
+    if typeof(TowerUseAbilityRequest) == "Instance" then
         originalInvokeServer = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
             local args = {...}
             if self == TowerUseAbilityRequest and #args >= 3 and typeof(args[3]) == "Vector3" then
@@ -153,7 +153,7 @@ local function setupHooks()
     
     -- Hook namecall for all cases
     originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if getnamecallmethod() == "InvokeServer" and self == TowerUseAbilityRequest then
+        if getnamecallmethod() == "InvokeServer" and typeof(self) == "Instance" and self.Name == "TowerUseAbilityRequest" then
             local args = {...}
             if #args >= 3 and typeof(args[3]) == "Vector3" then
                 recordMovingSkill(args[1], args[2], args[3])
@@ -165,20 +165,34 @@ end
 
 -- Initialize
 local TowerClass
-pcall(function()
-    local PlayerScripts = player:WaitForChild("PlayerScripts")
-    local client = PlayerScripts:WaitForChild("Client")
-    local gameClass = client:WaitForChild("GameClass")
-    local towerModule = gameClass:WaitForChild("TowerClass")
-    TowerClass = require(towerModule)
-end)
+local TowerUseAbilityRequest
 
-if not TowerClass then
-    warn("❌ Failed to load TowerClass - moving skills won't be recorded")
-    return
+local function initialize()
+    -- Load TowerClass
+    pcall(function()
+        local PlayerScripts = player:WaitForChild("PlayerScripts")
+        local client = PlayerScripts:WaitForChild("Client")
+        local gameClass = client:WaitForChild("GameClass")
+        local towerModule = gameClass:WaitForChild("TowerClass")
+        TowerClass = require(towerModule)
+    end)
+
+    if not TowerClass then
+        warn("❌ Failed to load TowerClass - moving skills won't be recorded")
+        return false
+    end
+
+    -- Get TowerUseAbilityRequest remote
+    TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
+    if not TowerUseAbilityRequest then
+        warn("❌ Failed to find TowerUseAbilityRequest remote")
+        return false
+    end
+
+    return true
 end
 
-local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
-setupHooks()
-
-print("✅ Moving Skill Recorder activated for Helio/Cryo Helio/Jet Trooper")
+if initialize() then
+    setupHooks()
+    print("✅ Moving Skill Recorder activated for Helio/Cryo Helio/Jet Trooper")
+end
