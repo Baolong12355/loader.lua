@@ -11,7 +11,6 @@ local replStorage = game:GetService("ReplicatedStorage")
 local remotes = replStorage:WaitForChild("Remotes")
 local TowerUseAbilityRequest = remotes:WaitForChild("TowerUseAbilityRequest")
 local localPlayer = game:GetService("Players").LocalPlayer
-local HttpService = game:GetService("HttpService")
 
 -- Cấu hình các tower và skill index cần log
 local TOWER_MOVING_SKILL = {
@@ -70,15 +69,16 @@ local function getTowerTypeByHash(hash)
     return nil
 end
 
--- Hook namecall để log khi sử dụng moving skill
-local originalNamecall
-originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    if getnamecallmethod() == "InvokeServer" and self == TowerUseAbilityRequest and not checkcaller() then
+-- Đoạn sau mới là quan trọng:
+local mt = getrawmetatable(game)
+local oldNamecall = mt.__namecall
+setreadonly(mt, false)
+mt.__namecall = function(self, ...)
+    if self == TowerUseAbilityRequest and getnamecallmethod() == "InvokeServer" and not checkcaller() then
         local args = {...}
         local hash = args[1]
         local skillIdx = args[2]
         local pos = args[3]
-        -- Xác định tower type & có phải skill di chuyển không
         local ttype = getTowerTypeByHash(hash)
         if ttype and TOWER_MOVING_SKILL[ttype] then
             for _, idx in ipairs(TOWER_MOVING_SKILL[ttype]) do
@@ -90,7 +90,8 @@ originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             end
         end
     end
-    return originalNamecall(self, ...)
-end)
+    return oldNamecall(self, ...)
+end
+setreadonly(mt, true)
 
 print("✅ Recorder Moving Skill đã hoạt động - Sẽ log các lần dùng skill di chuyển của Helio, Cryo Helio, Jet Trooper!")
