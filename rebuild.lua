@@ -1,7 +1,3 @@
--- TDX Macro Rebuild (No Sell, No Rebuild Sold) - Executor/loadstring ready
--- Không rebuild lại tower đã từng bị bán (theo record). Không thực hiện sell.
--- Không log hành động rebuild vào record nếu đã patch recorder (_G.TDX_REBUILD_RUNNING).
-
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -12,7 +8,7 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
 local macroPath = "tdx/macros/recorder_output.json"
 
--- Đọc file an toàn
+-- Safe file read function
 local function safeReadFile(path)
     if readfile and isfile and isfile(path) then
         local ok, res = pcall(readfile, path)
@@ -21,7 +17,7 @@ local function safeReadFile(path)
     return nil
 end
 
--- Lấy TowerClass
+-- Safe require TowerClass
 local function SafeRequire(path, timeout)
     timeout = timeout or 5
     local t0 = tick()
@@ -47,10 +43,20 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể load TowerClass!") end
 
+-- Hàm lấy vị trí chính xác của tower (dùng SpawnCFrame như runner)
+local function GetExactTowerPosition(tower)
+    if tower == nil then return nil end
+    local ok, scf = pcall(function() return tower.SpawnCFrame end)
+    if ok and scf and typeof(scf) == "CFrame" then
+        return scf.Position
+    end
+    return nil
+end
+
+-- Lấy tower theo đúng X không sai số (dùng GetExactTowerPosition, so sánh ==)
 local function GetTowerByAxis(axisX)
     for _, tower in pairs(TowerClass.GetTowers()) do
-        local pos
-        pcall(function() pos = tower:GetPosition() end)
+        local pos = GetExactTowerPosition(tower)
         if pos and pos.X == axisX then
             local hp = 1
             pcall(function() hp = tower.HealthHandler and tower.HealthHandler:GetHealth() or 1 end)
@@ -66,7 +72,26 @@ local function WaitForCash(amount)
     end
 end
 
--- Đặt lại 1 tower
+task.spawn(function()
+    while true do
+        for _, tower in pairs(TowerClass.GetTowers()) do
+            if tower.Converted == true then
+                local pos = GetExactTowerPosition(tower)
+                if pos and not soldConvertedX[pos.X] then
+                    _G.TDX_REBUILD_RUNNING = true  -- CHẶN LOG RECORDER
+                    pcall(function()
+                        Remotes.SellTower:FireServer(tower.Hash)
+                    end)
+                    _G.TDX_REBUILD_RUNNING = false
+                    soldConvertedX[pos.X] = true
+                end
+            end
+        end
+        task.wait(0.2)
+    end
+end)
+
+-- Đặt lại 1 tower (nếu đã bị convert và auto sell)
 local function PlaceTowerEntry(entry)
     local vecTab = {}
     for c in tostring(entry.TowerVector):gmatch("[^,%s]+") do table.insert(vecTab, tonumber(c)) end
@@ -77,7 +102,7 @@ local function PlaceTowerEntry(entry)
     _G.TDX_REBUILD_RUNNING = true
     local ok = pcall(function() Remotes.PlaceTower:InvokeServer(unpack(args)) end)
     _G.TDX_REBUILD_RUNNING = false
-    -- Chờ xuất hiện tower
+    -- Wait for tower to appear
     local t0 = tick()
     while tick() - t0 < 3 do
         if GetTowerByAxis(pos.X) then return true end
@@ -86,7 +111,6 @@ local function PlaceTowerEntry(entry)
     return false
 end
 
--- Nâng cấp tower
 local function UpgradeTowerEntry(entry)
     local axis = tonumber(entry.TowerUpgraded)
     local path = entry.UpgradePath
@@ -101,7 +125,6 @@ local function UpgradeTowerEntry(entry)
     return true
 end
 
--- Đổi target
 local function ChangeTargetEntry(entry)
     local axis = tonumber(entry.TowerTargetChange)
     local tower = GetTowerByAxis(axis)
@@ -114,22 +137,20 @@ local function ChangeTargetEntry(entry)
     return true
 end
 
--- Không bán tower (bỏ qua SellTowerEntry)
-
--- Hàm chính: Liên tục reload record + rebuild nếu phát hiện tower chết, không rebuild nếu đã từng bị bán
+-- Main: Continuously reload macro records and auto-rebuild towers not previously sold, auto-rebuild sell-convert
 task.spawn(function()
     local lastMacroHash = ""
     local towersByAxis = {}
     local soldAxis = {}
 
     while true do
-        -- Reload macro record nếu có thay đổi/new data
+        -- Reload macro record if there is new data
         local macroContent = safeReadFile(macroPath)
         if macroContent and #macroContent > 10 then
             local macroHash = tostring(#macroContent) .. "|" .. tostring(macroContent:sub(1,50))
             if macroHash ~= lastMacroHash then
                 lastMacroHash = macroHash
-                -- Parse lại macro file
+                -- Parse macro file
                 local ok, macro = pcall(function() return HttpService:JSONDecode(macroContent) end)
                 if ok and type(macro) == "table" then
                     towersByAxis = {}
@@ -165,18 +186,21 @@ task.spawn(function()
             end
         end
 
-        -- Rebuild nếu phát hiện tower chết, nhưng KHÔNG rebuild nếu đã từng bị bán (có trong soldAxis)
+        -- Auto-rebuild if tower is dead (or bị convert đã bị bán) và NOT in soldAxis, và nếu đã bị bán-convert thì rebuild lại
         for x, records in pairs(towersByAxis) do
             if soldAxis[x] then
-                -- Vị trí này đã từng bị bán => không rebuild lại
+                -- This position was previously sold, do not rebuild
                 continue
             end
+            -- Nếu bị bán do convert thì soldConvertedX[x] sẽ true, kiểm tra kèm trường hợp này
             local tower = GetTowerByAxis(x)
-            if not tower then
-                -- Rebuild: place + upgrade/target đúng thứ tự
+            if (not tower and not soldConvertedX[x]) or soldConvertedX[x] then
+                -- Rebuild: place + upgrade/target in correct sequence
                 for _, entry in ipairs(records) do
                     if entry.TowerPlaced then
-                        PlaceTowerEntry(entry)
+                        if PlaceTowerEntry(entry) then
+                            soldConvertedX[x] = nil -- reset convert flag nếu rebuild thành công
+                        end
                     elseif entry.UpgradePath then
                         UpgradeTowerEntry(entry)
                     elseif entry.TargetWanted then
@@ -187,8 +211,8 @@ task.spawn(function()
             end
         end
 
-        task.wait(1.5) -- Luôn reload record mới mỗi 1.5 giây
+        task.wait(1.5)
     end
 end)
 
-print("[TDX Macro Rebuild (No Sell/No Rebuild Sold/No Log)] Đã hoạt động!")
+print("[TDX Macro Auto Rebuild Recorder] Đã hoạt động (support auto sell convert & rebuild convert)!")
