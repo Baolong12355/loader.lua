@@ -435,24 +435,10 @@ local function handleRemote(name, args)
         setPending("Sell", "TDX:sellTower("..tostring(args[1])..")")
     elseif name == "ChangeQueryType" then
         setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
-    elseif name == "TowerUseAbilityRequest" then
-        -- Xử lý moving skills
-        if #args >= 3 then
-            local hash = args[1]
-            local skillIndex = args[2] 
-            local targetPos = args[3]
-            
-            if typeof(hash) == "number" and typeof(skillIndex) == "number" and typeof(targetPos) == "Vector3" then
-                local towerType = getTowerTypeFromHash(hash)
-                if towerType and isMovingSkill(towerType, skillIndex) then
-                    recordMovingSkill(hash, skillIndex, targetPos, towerType)
-                end
-            end
-        end
     end
 end
 
--- Hook các hàm remote
+-- Hook các hàm remote (giữ nguyên logic như script gốc)
 local function setupHooks()
     if not hookfunction or not hookmetamethod or not checkcaller then
         warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
@@ -465,20 +451,37 @@ local function setupHooks()
         return oldFireServer(self, ...)
     end)
 
-    -- Hook InvokeServer
+    -- Hook InvokeServer  
     local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-        -- Xử lý trước khi gọi để có return value
         handleRemote(self.Name, {...})
         return oldInvokeServer(self, ...)
     end)
 
-    -- Hook namecall
+    -- Hook namecall (sử dụng logic như script gốc của bạn)
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if checkcaller() then return oldNamecall(self, ...) end
-        local method = getnamecallmethod()
-        if method == "FireServer" or method == "InvokeServer" then
-            handleRemote(self.Name, {...})
+        if not checkcaller() then
+            local method = getnamecallmethod()
+            if method == "FireServer" or method == "InvokeServer" then
+                handleRemote(self.Name, {...})
+            end
+            
+            -- Xử lý riêng TowerUseAbilityRequest như script gốc của bạn
+            if method == "InvokeServer" and self.Name == "TowerUseAbilityRequest" then
+                local args = {...}
+                if #args >= 3 then
+                    local hash = args[1]
+                    local skillIndex = args[2] 
+                    local targetPos = args[3]
+                    
+                    if typeof(hash) == "number" and typeof(skillIndex) == "number" and typeof(targetPos) == "Vector3" then
+                        local towerType = getTowerTypeFromHash(hash)
+                        if towerType and isMovingSkill(towerType, skillIndex) then
+                            recordMovingSkill(hash, skillIndex, targetPos, towerType)
+                        end
+                    end
+                end
+            end
         end
         return oldNamecall(self, ...)
     end)
