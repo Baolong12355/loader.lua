@@ -64,11 +64,15 @@ local function safeReadFile(path)
     return ""
 end
 
--- Lấy vị trí của một tower
+-- Lấy vị trí của một tower (ưu tiên SpawnCFrame như runner)
 local function GetTowerPosition(tower)
     if not TowerClass or not tower then return nil end
 
-    -- Thử nhiều phương thức để có được vị trí chính xác
+    -- Ưu tiên lấy SpawnCFrame nếu có
+    local ok, scf = pcall(function() return tower.SpawnCFrame end)
+    if ok and scf and typeof(scf) == "CFrame" then return scf.Position end
+
+    -- Các phương án khác giữ nguyên
     local success, cframe = pcall(function() return tower.CFrame end)
     if success and typeof(cframe) == "CFrame" then return cframe.Position end
 
@@ -83,7 +87,6 @@ local function GetTowerPosition(tower)
 
     return nil
 end
-
 -- [SỬA LỖI] Lấy chi phí đặt tower dựa trên tên, sử dụng FindFirstChild
 local function GetTowerPlaceCostByName(name)
     local playerGui = player:FindFirstChildOfClass("PlayerGui")
