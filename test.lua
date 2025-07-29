@@ -34,7 +34,31 @@ if makefolder then
     pcall(makefolder, "tdx/macros")
 end
 
--- Hàm tiện ích
+-- Hàm tiện ích (sử dụng từ main.lua)
+local function serialize(value)
+    if type(value) == "table" then
+        local result = "{"
+        for k, v in pairs(value) do
+            result = result .. "[" .. serialize(k) .. "]=" .. serialize(v) .. ", "
+        end
+        if result ~= "{" then
+            result = result:sub(1, -3)
+        end
+        return result .. "}"
+    else
+        return tostring(value)
+    end
+end
+
+local function serializeArgs(...)
+    local args = {...}
+    local strArgs = {}
+    for i, v in ipairs(args) do
+        strArgs[i] = serialize(v)
+    end
+    return table.concat(strArgs, ", ")
+end
+
 local function safeWriteFile(path, content)
     if writefile then
         pcall(writefile, path, content)
@@ -127,7 +151,7 @@ local function getTowerInfo(hash)
     return towerType, towerX
 end
 
--- Lấy vị trí hiện tại của tower (để ghi lại cho skill không có vector)
+-- Lấy vị trí hiện tại của tower
 local function getTowerCurrentPosition(hash)
     if not TowerClass then return nil end
     local towers = TowerClass.GetTowers()
@@ -141,11 +165,46 @@ local function getTowerCurrentPosition(hash)
     return nil
 end
 
--- Ghi lại moving skill
-local function recordMovingSkill(hash, skillIndex, targetPos)
+-- Function log moving skill - sử dụng logic từ main.lua
+local function logMovingSkill(method, self, serializedArgs)
     -- Skip nếu đang rebuild
     if _G and _G.TDX_REBUILD_RUNNING then return end
     
+    -- Chỉ xử lý TowerUseAbilityRequest
+    if self.Name ~= "TowerUseAbilityRequest" then return end
+    
+    -- Parse args từ serializedArgs string
+    local args = {}
+    local argString = serializedArgs
+    
+    -- Extract hash (first number)
+    local hash = tonumber(argString:match("^([^,]+)"))
+    if not hash then return end
+    args[1] = hash
+    
+    -- Extract skill index (second number)  
+    local remaining = argString:match("^[^,]+,%s*(.+)")
+    if not remaining then return end
+    local skillIndex = tonumber(remaining:match("^([^,]+)"))
+    if not skillIndex then return end
+    args[2] = skillIndex
+    
+    -- Extract Vector3 if exists (third argument)
+    local remaining2 = remaining:match("^[^,]+,%s*(.+)")
+    local targetPos = nil
+    if remaining2 and remaining2:match("Vector3") then
+        -- Parse Vector3 from string format
+        local x, y, z = remaining2:match("Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)")
+        if x and y and z then
+            targetPos = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
+        end
+    end
+    
+    -- Debug output
+    print(string.format("🔍 [Raw Hook] %s | Hash: %s | Skill: %s | Has Vector: %s", 
+        method, tostring(hash), tostring(skillIndex), tostring(targetPos ~= nil)))
+    
+    -- Xử lý ghi lại skill
     local towerType, towerX = getTowerInfo(hash)
     if not towerType or not towerX then return end
     
@@ -166,15 +225,15 @@ local function recordMovingSkill(hash, skillIndex, targetPos)
     -- Lấy wave và time
     local currentWave, currentTime = getCurrentWaveAndTime()
     
-    -- Xử lý position - nếu không có targetPos thì dùng vị trí hiện tại của tower
+    -- Xử lý position
     local locationStr
-    if targetPos and typeof(targetPos) == "Vector3" then
+    if targetPos then
         locationStr = string.format("%s, %s, %s", 
             tostring(targetPos.X), 
             tostring(targetPos.Y), 
             tostring(targetPos.Z))
     else
-        -- Skill không có vector (như Helicopter skill 3) - dùng vị trí hiện tại
+        -- Skill không có vector - dùng vị trí hiện tại
         local currentPos = getTowerCurrentPosition(hash)
         if currentPos then
             locationStr = string.format("%s, %s, %s", 
@@ -182,7 +241,7 @@ local function recordMovingSkill(hash, skillIndex, targetPos)
                 tostring(currentPos.Y), 
                 tostring(currentPos.Z))
         else
-            locationStr = "0, 0, 0" -- Fallback
+            locationStr = "0, 0, 0"
         end
     end
     
@@ -202,60 +261,39 @@ local function recordMovingSkill(hash, skillIndex, targetPos)
         towerType, tostring(towerX), skillIndex, locationStr, currentWave or "N/A"))
 end
 
--- Biến lưu hàm gốc
-local originalInvokeServer
-
--- Hook function - Hook thô trước, xử lý sau
-local function setupAbilityHook()
-    if TowerUseAbilityRequest:IsA("RemoteFunction") then
-        originalInvokeServer = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
-            local args = {...}
-            
-            -- Hook thô - in ra console để debug
-            print(string.format("🔍 [Raw Hook] Hash: %s | Skill: %s | Args count: %d", 
-                tostring(args[1]), tostring(args[2]), #args))
-            if args[3] then
-                print(string.format("   Arg3 type: %s | Value: %s", typeof(args[3]), tostring(args[3])))
-            end
-            
-            -- Xử lý ghi lại skill
-            if #args >= 2 and typeof(args[1]) == "number" and typeof(args[2]) == "number" then
-                -- args[3] có thể là Vector3 hoặc nil/khác
-                local targetPos = (typeof(args[3]) == "Vector3") and args[3] or nil
-                recordMovingSkill(args[1], args[2], targetPos)
-            end
-            
-            -- Trả về kết quả gốc
-            return originalInvokeServer(self, ...)
-        end)
-    end
+-- Hook system từ main.lua
+local function setupMovingSkillLogger()
+    -- Hook FireServer
+    local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+        local serializedArgs = serializeArgs(...)
+        logMovingSkill("FireServer", self, serializedArgs)
+        return oldFireServer(self, ...)
+    end)
+   
+    -- Hook InvokeServer
+    local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+        local serializedArgs = serializeArgs(...)
+        logMovingSkill("InvokeServer", self, serializedArgs)
+        return oldInvokeServer(self, ...)
+    end)
     
     -- Hook namecall
-    local originalNamecall
-    originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if getnamecallmethod() == "InvokeServer" and self == TowerUseAbilityRequest then
-            local args = {...}
-            
-            -- Hook thô - in ra console để debug
-            print(string.format("🔸 [Namecall Hook] Hash: %s | Skill: %s | Args count: %d", 
-                tostring(args[1]), tostring(args[2]), #args))
-            if args[3] then
-                print(string.format("   Arg3 type: %s | Value: %s", typeof(args[3]), tostring(args[3])))
-            end
-            
-            -- Xử lý ghi lại skill
-            if #args >= 2 and typeof(args[1]) == "number" and typeof(args[2]) == "number" then
-                local targetPos = (typeof(args[3]) == "Vector3") and args[3] or nil
-                recordMovingSkill(args[1], args[2], targetPos)
-            end
+    local oldNameCall
+    oldNameCall = hookmetamethod(game, "__namecall", function(self, ...)    
+        local namecallmethod = getnamecallmethod()
+        
+        if namecallmethod == "FireServer" or namecallmethod == "InvokeServer" then
+            local serializedArgs = serializeArgs(...)
+            logMovingSkill(namecallmethod, self, serializedArgs)
         end
-        return originalNamecall(self, ...)
+ 
+        return oldNameCall(self, ...)
     end)
 end
 
 -- Khởi tạo
 preserveExistingData()
-setupAbilityHook()
+setupMovingSkillLogger()
 
 print("✅ TDX Moving Skill Recorder Hook đã hoạt động!")
 print("🎯 Đang theo dõi:")
@@ -263,3 +301,4 @@ print("   - Helicopter: skill 1 (có vector), skill 3 (không vector)")
 print("   - Cryo Helicopter: skill 1 (có vector), skill 3 (không vector)")  
 print("   - Jet Trooper: skill 1 (có vector)")
 print("📁 Dữ liệu sẽ được ghi vào: " .. outJson)
+print("🔧 Sử dụng hook system từ main.lua")
