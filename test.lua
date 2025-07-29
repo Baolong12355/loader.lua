@@ -390,55 +390,60 @@ local function handleRemote(name, args)
     end
     -- ==================================================
 
-    if name == "TowerUpgradeRequest" then
-        local hash, path, count = unpack(args)
-        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
-            setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
-        end
-    elseif name == "PlaceTower" then
-        local a1, towerName, vec, rot = unpack(args)
-        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
-            local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
-            setPending("Place", code)
-        end
-    elseif name == "SellTower" then
-        setPending("Sell", "TDX:sellTower("..tostring(args[1])..")")
-    elseif name == "ChangeQueryType" then
-        setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
-    -- ===== THÊM: Xử lý TowerUseAbilityRequest cho moving skill =====
-    elseif name == "TowerUseAbilityRequest" then
-        local hash, skillIndex, targetPos = unpack(args)
-        if typeof(hash) == "number" and typeof(skillIndex) == "number" and typeof(targetPos) == "Vector3" then
-            -- Kiểm tra xem tower có phải là moving skill tower không
-            local towerType = getTowerTypeFromHash(hash)
-            if towerType then
-                local movingSkills = isMovingSkillTower(towerType)
-                if movingSkills then
-                    -- Kiểm tra skill index có trong danh sách moving skill không
-                    for _, validSkill in ipairs(movingSkills) do
-                        if skillIndex == validSkill then
-                            local currentWave, currentTime = getCurrentWaveAndTime()
-                            local code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
-                                tostring(hash), skillIndex, tostring(targetPos.X), tostring(targetPos.Y), tostring(targetPos.Z))
-                            -- Ghi nhận ngay lập tức với thông tin wave và time
-                            local pos = hash2pos[tostring(hash)]
-                            if pos then
-                                local entry = {
-                                    MovingSkillUsed = pos.x,
-                                    SkillIndex = skillIndex,
-                                    TargetPosition = string.format("%s, %s, %s", tostring(targetPos.X), tostring(targetPos.Y), tostring(targetPos.Z)),
-                                    SkillWave = currentWave,
-                                    SkillUsedAt = convertTimeToNumber(currentTime)
-                                }
-                                table.insert(recordedActions, entry)
-                                updateJsonFile()
+    -- Sử dụng pcall để tránh lỗi khi xử lý args
+    local success, processResult = pcall(function()
+        if name == "TowerUpgradeRequest" then
+            local hash, path, count = unpack(args)
+            if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
+                setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
+            end
+        elseif name == "PlaceTower" then
+            local a1, towerName, vec, rot = unpack(args)
+            if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
+                local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
+                setPending("Place", code)
+            end
+        elseif name == "SellTower" then
+            setPending("Sell", "TDX:sellTower("..tostring(args[1])..")")
+        elseif name == "ChangeQueryType" then
+            setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
+        -- ===== THÊM: Xử lý TowerUseAbilityRequest cho moving skill =====
+        elseif name == "TowerUseAbilityRequest" then
+            local hash, skillIndex, targetPos = unpack(args)
+            if typeof(hash) == "number" and typeof(skillIndex) == "number" and typeof(targetPos) == "Vector3" then
+                -- Kiểm tra xem tower có phải là moving skill tower không
+                local towerType = getTowerTypeFromHash(hash)
+                if towerType then
+                    local movingSkills = isMovingSkillTower(towerType)
+                    if movingSkills then
+                        -- Kiểm tra skill index có trong danh sách moving skill không
+                        for _, validSkill in ipairs(movingSkills) do
+                            if skillIndex == validSkill then
+                                local currentWave, currentTime = getCurrentWaveAndTime()
+                                -- Ghi nhận ngay lập tức với thông tin wave và time
+                                local pos = hash2pos[tostring(hash)]
+                                if pos then
+                                    local entry = {
+                                        MovingSkillUsed = pos.x,
+                                        SkillIndex = skillIndex,
+                                        TargetPosition = string.format("%s, %s, %s", tostring(targetPos.X), tostring(targetPos.Y), tostring(targetPos.Z)),
+                                        SkillWave = currentWave,
+                                        SkillUsedAt = convertTimeToNumber(currentTime)
+                                    }
+                                    table.insert(recordedActions, entry)
+                                    updateJsonFile()
+                                end
+                                break
                             end
-                            break
                         end
                     end
                 end
             end
         end
+    end)
+    
+    if not success then
+        warn("Lỗi khi xử lý remote " .. tostring(name) .. ": " .. tostring(processResult))
     end
 end
 
@@ -457,7 +462,8 @@ local function setupHooks()
 
     -- Hook InvokeServer
     local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-        handleRemote(self.Name, {...})
+        local args = {...}
+        handleRemote(self.Name, args)
         return oldInvokeServer(self, ...)
     end)
 
@@ -467,7 +473,8 @@ local function setupHooks()
         if checkcaller() then return oldNamecall(self, ...) end
         local method = getnamecallmethod()
         if method == "FireServer" or method == "InvokeServer" then
-            handleRemote(self.Name, {...})
+            local args = {...}
+            handleRemote(self.Name, args)
         end
         return oldNamecall(self, ...)
     end)
@@ -526,3 +533,4 @@ print("✅ TDX Recorder với Moving Skill Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🚁 Hỗ trợ moving skill cho: Helicopter (skill 1,3), Cryo Helicopter (skill 1,3), Jet Trooper (skill 1)")
 print("📊 Moving skill sẽ được ghi với thông tin Wave và Time")
+print("🔒 Hook an toàn với return value cho RemoteFunction")
