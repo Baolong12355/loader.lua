@@ -463,10 +463,13 @@ local function StartMovingSkillMonitor(movingSkillEntries, gameUI)
     end)
 end
 
+-- Thay thế phần StartRebuildSystem trong code của bạn bằng version này:
+
 local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     local config = globalEnv.TDX_Config
     local rebuildAttempts = {}
     local soldPositions = {}
+    local lastSeenTowers = {} -- Track towers để phát hiện khi nào bị bán thủ công
 
     -- Tracking system cho towers đã chết
     local deadTowerTracker = {
@@ -486,6 +489,31 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
 
     local function clearTowerDeath(x)
         deadTowerTracker.deadTowers[x] = nil
+    end
+
+    -- Function để kiểm tra xem tower có bị bán thủ công không
+    local function updateSoldPositions()
+        for x, _ in pairs(lastSeenTowers) do
+            local hash, tower = GetTowerByAxis(x)
+            if not hash then
+                -- Tower không còn tồn tại
+                -- Kiểm tra xem có phải do auto sell converted không
+                if not soldConvertedX[x] then
+                    -- Không phải auto sell converted, có thể là bán thủ công
+                    soldPositions[x] = true
+                end
+            end
+        end
+        
+        -- Cập nhật lastSeenTowers
+        lastSeenTowers = {}
+        for hash, tower in pairs(TowerClass.GetTowers()) do
+            local spawnCFrame = tower.SpawnCFrame
+            if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                local pos = spawnCFrame.Position
+                lastSeenTowers[pos.X] = true
+            end
+        end
     end
 
     -- Worker system với moving skills support
@@ -540,6 +568,10 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                             WaitForCash(action.TowerPlaceCost)
                             if not PlaceTowerRetry(args, pos.X, action.TowerPlaced) then
                                 rebuildSuccess = false
+                            else
+                                -- Reset sold status khi place thành công
+                                soldPositions[x] = nil
+                                soldConvertedX[x] = nil
                             end
                         end
                     end
@@ -600,6 +632,106 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
             end
         end)
     end
+
+    -- Khởi tạo workers
+    for i = 1, config.MaxConcurrentRebuilds do
+        RebuildWorker()
+    end
+
+    -- Producer - Fast detection system với improved sold detection
+    task.spawn(function()
+        while true do
+            -- Cập nhật danh sách towers bị bán thủ công
+            updateSoldPositions()
+            
+            if next(towerRecords) then
+                for x, records in pairs(towerRecords) do
+                    local hash, tower = GetTowerByAxis(x)
+
+                    if not hash or not tower then
+                        -- Tower không tồn tại (chết HOẶC bị bán)
+                        if not activeJobs[x] then -- Chưa có job rebuild
+                            -- Check ForceRebuildEvenIfSold setting - FIXED LOGIC
+                            if soldPositions[x] and not config.ForceRebuildEvenIfSold then
+                                -- Tower đã bị bán thủ công và không force rebuild
+                                print("Skipping rebuild for tower at X=" .. x .. " - manually sold and ForceRebuildEvenIfSold is disabled")
+                                continue
+                            end
+
+                            recordTowerDeath(x)
+
+                            local towerType = nil
+                            local firstPlaceRecord = nil
+
+                            for _, record in ipairs(records) do
+                                if record.entry.TowerPlaced then 
+                                    towerType = record.entry.TowerPlaced
+                                    firstPlaceRecord = record
+                                    break
+                                end
+                            end
+
+                            if towerType then
+                                local skipRule = skipTypesMap[towerType]
+                                local shouldSkip = false
+
+                                if skipRule then
+                                    if skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine then
+                                        shouldSkip = true
+                                    elseif not skipRule.beOnly then
+                                        shouldSkip = true
+                                    end
+                                end
+
+                                if not shouldSkip then
+                                    rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                                    local maxRetry = config.MaxRebuildRetry
+
+                                    if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                                        -- Add to queue với priority
+                                        activeJobs[x] = true
+                                        local priority = GetTowerPriority(towerType)
+                                        table.insert(jobQueue, { 
+                                            x = x, 
+                                            records = records, 
+                                            priority = priority,
+                                            deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick()
+                                        })
+
+                                        -- Sort by priority, then by death time (older first)
+                                        table.sort(jobQueue, function(a, b) 
+                                            if a.priority == b.priority then
+                                                return a.deathTime < b.deathTime
+                                            end
+                                            return a.priority < b.priority 
+                                        end)
+                                        
+                                        print("Queued rebuild for " .. towerType .. " at X=" .. x)
+                                    end
+                                end
+                            end
+                        end
+                    else
+                        -- Tower sống, cleanup
+                        clearTowerDeath(x)
+                        if activeJobs[x] then
+                            activeJobs[x] = nil
+                            -- Remove from queue if exists
+                            for i = #jobQueue, 1, -1 do
+                                if jobQueue[i].x == x then
+                                    table.remove(jobQueue, i)
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            RunService.Heartbeat:Wait()
+        end
+    end)
+end
 
     -- Khởi tạo workers
     for i = 1, config.MaxConcurrentRebuilds do
