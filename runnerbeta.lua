@@ -613,7 +613,9 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
 
                     if not hash or not tower then
                         if not activeJobs[x] then
+                            -- Kiểm tra xem tower có bị bán không
                             if soldPositions[x] and not config.ForceRebuildEvenIfSold then
+                                -- Tower đã bị bán và không force rebuild
                                 continue
                             end
 
