@@ -393,8 +393,23 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- THÊM: Xử lý sự kiện skill được sử dụng (không cần thiết nữa)
--- Moving skills sẽ được ghi nhận trực tiếp trong hook
+-- THÊM: Xử lý sự kiện moving skill được sử dụng
+pcall(function()
+    -- Tạo một event listener giả cho moving skills
+    -- Vì không có event riêng, chúng ta sẽ confirm sau 0.2 giây
+    task.spawn(function()
+        while task.wait(0.2) do
+            -- Auto confirm tất cả moving skills pending
+            for i = #pendingQueue, 1, -1 do
+                local item = pendingQueue[i]
+                if item.type == "MovingSkill" and tick() - item.created > 0.1 then
+                    processAndWriteAction(item.code)
+                    table.remove(pendingQueue, i)
+                end
+            end
+        end
+    end)
+end)
 
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
@@ -410,19 +425,13 @@ local function handleRemote(name, args)
         if typeof(towerHash) == "number" and typeof(skillIndex) == "number" and typeof(targetPos) == "Vector3" then
             local towerName = GetTowerNameByHash(towerHash)
             if IsMovingSkillTower(towerName, skillIndex) then
-                -- Ghi nhận ngay lập tức không cần queue
-                local pos = hash2pos[tostring(towerHash)]
-                if pos then
-                    local currentWave, currentTime = getCurrentWaveAndTime()
-                    local code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
-                        tostring(towerHash), 
-                        skillIndex, 
-                        tostring(targetPos.X), 
-                        tostring(targetPos.Y), 
-                        tostring(targetPos.Z))
-                    processAndWriteAction(code)
-                end
-                return
+                local code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
+                    tostring(towerHash), 
+                    skillIndex, 
+                    tostring(targetPos.X), 
+                    tostring(targetPos.Y), 
+                    tostring(targetPos.Z))
+                setPending("MovingSkill", code, towerHash)
             end
         end
     end
