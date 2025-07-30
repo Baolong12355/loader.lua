@@ -48,7 +48,7 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["Macro Name"] = "e",
+    ["Macro Name"] = "elite",
     ["PlaceMode"] = "Rewrite",
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
@@ -319,7 +319,7 @@ local function SellTowerRetry(axisValue)
     return false
 end
 
--- THÊM: Hàm xử lý moving skills
+-- THÊM: Hàm xử lý moving skills (sử dụng cách của auto_skill)
 local function UseMovingSkillRetry(axisValue, skillIndex, location)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
@@ -332,11 +332,7 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
             if location == "no_pos" then
                 -- Skill không cần position (skill 3)
                 success = pcall(function()
-                    if Remotes.TowerUseAbilityRequest:IsA("RemoteEvent") then
-                        Remotes.TowerUseAbilityRequest:FireServer(hash, skillIndex)
-                    else
-                        Remotes.TowerUseAbilityRequest:InvokeServer(hash, skillIndex)
-                    end
+                    Remotes.TowerUseAbilityRequest:InvokeServer(hash, skillIndex)
                 end)
             else
                 -- Skill cần position (skill 1)
@@ -348,11 +344,7 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
                 if #coords == 3 then
                     local targetPos = Vector3.new(coords[1], coords[2], coords[3])
                     success = pcall(function()
-                        if Remotes.TowerUseAbilityRequest:IsA("RemoteEvent") then
-                            Remotes.TowerUseAbilityRequest:FireServer(hash, skillIndex, targetPos)
-                        else
-                            Remotes.TowerUseAbilityRequest:InvokeServer(hash, skillIndex, targetPos)
-                        end
+                        Remotes.TowerUseAbilityRequest:InvokeServer(hash, skillIndex, targetPos)
                     end)
                 end
             end
