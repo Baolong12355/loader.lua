@@ -57,7 +57,7 @@ local defaultConfig = {
     ["TargetChangeCheckDelay"] = 0.1,
     ["RebuildPriority"] = false,
     ["RebuildCheckInterval"] = 0,
-    ["MacroStepDelay"] = 0,
+    ["MacroStepDelay"] = 0.1,
     ["MaxConcurrentRebuilds"] = 5
 }
 
