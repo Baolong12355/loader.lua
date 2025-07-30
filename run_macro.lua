@@ -48,9 +48,9 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["Macro Name"] = "e",
+    ["Macro Name"] = "o",
     ["PlaceMode"] = "Rewrite",
-    ["ForceRebuildEvenIfSold"] = false, -- Changed to true by default
+    ["ForceRebuildEvenIfSold"] = true, -- Changed to true by default
     ["MaxRebuildRetry"] = nil,
     ["SellAllDelay"] = 0.1,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
