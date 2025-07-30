@@ -20,7 +20,7 @@ local defaultConfig = {
     ["RebuildPlaceDelay"] = 0.3,
     ["MaxConcurrentRebuilds"] = 5,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
-    ["ForceRebuildEvenIfSold"] = true,
+    ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil
 }
 
