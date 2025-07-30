@@ -319,59 +319,45 @@ local function SellTowerRetry(axisValue)
     return false
 end
 
--- THÊM: Hàm xử lý moving skills (sử dụng cách của auto_skill)
-local function UseMovingSkillRetry(axisValue, skillIndex, location)
-    local maxAttempts = getMaxAttempts()
-    local attempts = 0
+-- Hàm xử lý moving skills
+local function UseMovingSkill(axisValue, skillIndex, location)
+    local hash = GetTowerByAxis(axisValue)
+    if not hash then return false end
     
-    print("[TDX Runner] Trying to use moving skill - axisValue:", axisValue, "skillIndex:", skillIndex, "location:", location)
-    
-    while attempts < maxAttempts do
-        local hash = GetTowerByAxis(axisValue)
-        if hash then
-            print("[TDX Runner] Found tower hash:", hash, "for axis:", axisValue)
-            local success = false
-            
-            if location == "no_pos" then
-                -- Skill không cần position (skill 3)
-                print("[TDX Runner] Using skill without position")
-                success = pcall(function()
-                    Remotes.TowerUseAbilityRequest:InvokeServer(hash, skillIndex)
-                end)
-            else
-                -- Skill cần position (skill 1)
-                local coords = {}
-                for coord in location:gmatch("[^,%s]+") do
-                    table.insert(coords, tonumber(coord))
-                end
-                
-                if #coords == 3 then
-                    local targetPos = Vector3.new(coords[1], coords[2], coords[3])
-                    print("[TDX Runner] Using skill with position:", targetPos)
-                    success = pcall(function()
-                        Remotes.TowerUseAbilityRequest:InvokeServer(hash, skillIndex, targetPos)
-                    end)
-                else
-                    print("[TDX Runner] Invalid coordinates format:", location)
-                end
-            end
-            
-            if success then 
-                print("[TDX Runner] Successfully used moving skill!")
-                return true 
-            else
-                print("[TDX Runner] Failed to use moving skill, attempt:", attempts + 1)
-            end
-        else
-            print("[TDX Runner] No tower found at axis:", axisValue)
+    local success = false
+    if location == "no_pos" then
+        success = pcall(function()
+            Remotes.TowerUseAbilityRequest:InvokeServer(hash, skillIndex)
+        end)
+    else
+        local coords = {}
+        for coord in location:gmatch("[^,%s]+") do
+            table.insert(coords, tonumber(coord))
         end
-        
-        attempts = attempts + 1
-        task.wait(0.1)
+        if #coords == 3 then
+            local targetPos = Vector3.new(coords[1], coords[2], coords[3])
+            success = pcall(function()
+                Remotes.TowerUseAbilityRequest:InvokeServer(hash, skillIndex, targetPos)
+            end)
+        end
     end
     
-    print("[TDX Runner] Failed to use moving skill after", maxAttempts, "attempts")
-    return false
+    return success
+end
+
+-- Lấy moving skill cuối cùng của tower
+local function GetLastMovingSkillForTower(records)
+    local lastMovingSkill = nil
+    local lastLine = -1
+    
+    for _, record in ipairs(records) do
+        if record.entry.towermoving and record.entry.skillindex and record.entry.location and record.line > lastLine then
+            lastMovingSkill = record.entry
+            lastLine = record.line
+        end
+    end
+    
+    return lastMovingSkill
 end
 
 local function shouldChangeTarget(entry, currentWave, currentTime)
@@ -413,54 +399,11 @@ local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
     end)
 end
 
--- Hàm rebuild lại tower nếu bị convert auto sell
-local function RebuildIfNeeded(axisX, placeArgs)
-    local hash, tower = GetTowerByAxis(axisX)
-    if not hash and soldConvertedX[axisX] then
-        local ok = false
-        for i = 1, getMaxAttempts() do
-            ok = pcall(function()
-                Remotes.PlaceTower:InvokeServer(unpack(placeArgs))
-            end)
-            if ok then
-                local t1 = tick()
-                repeat
-                    local h = GetTowerByAxis(axisX)
-                    if h then break end
-                    task.wait(0.1)
-                until tick() - t1 > 3
-                if GetTowerByAxis(axisX) then break end
-            end
-            task.wait(0.1)
-        end
-        if ok then
-            soldConvertedX[axisX] = nil
-        end
-    end
-end
-
--- THÊM: Hàm lấy moving skill cuối cùng của mỗi tower
-local function GetLastMovingSkillForTower(records)
-    local lastMovingSkill = nil
-    local lastLine = -1
-    
-    for _, record in ipairs(records) do
-        -- Kiểm tra entry có towermoving, skillindex và location
-        if record.entry.towermoving and record.entry.skillindex and record.entry.location and record.line > lastLine then
-            lastMovingSkill = record.entry
-            lastLine = record.line
-        end
-    end
-    
-    return lastMovingSkill
-end
-
 local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     local config = globalEnv.TDX_Config
     local rebuildAttempts = {}
     local soldPositions = {}
 
-    -- Tracking system cho towers đã chết (từ v19)
     local deadTowerTracker = {
         deadTowers = {},
         nextDeathId = 1
@@ -480,11 +423,9 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
         deadTowerTracker.deadTowers[x] = nil
     end
 
-    -- Worker system (từ v20) với cải tiến
     local jobQueue = {}
     local activeJobs = {}
 
-    -- Worker function - Optimized rebuild with moving skills support
     local function RebuildWorker()
         task.spawn(function()
             while true do
@@ -494,8 +435,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                     local records = job.records
 
                     local rebuildSuccess = true
-                    
-                    -- Lấy moving skill cuối cùng cho tower này
                     local lastMovingSkill = GetLastMovingSkillForTower(records)
                     
                     for _, record in ipairs(records) do
@@ -522,7 +461,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                             end
 
                         elseif action.TowerUpgraded then
-                            -- Đảm bảo upgrade thành công, nếu fail thì retry
                             if not UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath) then
                                 rebuildSuccess = false
                                 break
@@ -538,18 +476,16 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                         end
                     end
 
-                    -- Sau khi rebuild xong, dùng moving skill cuối cùng (nếu có)
+                    -- Dùng moving skill cuối cùng sau khi rebuild
                     if rebuildSuccess and lastMovingSkill then
-                        task.wait(0.2) -- Đợi tower ổn định
-                        print("[TDX Runner] Sử dụng moving skill cuối cùng cho tower tại X:", x, "skillindex:", lastMovingSkill.skillindex, "location:", lastMovingSkill.location)
-                        UseMovingSkillRetry(
+                        task.wait(0.2)
+                        UseMovingSkill(
                             tonumber(lastMovingSkill.towermoving), 
                             lastMovingSkill.skillindex, 
                             lastMovingSkill.location
                         )
                     end
 
-                    -- Cleanup sau khi rebuild
                     if rebuildSuccess then
                         rebuildAttempts[x] = 0
                         clearTowerDeath(x)
@@ -557,18 +493,16 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
 
                     activeJobs[x] = nil
                 else
-                    RunService.Heartbeat:Wait() -- Sử dụng heartbeat thay vì task.wait
+                    RunService.Heartbeat:Wait()
                 end
             end
         end)
     end
 
-    -- Khởi tạo workers
     for i = 1, config.MaxConcurrentRebuilds do
         RebuildWorker()
     end
 
-    -- Producer - Fast detection system
     task.spawn(function()
         while true do
             if next(towerRecords) then
@@ -576,11 +510,8 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                     local hash, tower = GetTowerByAxis(x)
 
                     if not hash or not tower then
-                        -- Tower không tồn tại (chết HOẶC bị bán)
-                        if not activeJobs[x] then -- Chưa có job rebuild
-                            -- Kiểm tra xem tower có bị bán không
+                        if not activeJobs[x] then
                             if soldPositions[x] and not config.ForceRebuildEvenIfSold then
-                                -- Tower đã bị bán và không force rebuild
                                 continue
                             end
 
@@ -614,7 +545,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                                     local maxRetry = config.MaxRebuildRetry
 
                                     if not maxRetry or rebuildAttempts[x] <= maxRetry then
-                                        -- Add to queue với priority
                                         activeJobs[x] = true
                                         local priority = GetTowerPriority(towerType)
                                         table.insert(jobQueue, { 
@@ -624,7 +554,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                                             deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick()
                                         })
 
-                                        -- Sort by priority, then by death time (older first)
                                         table.sort(jobQueue, function(a, b) 
                                             if a.priority == b.priority then
                                                 return a.deathTime < b.deathTime
@@ -636,11 +565,9 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                             end
                         end
                     else
-                        -- Tower sống, cleanup
                         clearTowerDeath(x)
                         if activeJobs[x] then
                             activeJobs[x] = nil
-                            -- Remove from queue if exists
                             for i = #jobQueue, 1, -1 do
                                 if jobQueue[i].x == x then
                                     table.remove(jobQueue, i)
@@ -652,7 +579,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                 end
             end
 
-            RunService.Heartbeat:Wait() -- Sử dụng heartbeat để response nhanh nhất
+            RunService.Heartbeat:Wait()
         end
     end)
 end
@@ -752,13 +679,11 @@ local function RunMacroRunner()
             towerRecords[axis] = towerRecords[axis] or {}
             table.insert(towerRecords[axis], { line = i, entry = entry })
 
-        -- THÊM: Xử lý moving skills trong macro chính
         elseif entry.towermoving and entry.skillindex and entry.location then
             local axis = tonumber(entry.towermoving)
             if axis then
-                UseMovingSkillRetry(axis, entry.skillindex, entry.location)
+                UseMovingSkill(axis, entry.skillindex, entry.location)
 
-                -- Thêm vào towerRecords để rebuild system biết
                 towerRecords[axis] = towerRecords[axis] or {}
                 table.insert(towerRecords[axis], { line = i, entry = entry })
             end
