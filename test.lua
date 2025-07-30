@@ -1,8 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
-local player = Players.LocalPlayer
-local PlayerScripts = player:WaitForChild("PlayerScripts")
+local PlayerScripts = Players.LocalPlayer:WaitForChild("PlayerScripts")
 
 local replStorage = game:GetService("ReplicatedStorage")
 local remotes = replStorage:WaitForChild("Remotes")
@@ -15,7 +13,7 @@ local originalInvokeServer
 -- Cache để lưu moving skills thay vì ghi file
 local movingSkillsCache = {}
 
--- Lấy TowerClass để ánh xạ hash tới tower type
+-- Lấy TowerClass
 local TowerClass
 pcall(function()
     local client = PlayerScripts:WaitForChild("Client")
@@ -26,7 +24,7 @@ end)
 
 -- Lấy thông tin wave và thời gian hiện tại
 local function getCurrentWaveAndTime()
-    local playerGui = player:FindFirstChildOfClass("PlayerGui")
+    local playerGui = localPlayer:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return nil, nil end
 
     local interface = playerGui:FindFirstChild("Interface")
@@ -49,35 +47,15 @@ local function convertTimeToNumber(timeStr)
     return nil
 end
 
--- Lấy tower type từ hash
-local function getTowerTypeFromHash(hash)
-    if not TowerClass then return nil end
-    local towers = TowerClass.GetTowers()
-    local tower = towers[hash]
-    return tower and tower.Type or nil
-end
-
--- Lấy vị trí X của tower từ hash
-local function getTowerXFromHash(hash)
-    if not TowerClass then return nil end
-    local towers = TowerClass.GetTowers()
-    local tower = towers[hash]
-    if tower and tower.SpawnCFrame then
-        return tower.SpawnCFrame.Position.X
-    end
-    return nil
-end
-
 -- Cache moving skill thay vì ghi file
-local function cacheToMemory(entry)
+local function cacheToMemory(text)
     -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
     if _G and _G.TDX_REBUILD_RUNNING then
         return
     end
     -- ==================================================
     
-    table.insert(movingSkillsCache, entry)
-    print(string.format("📋 Cached: %s", entry))
+    table.insert(movingSkillsCache, text)
 end
 
 -- Hook nguyên mẫu cho Ability Request
@@ -89,12 +67,19 @@ local function setupAbilityHook()
             -- Kiểm tra moving skill
             if #args >= 3 and typeof(args[1]) == "number" and typeof(args[2]) == "number" and typeof(args[3]) == "Vector3" then
                 local hash = args[1]
-                local skillIndex = args[2]
+                local skillIndex = args[2] 
                 local targetPos = args[3]
                 
-                local towerType = getTowerTypeFromHash(hash)
-                local isMovingSkill = false
+                -- Lấy tower type
+                local towerType = nil
+                if TowerClass then
+                    local towers = TowerClass.GetTowers()
+                    local tower = towers[hash]
+                    towerType = tower and tower.Type or nil
+                end
                 
+                -- Kiểm tra moving skill
+                local isMovingSkill = false
                 if towerType == "Helicopter" and (skillIndex == 1 or skillIndex == 3) then
                     isMovingSkill = true
                 elseif towerType == "Cryo Helicopter" and (skillIndex == 1 or skillIndex == 3) then
@@ -104,7 +89,16 @@ local function setupAbilityHook()
                 end
                 
                 if isMovingSkill then
-                    local towerX = getTowerXFromHash(hash)
+                    -- Lấy vị trí X của tower
+                    local towerX = nil
+                    if TowerClass then
+                        local towers = TowerClass.GetTowers()
+                        local tower = towers[hash]
+                        if tower and tower.SpawnCFrame then
+                            towerX = tower.SpawnCFrame.Position.X
+                        end
+                    end
+                    
                     local currentWave, currentTime = getCurrentWaveAndTime()
                     local timeNumber = convertTimeToNumber(currentTime)
                     
@@ -112,7 +106,7 @@ local function setupAbilityHook()
                         tostring(towerX),
                         tostring(skillIndex),
                         tostring(targetPos.X),
-                        tostring(targetPos.Y), 
+                        tostring(targetPos.Y),
                         tostring(targetPos.Z),
                         tostring(currentWave),
                         tostring(timeNumber))
@@ -136,9 +130,16 @@ local function setupAbilityHook()
                 local skillIndex = args[2]
                 local targetPos = args[3]
                 
-                local towerType = getTowerTypeFromHash(hash)
-                local isMovingSkill = false
+                -- Lấy tower type
+                local towerType = nil
+                if TowerClass then
+                    local towers = TowerClass.GetTowers()
+                    local tower = towers[hash]
+                    towerType = tower and tower.Type or nil
+                end
                 
+                -- Kiểm tra moving skill
+                local isMovingSkill = false
                 if towerType == "Helicopter" and (skillIndex == 1 or skillIndex == 3) then
                     isMovingSkill = true
                 elseif towerType == "Cryo Helicopter" and (skillIndex == 1 or skillIndex == 3) then
@@ -148,7 +149,16 @@ local function setupAbilityHook()
                 end
                 
                 if isMovingSkill then
-                    local towerX = getTowerXFromHash(hash)
+                    -- Lấy vị trí X của tower
+                    local towerX = nil
+                    if TowerClass then
+                        local towers = TowerClass.GetTowers()
+                        local tower = towers[hash]
+                        if tower and tower.SpawnCFrame then
+                            towerX = tower.SpawnCFrame.Position.X
+                        end
+                    end
+                    
                     local currentWave, currentTime = getCurrentWaveAndTime()
                     local timeNumber = convertTimeToNumber(currentTime)
                     
@@ -174,7 +184,7 @@ _G.TDX_MovingSkills = {
         return movingSkillsCache
     end,
     
-    clearCache = function()
+    clearCache = function()  
         movingSkillsCache = {}
         print("🗑️ Moving skills cache cleared")
     end,
@@ -194,4 +204,4 @@ _G.TDX_MovingSkills = {
 -- Khởi tạo hook
 setupAbilityHook()
 
-print("✅ TDX Moving Skills Hook activated - Ready to track moving skills")
+print(" TowerUseAbilityRequest hook activated - Ready to track moving skills")
