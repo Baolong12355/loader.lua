@@ -50,7 +50,7 @@ end
 local defaultConfig = {
     ["Macro Name"] = "e",
     ["PlaceMode"] = "Rewrite",
-    ["ForceRebuildEvenIfSold"] = false,
+    ["ForceRebuildEvenIfSold"] = true, -- Changed to true by default
     ["MaxRebuildRetry"] = nil,
     ["SellAllDelay"] = 0.1,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
@@ -110,7 +110,7 @@ if not TowerClass then
 end
 
 -- ==== TÍCH HỢP AUTO SELL CONVERT + REBUILD ====
-local soldConvertedPositions = {}
+local soldConvertedX = {}
 
 task.spawn(function()
     while true do
@@ -118,12 +118,13 @@ task.spawn(function()
             if tower.Converted == true then
                 local spawnCFrame = tower.SpawnCFrame
                 if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                    local posKey = tostring(spawnCFrame)
-                    if not soldConvertedPositions[posKey] then
+                    local pos = spawnCFrame.Position
+                    local x = pos.X
+                    if not soldConvertedX[x] then
                         pcall(function()
                             Remotes.SellTower:FireServer(hash)
                         end)
-                        soldConvertedPositions[posKey] = true
+                        soldConvertedX[x] = true
                     end
                 end
             end
@@ -132,12 +133,13 @@ task.spawn(function()
     end
 end)
 
-local function GetTowerHashBySpawnCFrame(targetCFrame)
+local function GetTowerHashBySpawnX(targetX)
     for hash, tower in pairs(TowerClass.GetTowers()) do
         local spawnCFrame = tower.SpawnCFrame
         if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-            if spawnCFrame == targetCFrame then
-                return hash, tower, spawnCFrame
+            local pos = spawnCFrame.Position
+            if pos.X == targetX then
+                return hash, tower, pos
             end
         end
     end
@@ -207,8 +209,8 @@ local function SellAllTowers(skipList)
     end
 end
 
-local function GetTowerByCFrame(targetCFrame)
-    return GetTowerHashBySpawnCFrame(targetCFrame)
+local function GetTowerByAxis(axisX)
+    return GetTowerHashBySpawnX(axisX)
 end
 
 local function GetCurrentUpgradeCost(tower, path)
@@ -230,7 +232,7 @@ local function WaitForCash(amount)
     end
 end
 
-local function PlaceTowerRetry(args, targetCFrame, towerName)
+local function PlaceTowerRetry(args, axisValue, towerName)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
     while attempts < maxAttempts do
@@ -241,8 +243,8 @@ local function PlaceTowerRetry(args, targetCFrame, towerName)
             local startTime = tick()
             repeat 
                 task.wait(0.1)
-            until tick() - startTime > 3 or GetTowerByCFrame(targetCFrame)
-            if GetTowerByCFrame(targetCFrame) then 
+            until tick() - startTime > 3 or GetTowerByAxis(axisValue)
+            if GetTowerByAxis(axisValue) then 
                 return true
             end
         end
@@ -252,11 +254,11 @@ local function PlaceTowerRetry(args, targetCFrame, towerName)
     return false
 end
 
-local function UpgradeTowerRetry(targetCFrame, path)
+local function UpgradeTowerRetry(axisValue, path)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
     while attempts < maxAttempts do
-        local hash, tower = GetTowerByCFrame(targetCFrame)
+        local hash, tower = GetTowerByAxis(axisValue)
         if not hash then 
             task.wait() 
             attempts = attempts + 1
@@ -273,7 +275,7 @@ local function UpgradeTowerRetry(targetCFrame, path)
             local startTime = tick()
             repeat
                 task.wait(0.1)
-                local _, t = GetTowerByCFrame(targetCFrame)
+                local _, t = GetTowerByAxis(axisValue)
                 if t and t.LevelHandler:GetLevelOnPath(path) > before then return true end
             until tick() - startTime > 3
         end
@@ -283,11 +285,11 @@ local function UpgradeTowerRetry(targetCFrame, path)
     return false
 end
 
-local function ChangeTargetRetry(targetCFrame, targetType)
+local function ChangeTargetRetry(axisValue, targetType)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
     while attempts < maxAttempts do
-        local hash = GetTowerByCFrame(targetCFrame)
+        local hash = GetTowerByAxis(axisValue)
         if hash then
             pcall(function()
                 Remotes.ChangeQueryType:FireServer(hash, targetType)
@@ -300,7 +302,7 @@ local function ChangeTargetRetry(targetCFrame, targetType)
 end
 
 -- Function để sử dụng moving skill
-local function UseMovingSkillRetry(targetCFrame, skillIndex, location)
+local function UseMovingSkillRetry(axisValue, skillIndex, location)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
 
@@ -312,7 +314,7 @@ local function UseMovingSkillRetry(targetCFrame, skillIndex, location)
     local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 
     while attempts < maxAttempts do
-        local hash, tower = GetTowerByCFrame(targetCFrame)
+        local hash, tower = GetTowerByAxis(axisValue)
         if hash and tower then
             if not tower.AbilityHandler then
                 return false
@@ -325,8 +327,7 @@ local function UseMovingSkillRetry(targetCFrame, skillIndex, location)
 
             local cooldown = ability.CooldownRemaining or 0
             if cooldown > 0 then
-                -- Có thể chọn wait hoặc skip
-                -- task.wait(cooldown + 0.1)
+                task.wait(cooldown + 0.1)
             end
 
             local success = false
@@ -362,17 +363,17 @@ local function UseMovingSkillRetry(targetCFrame, skillIndex, location)
     return false
 end
 
-local function SellTowerRetry(targetCFrame)
+local function SellTowerRetry(axisValue)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
     while attempts < maxAttempts do
-        local hash = GetTowerByCFrame(targetCFrame)
+        local hash = GetTowerByAxis(axisValue)
         if hash then
             pcall(function()
                 Remotes.SellTower:FireServer(hash)
             end)
             task.wait(0.1)
-            if not GetTowerByCFrame(targetCFrame) then return true end
+            if not GetTowerByAxis(axisValue) then return true end
         end
         attempts = attempts + 1
         task.wait()
@@ -419,9 +420,10 @@ local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
             if success then
                 for i, entry in ipairs(targetChangeEntries) do
                     if not processedEntries[i] and shouldChangeTarget(entry, currentWave, currentTime) then
-                        local targetCFrame = entry.TowerTargetChangeCFrame
+                        local axisValue = entry.TowerTargetChange
+                        local targetType = entry.TargetWanted
 
-                        ChangeTargetRetry(targetCFrame, entry.TargetWanted)
+                        ChangeTargetRetry(axisValue, targetType)
                         processedEntries[i] = true
                     end
                 end
@@ -445,11 +447,11 @@ local function StartMovingSkillMonitor(movingSkillEntries, gameUI)
             if success then
                 for i, entry in ipairs(movingSkillEntries) do
                     if not processedEntries[i] and shouldUseMovingSkill(entry, currentWave, currentTime) then
-                        local targetCFrame = entry.towermovingCFrame
+                        local axisValue = entry.towermoving
                         local skillIndex = entry.skillindex
                         local location = entry.location
 
-                        if UseMovingSkillRetry(targetCFrame, skillIndex, location) then
+                        if UseMovingSkillRetry(axisValue, skillIndex, location) then
                             processedEntries[i] = true
                         end
                     end
@@ -461,37 +463,10 @@ local function StartMovingSkillMonitor(movingSkillEntries, gameUI)
     end)
 end
 
--- Hàm rebuild lại tower nếu bị convert auto sell
-local function RebuildIfNeeded(targetCFrame, placeArgs)
-    local hash, tower = GetTowerByCFrame(targetCFrame)
-    if not hash and soldConvertedPositions[tostring(targetCFrame)] then
-        local ok = false
-        for i = 1, getMaxAttempts() do
-            ok = pcall(function()
-                Remotes.PlaceTower:InvokeServer(unpack(placeArgs))
-            end)
-            if ok then
-                local t1 = tick()
-                repeat
-                    local h = GetTowerByCFrame(targetCFrame)
-                    if h then break end
-                    task.wait(0.1)
-                until tick() - t1 > 3
-                if GetTowerByCFrame(targetCFrame) then break end
-            end
-            task.wait(0.1)
-        end
-        if ok then
-            soldConvertedPositions[tostring(targetCFrame)] = nil
-        end
-    end
-end
-
 local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     local config = globalEnv.TDX_Config
     local rebuildAttempts = {}
     local soldPositions = {}
-    local soldByScript = {} -- Track towers sold by script
 
     -- Tracking system cho towers đã chết
     local deadTowerTracker = {
@@ -499,10 +474,9 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
         nextDeathId = 1
     }
 
-    local function recordTowerDeath(cframe)
-        local key = tostring(cframe)
-        if not deadTowerTracker.deadTowers[key] then
-            deadTowerTracker.deadTowers[key] = {
+    local function recordTowerDeath(x)
+        if not deadTowerTracker.deadTowers[x] then
+            deadTowerTracker.deadTowers[x] = {
                 deathTime = tick(),
                 deathId = deadTowerTracker.nextDeathId
             }
@@ -510,94 +484,116 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
         end
     end
 
-    local function clearTowerDeath(cframe)
-        local key = tostring(cframe)
-        deadTowerTracker.deadTowers[key] = nil
+    local function clearTowerDeath(x)
+        deadTowerTracker.deadTowers[x] = nil
     end
 
-    -- Worker system
+    -- Worker system với moving skills support
     local jobQueue = {}
     local activeJobs = {}
 
-    -- Worker function - Optimized rebuild with moving skills support
+    -- Worker function - Improved rebuild sequence: Place -> Upgrade -> Target -> Moving
     local function RebuildWorker()
         task.spawn(function()
             while true do
                 if #jobQueue > 0 then
                     local job = table.remove(jobQueue, 1)
-                    local cframe = job.cframe
+                    local x = job.x
                     local records = job.records
 
-                    -- Collect all actions except moving skills first
-                    local regularActions = {}
-                    local movingSkillActions = {}
-                    
+                    -- Organize records by type with proper sequence
+                    local placeRecord = nil
+                    local upgradeRecords = {}
+                    local targetRecords = {}
+                    local movingRecords = {}
+
                     for _, record in ipairs(records) do
-                        if record.entry.towermovingCFrame then
-                            table.insert(movingSkillActions, record)
-                        else
-                            table.insert(regularActions, record)
+                        local action = record.entry
+                        if action.TowerPlaced then
+                            placeRecord = record
+                        elseif action.TowerUpgraded then
+                            table.insert(upgradeRecords, record)
+                        elseif action.TowerTargetChange then
+                            table.insert(targetRecords, record)
+                        elseif action.towermoving then
+                            table.insert(movingRecords, record)
                         end
                     end
 
                     local rebuildSuccess = true
-                    
-                    -- Execute regular actions first
-                    for _, record in ipairs(regularActions) do
-                        local action = record.entry
 
-                        if action.TowerPlaced then
-                            local vecTab = {}
-                            for coord in action.TowerVector:gmatch("[^,%s]+") do
-                                table.insert(vecTab, tonumber(coord))
-                            end
-                            if #vecTab == 3 then
-                                local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-                                local args = {
-                                    tonumber(action.TowerA1), 
-                                    action.TowerPlaced, 
-                                    pos, 
-                                    tonumber(action.Rotation or 0)
-                                }
-                                WaitForCash(action.TowerPlaceCost)
-                                if not PlaceTowerRetry(args, cframe, action.TowerPlaced) then
-                                    rebuildSuccess = false
-                                    break
-                                end
-                            end
-
-                        elseif action.TowerUpgraded then
-                            if not UpgradeTowerRetry(cframe, action.UpgradePath) then
+                    -- Step 1: Place tower
+                    if placeRecord then
+                        local action = placeRecord.entry
+                        local vecTab = {}
+                        for coord in action.TowerVector:gmatch("[^,%s]+") do
+                            table.insert(vecTab, tonumber(coord))
+                        end
+                        if #vecTab == 3 then
+                            local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
+                            local args = {
+                                tonumber(action.TowerA1), 
+                                action.TowerPlaced, 
+                                pos, 
+                                tonumber(action.Rotation or 0)
+                            }
+                            WaitForCash(action.TowerPlaceCost)
+                            if not PlaceTowerRetry(args, pos.X, action.TowerPlaced) then
                                 rebuildSuccess = false
-                                break
-                            end
-
-                        elseif action.ChangeTarget then
-                            ChangeTargetRetry(cframe, action.TargetType)
-
-                        elseif action.SellTower then
-                            if SellTowerRetry(cframe) then
-                                soldByScript[tostring(cframe)] = true
                             end
                         end
                     end
 
-                    -- Execute moving skills last if rebuild was successful
+                    -- Step 2: Upgrade towers (in order)
                     if rebuildSuccess then
-                        for _, record in ipairs(movingSkillActions) do
+                        table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
+                        for _, record in ipairs(upgradeRecords) do
                             local action = record.entry
-                            UseMovingSkillRetry(action.towermovingCFrame, action.skillindex, action.location)
-                            task.wait(0.2)
+                            if not UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath) then
+                                rebuildSuccess = false
+                                break
+                            end
+                            task.wait(0.1) -- Small delay between upgrades
+                        end
+                    end
+
+                    -- Step 3: Change targets
+                    if rebuildSuccess then
+                        for _, record in ipairs(targetRecords) do
+                            local action = record.entry
+                            ChangeTargetRetry(tonumber(action.TowerTargetChange), action.TargetWanted)
+                            task.wait(0.05)
+                        end
+                    end
+
+                    -- Step 4: Apply moving skills (only the last one for each tower)
+                    if rebuildSuccess and #movingRecords > 0 then
+                        -- Get the last moving skill for this tower
+                        local lastMovingRecord = movingRecords[#movingRecords]
+                        local action = lastMovingRecord.entry
+                        UseMovingSkillRetry(action.towermoving, action.skillindex, action.location)
+                        task.wait(0.2)
+                    end
+
+                    -- Handle other actions (sell, etc.)
+                    if rebuildSuccess then
+                        for _, record in ipairs(records) do
+                            local action = record.entry
+                            if action.SellTower then
+                                if SellTowerRetry(tonumber(action.SellTower)) then
+                                    soldPositions[tonumber(action.SellTower)] = true
+                                end
+                            end
                         end
                     end
 
                     -- Cleanup sau khi rebuild
                     if rebuildSuccess then
-                        rebuildAttempts[tostring(cframe)] = 0
-                        clearTowerDeath(cframe)
+                        rebuildAttempts[x] = 0
+                        clearTowerDeath(x)
                     end
 
-                    activeJobs[tostring(cframe)] = nil
+                    activeJobs[x] = nil
                 else
                     RunService.Heartbeat:Wait()
                 end
@@ -610,24 +606,23 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
         RebuildWorker()
     end
 
-    -- Producer - Fast detection system
+    -- Producer - Fast detection system with ForceRebuildEvenIfSold support
     task.spawn(function()
         while true do
             if next(towerRecords) then
-                for cframe, records in pairs(towerRecords) do
-                    local hash, tower = GetTowerByCFrame(cframe)
-                    local cframeKey = tostring(cframe)
+                for x, records in pairs(towerRecords) do
+                    local hash, tower = GetTowerByAxis(x)
 
                     if not hash or not tower then
                         -- Tower không tồn tại (chết HOẶC bị bán)
-                        if not activeJobs[cframeKey] then -- Chưa có job rebuild
-                            -- Kiểm tra xem tower có bị bán bởi script không và có force rebuild không
-                            if soldByScript[cframeKey] and not config.ForceRebuildEvenIfSold then
-                                -- Tower đã bị bán bởi script và không force rebuild
+                        if not activeJobs[x] then -- Chưa có job rebuild
+                            -- Check ForceRebuildEvenIfSold setting
+                            if soldPositions[x] and not config.ForceRebuildEvenIfSold then
+                                -- Tower đã bị bán và không force rebuild
                                 continue
                             end
 
-                            recordTowerDeath(cframe)
+                            recordTowerDeath(x)
 
                             local towerType = nil
                             local firstPlaceRecord = nil
@@ -653,18 +648,18 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                                 end
 
                                 if not shouldSkip then
-                                    rebuildAttempts[cframeKey] = (rebuildAttempts[cframeKey] or 0) + 1
+                                    rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
                                     local maxRetry = config.MaxRebuildRetry
 
-                                    if not maxRetry or rebuildAttempts[cframeKey] <= maxRetry then
+                                    if not maxRetry or rebuildAttempts[x] <= maxRetry then
                                         -- Add to queue với priority
-                                        activeJobs[cframeKey] = true
+                                        activeJobs[x] = true
                                         local priority = GetTowerPriority(towerType)
                                         table.insert(jobQueue, { 
-                                            cframe = cframe, 
+                                            x = x, 
                                             records = records, 
                                             priority = priority,
-                                            deathTime = deadTowerTracker.deadTowers[cframeKey] and deadTowerTracker.deadTowers[cframeKey].deathTime or tick()
+                                            deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick()
                                         })
 
                                         -- Sort by priority, then by death time (older first)
@@ -680,12 +675,12 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                         end
                     else
                         -- Tower sống, cleanup
-                        clearTowerDeath(cframe)
-                        if activeJobs[cframeKey] then
-                            activeJobs[cframeKey] = nil
+                        clearTowerDeath(x)
+                        if activeJobs[x] then
+                            activeJobs[x] = nil
                             -- Remove from queue if exists
                             for i = #jobQueue, 1, -1 do
-                                if tostring(jobQueue[i].cframe) == cframeKey then
+                                if jobQueue[i].x == x then
                                     table.remove(jobQueue, i)
                                     break
                                 end
@@ -731,9 +726,9 @@ local function RunMacroRunner()
 
     -- Phân loại các entries theo loại
     for i, entry in ipairs(macro) do
-        if entry.TowerTargetChangeCFrame then
+        if entry.TowerTargetChange then
             table.insert(targetChangeEntries, entry)
-        elseif entry.towermovingCFrame then
+        elseif entry.towermoving then
             table.insert(movingSkillEntries, entry)
         end
     end
@@ -742,7 +737,6 @@ local function RunMacroRunner()
         StartTargetChangeMonitor(targetChangeEntries, gameUI)
     end
 
-    -- Start moving skill monitor
     if #movingSkillEntries > 0 then
         StartMovingSkillMonitor(movingSkillEntries, gameUI)
     end
@@ -769,7 +763,6 @@ local function RunMacroRunner()
 
             if #vecTab == 3 then
                 local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-                local cframe = CFrame.new(pos)
                 local args = {
                     tonumber(entry.TowerA1),
                     entry.TowerPlaced,
@@ -778,60 +771,37 @@ local function RunMacroRunner()
                 }
 
                 WaitForCash(entry.TowerPlaceCost)
-                PlaceTowerRetry(args, cframe, entry.TowerPlaced)
+                PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
 
-                towerRecords[cframe] = towerRecords[cframe] or {}
-                table.insert(towerRecords[cframe], { line = i, entry = entry })
+                towerRecords[pos.X] = towerRecords[pos.X] or {}
+                table.insert(towerRecords[pos.X], { line = i, entry = entry })
             end
 
         elseif entry.TowerUpgraded and entry.UpgradePath and entry.UpgradeCost then
-            local vecTab = {}
-            for coord in entry.TowerUpgraded:gmatch("[^,%s]+") do
-                table.insert(vecTab, tonumber(coord))
-            end
-            if #vecTab == 3 then
-                local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-                local cframe = CFrame.new(pos)
-                UpgradeTowerRetry(cframe, entry.UpgradePath)
+            local axis = tonumber(entry.TowerUpgraded)
+            UpgradeTowerRetry(axis, entry.UpgradePath)
 
-                towerRecords[cframe] = towerRecords[cframe] or {}
-                table.insert(towerRecords[cframe], { line = i, entry = entry })
-            end
+            towerRecords[axis] = towerRecords[axis] or {}
+            table.insert(towerRecords[axis], { line = i, entry = entry })
 
-        elseif entry.ChangeTarget and entry.TargetType then
-            local vecTab = {}
-            for coord in entry.ChangeTarget:gmatch("[^,%s]+") do
-                table.insert(vecTab, tonumber(coord))
-            end
-            if #vecTab == 3 then
-                local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-                local cframe = CFrame.new(pos)
-                ChangeTargetRetry(cframe, entry.TargetType)
-
-                towerRecords[cframe] = towerRecords[cframe] or {}
-                table.insert(towerRecords[cframe], { line = i, entry = entry })
-            end
+        elseif entry.TowerTargetChange and entry.TargetWanted then
+            local axis = tonumber(entry.TowerTargetChange)
+            -- Target changes are handled by monitor, just add to records
+            towerRecords[axis] = towerRecords[axis] or {}
+            table.insert(towerRecords[axis], { line = i, entry = entry })
 
         elseif entry.SellTower then
-            local vecTab = {}
-            for coord in entry.SellTower:gmatch("[^,%s]+") do
-                table.insert(vecTab, tonumber(coord))
-            end
-            if #vecTab == 3 then
-                local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-                local cframe = CFrame.new(pos)
-                SellTowerRetry(cframe)
+            local axis = tonumber(entry.SellTower)
+            SellTowerRetry(axis)
 
-                towerRecords[cframe] = towerRecords[cframe] or {}
-                table.insert(towerRecords[cframe], { line = i, entry = entry })
-            end
+            towerRecords[axis] = towerRecords[axis] or {}
+            table.insert(towerRecords[axis], { line = i, entry = entry })
 
-        -- Xử lý moving skill entries trong main execution
-        elseif entry.towermovingCFrame and entry.skillindex and entry.location then
+        elseif entry.towermoving and entry.skillindex and entry.location then
             -- Moving skills sẽ được xử lý bởi monitor, nhưng vẫn cần thêm vào towerRecords cho rebuild
-            local cframe = entry.towermovingCFrame
-            towerRecords[cframe] = towerRecords[cframe] or {}
-            table.insert(towerRecords[cframe], { line = i, entry = entry })
+            local axis = entry.towermoving
+            towerRecords[axis] = towerRecords[axis] or {}
+            table.insert(towerRecords[axis], { line = i, entry = entry })
         end
 
         task.wait(globalEnv.TDX_Config.MacroStepDelay)
