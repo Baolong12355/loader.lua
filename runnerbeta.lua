@@ -50,7 +50,7 @@ end
 local defaultConfig = {
     ["Macro Name"] = "e",
     ["PlaceMode"] = "Rewrite",
-    ["ForceRebuildEvenIfSold"] = false, -- Changed to true by default
+    ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
     ["SellAllDelay"] = 0.1,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
@@ -301,7 +301,6 @@ local function ChangeTargetRetry(axisValue, targetType)
     end
 end
 
--- Function để sử dụng moving skill
 local function UseMovingSkillRetry(axisValue, skillIndex, location)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
@@ -323,11 +322,6 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
             local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
             if not ability then
                 return false
-            end
-
-            local cooldown = ability.CooldownRemaining or 0
-            if cooldown > 0 then
-                task.wait(cooldown + 0.1)
             end
 
             local success = false
@@ -394,7 +388,6 @@ local function shouldChangeTarget(entry, currentWave, currentTime)
     return true
 end
 
--- Function để kiểm tra nếu nên sử dụng moving skill
 local function shouldUseMovingSkill(entry, currentWave, currentTime)
     if entry.wave and entry.wave ~= currentWave then
         return false
@@ -434,7 +427,6 @@ local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
     end)
 end
 
--- Function để monitor moving skills
 local function StartMovingSkillMonitor(movingSkillEntries, gameUI)
     local processedEntries = {}
 
@@ -463,15 +455,36 @@ local function StartMovingSkillMonitor(movingSkillEntries, gameUI)
     end)
 end
 
--- Thay thế phần StartRebuildSystem trong code của bạn bằng version này:
+local function RebuildIfNeeded(axisX, placeArgs)
+    local hash, tower = GetTowerByAxis(axisX)
+    if not hash and soldConvertedX[axisX] then
+        local ok = false
+        for i = 1, getMaxAttempts() do
+            ok = pcall(function()
+                Remotes.PlaceTower:InvokeServer(unpack(placeArgs))
+            end)
+            if ok then
+                local t1 = tick()
+                repeat
+                    local h = GetTowerByAxis(axisX)
+                    if h then break end
+                    task.wait(0.1)
+                until tick() - t1 > 3
+                if GetTowerByAxis(axisX) then break end
+            end
+            task.wait(0.1)
+        end
+        if ok then
+            soldConvertedX[axisX] = nil
+        end
+    end
+end
 
 local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     local config = globalEnv.TDX_Config
     local rebuildAttempts = {}
     local soldPositions = {}
-    local lastSeenTowers = {} -- Track towers để phát hiện khi nào bị bán thủ công
 
-    -- Tracking system cho towers đã chết
     local deadTowerTracker = {
         deadTowers = {},
         nextDeathId = 1
@@ -491,36 +504,10 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
         deadTowerTracker.deadTowers[x] = nil
     end
 
-    -- Function để kiểm tra xem tower có bị bán thủ công không
-    local function updateSoldPositions()
-        for x, _ in pairs(lastSeenTowers) do
-            local hash, tower = GetTowerByAxis(x)
-            if not hash then
-                -- Tower không còn tồn tại
-                -- Kiểm tra xem có phải do auto sell converted không
-                if not soldConvertedX[x] then
-                    -- Không phải auto sell converted, có thể là bán thủ công
-                    soldPositions[x] = true
-                end
-            end
-        end
-        
-        -- Cập nhật lastSeenTowers
-        lastSeenTowers = {}
-        for hash, tower in pairs(TowerClass.GetTowers()) do
-            local spawnCFrame = tower.SpawnCFrame
-            if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                local pos = spawnCFrame.Position
-                lastSeenTowers[pos.X] = true
-            end
-        end
-    end
-
-    -- Worker system với moving skills support
     local jobQueue = {}
     local activeJobs = {}
 
-    -- Worker function - Improved rebuild sequence: Place -> Upgrade -> Target -> Moving
+    -- Worker function với thứ tự rebuild: Place → Upgrade → Target → Moving Skills
     local function RebuildWorker()
         task.spawn(function()
             while true do
@@ -529,30 +516,30 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                     local x = job.x
                     local records = job.records
 
-                    -- Organize records by type with proper sequence
-                    local placeRecord = nil
-                    local upgradeRecords = {}
-                    local targetRecords = {}
-                    local movingRecords = {}
+                    -- Phân loại actions theo thứ tự rebuild
+                    local placeActions = {}
+                    local upgradeActions = {}
+                    local targetActions = {}
+                    local movingActions = {}
 
                     for _, record in ipairs(records) do
                         local action = record.entry
                         if action.TowerPlaced then
-                            placeRecord = record
+                            table.insert(placeActions, record)
                         elseif action.TowerUpgraded then
-                            table.insert(upgradeRecords, record)
-                        elseif action.TowerTargetChange then
-                            table.insert(targetRecords, record)
+                            table.insert(upgradeActions, record)
+                        elseif action.ChangeTarget then
+                            table.insert(targetActions, record)
                         elseif action.towermoving then
-                            table.insert(movingRecords, record)
+                            table.insert(movingActions, record)
                         end
                     end
 
                     local rebuildSuccess = true
 
-                    -- Step 1: Place tower
-                    if placeRecord then
-                        local action = placeRecord.entry
+                    -- 1. Place towers trước
+                    for _, record in ipairs(placeActions) do
+                        local action = record.entry
                         local vecTab = {}
                         for coord in action.TowerVector:gmatch("[^,%s]+") do
                             table.insert(vecTab, tonumber(coord))
@@ -568,58 +555,37 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                             WaitForCash(action.TowerPlaceCost)
                             if not PlaceTowerRetry(args, pos.X, action.TowerPlaced) then
                                 rebuildSuccess = false
-                            else
-                                -- Reset sold status khi place thành công
-                                soldPositions[x] = nil
-                                soldConvertedX[x] = nil
+                                break
                             end
                         end
                     end
 
-                    -- Step 2: Upgrade towers (in order)
+                    -- 2. Upgrade towers
                     if rebuildSuccess then
-                        table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
-                        for _, record in ipairs(upgradeRecords) do
+                        for _, record in ipairs(upgradeActions) do
                             local action = record.entry
                             if not UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath) then
                                 rebuildSuccess = false
                                 break
                             end
-                            task.wait(0.1) -- Small delay between upgrades
                         end
                     end
 
-                    -- Step 3: Change targets
+                    -- 3. Change targets
                     if rebuildSuccess then
-                        for _, record in ipairs(targetRecords) do
+                        for _, record in ipairs(targetActions) do
                             local action = record.entry
-                            ChangeTargetRetry(tonumber(action.TowerTargetChange), action.TargetWanted)
-                            task.wait(0.05)
+                            ChangeTargetRetry(tonumber(action.ChangeTarget), action.TargetType)
                         end
                     end
 
-                    -- Step 4: Apply moving skills (only the last one for each tower)
-                    if rebuildSuccess and #movingRecords > 0 then
-                        -- Get the last moving skill for this tower
-                        local lastMovingRecord = movingRecords[#movingRecords]
-                        local action = lastMovingRecord.entry
-                        UseMovingSkillRetry(action.towermoving, action.skillindex, action.location)
+                    -- 4. Cuối cùng là moving skills (chỉ dùng cái cuối cùng)
+                    if rebuildSuccess and #movingActions > 0 then
+                        local lastMovingAction = movingActions[#movingActions].entry
+                        UseMovingSkillRetry(lastMovingAction.towermoving, lastMovingAction.skillindex, lastMovingAction.location)
                         task.wait(0.2)
                     end
 
-                    -- Handle other actions (sell, etc.)
-                    if rebuildSuccess then
-                        for _, record in ipairs(records) do
-                            local action = record.entry
-                            if action.SellTower then
-                                if SellTowerRetry(tonumber(action.SellTower)) then
-                                    soldPositions[tonumber(action.SellTower)] = true
-                                end
-                            end
-                        end
-                    end
-
-                    -- Cleanup sau khi rebuild
                     if rebuildSuccess then
                         rebuildAttempts[x] = 0
                         clearTowerDeath(x)
@@ -638,23 +604,16 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
         RebuildWorker()
     end
 
-    -- Producer - Fast detection system với improved sold detection
+    -- Producer - Fast detection system
     task.spawn(function()
         while true do
-            -- Cập nhật danh sách towers bị bán thủ công
-            updateSoldPositions()
-            
             if next(towerRecords) then
                 for x, records in pairs(towerRecords) do
                     local hash, tower = GetTowerByAxis(x)
 
                     if not hash or not tower then
-                        -- Tower không tồn tại (chết HOẶC bị bán)
-                        if not activeJobs[x] then -- Chưa có job rebuild
-                            -- Check ForceRebuildEvenIfSold setting - FIXED LOGIC
+                        if not activeJobs[x] then
                             if soldPositions[x] and not config.ForceRebuildEvenIfSold then
-                                -- Tower đã bị bán thủ công và không force rebuild
-                                print("Skipping rebuild for tower at X=" .. x .. " - manually sold and ForceRebuildEvenIfSold is disabled")
                                 continue
                             end
 
@@ -688,7 +647,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                                     local maxRetry = config.MaxRebuildRetry
 
                                     if not maxRetry or rebuildAttempts[x] <= maxRetry then
-                                        -- Add to queue với priority
                                         activeJobs[x] = true
                                         local priority = GetTowerPriority(towerType)
                                         table.insert(jobQueue, { 
@@ -698,103 +656,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                                             deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick()
                                         })
 
-                                        -- Sort by priority, then by death time (older first)
-                                        table.sort(jobQueue, function(a, b) 
-                                            if a.priority == b.priority then
-                                                return a.deathTime < b.deathTime
-                                            end
-                                            return a.priority < b.priority 
-                                        end)
-                                        
-                                        print("Queued rebuild for " .. towerType .. " at X=" .. x)
-                                    end
-                                end
-                            end
-                        end
-                    else
-                        -- Tower sống, cleanup
-                        clearTowerDeath(x)
-                        if activeJobs[x] then
-                            activeJobs[x] = nil
-                            -- Remove from queue if exists
-                            for i = #jobQueue, 1, -1 do
-                                if jobQueue[i].x == x then
-                                    table.remove(jobQueue, i)
-                                    break
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-
-            RunService.Heartbeat:Wait()
-        end
-    end)
-end
-
-    -- Khởi tạo workers
-    for i = 1, config.MaxConcurrentRebuilds do
-        RebuildWorker()
-    end
-
-    -- Producer - Fast detection system with ForceRebuildEvenIfSold support
-    task.spawn(function()
-        while true do
-            if next(towerRecords) then
-                for x, records in pairs(towerRecords) do
-                    local hash, tower = GetTowerByAxis(x)
-
-                    if not hash or not tower then
-                        -- Tower không tồn tại (chết HOẶC bị bán)
-                        if not activeJobs[x] then -- Chưa có job rebuild
-                            -- Check ForceRebuildEvenIfSold setting
-                            if soldPositions[x] and not config.ForceRebuildEvenIfSold then
-                                -- Tower đã bị bán và không force rebuild
-                                continue
-                            end
-
-                            recordTowerDeath(x)
-
-                            local towerType = nil
-                            local firstPlaceRecord = nil
-
-                            for _, record in ipairs(records) do
-                                if record.entry.TowerPlaced then 
-                                    towerType = record.entry.TowerPlaced
-                                    firstPlaceRecord = record
-                                    break
-                                end
-                            end
-
-                            if towerType then
-                                local skipRule = skipTypesMap[towerType]
-                                local shouldSkip = false
-
-                                if skipRule then
-                                    if skipRule.beOnly and firstPlaceRecord.line < skipRule.fromLine then
-                                        shouldSkip = true
-                                    elseif not skipRule.beOnly then
-                                        shouldSkip = true
-                                    end
-                                end
-
-                                if not shouldSkip then
-                                    rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
-                                    local maxRetry = config.MaxRebuildRetry
-
-                                    if not maxRetry or rebuildAttempts[x] <= maxRetry then
-                                        -- Add to queue với priority
-                                        activeJobs[x] = true
-                                        local priority = GetTowerPriority(towerType)
-                                        table.insert(jobQueue, { 
-                                            x = x, 
-                                            records = records, 
-                                            priority = priority,
-                                            deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick()
-                                        })
-
-                                        -- Sort by priority, then by death time (older first)
                                         table.sort(jobQueue, function(a, b) 
                                             if a.priority == b.priority then
                                                 return a.deathTime < b.deathTime
@@ -806,11 +667,9 @@ end
                             end
                         end
                     else
-                        -- Tower sống, cleanup
                         clearTowerDeath(x)
                         if activeJobs[x] then
                             activeJobs[x] = nil
-                            -- Remove from queue if exists
                             for i = #jobQueue, 1, -1 do
                                 if jobQueue[i].x == x then
                                     table.remove(jobQueue, i)
@@ -856,7 +715,6 @@ local function RunMacroRunner()
     local movingSkillEntries = {}
     local rebuildSystemActive = false
 
-    -- Phân loại các entries theo loại
     for i, entry in ipairs(macro) do
         if entry.TowerTargetChange then
             table.insert(targetChangeEntries, entry)
@@ -916,21 +774,14 @@ local function RunMacroRunner()
             towerRecords[axis] = towerRecords[axis] or {}
             table.insert(towerRecords[axis], { line = i, entry = entry })
 
-        elseif entry.TowerTargetChange and entry.TargetWanted then
-            local axis = tonumber(entry.TowerTargetChange)
-            -- Target changes are handled by monitor, just add to records
-            towerRecords[axis] = towerRecords[axis] or {}
-            table.insert(towerRecords[axis], { line = i, entry = entry })
-
-        elseif entry.SellTower then
-            local axis = tonumber(entry.SellTower)
-            SellTowerRetry(axis)
+        elseif entry.ChangeTarget and entry.TargetType then
+            local axis = tonumber(entry.ChangeTarget)
+            ChangeTargetRetry(axis, entry.TargetType)
 
             towerRecords[axis] = towerRecords[axis] or {}
             table.insert(towerRecords[axis], { line = i, entry = entry })
 
         elseif entry.towermoving and entry.skillindex and entry.location then
-            -- Moving skills sẽ được xử lý bởi monitor, nhưng vẫn cần thêm vào towerRecords cho rebuild
             local axis = entry.towermoving
             towerRecords[axis] = towerRecords[axis] or {}
             table.insert(towerRecords[axis], { line = i, entry = entry })
