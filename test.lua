@@ -1,15 +1,19 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local player = Players.LocalPlayer
+local PlayerScripts = player:WaitForChild("PlayerScripts")
+
 local replStorage = game:GetService("ReplicatedStorage")
 local remotes = replStorage:WaitForChild("Remotes")
 local TowerUseAbilityRequest = remotes:WaitForChild("TowerUseAbilityRequest")
 local localPlayer = game:GetService("Players").LocalPlayer
-local PlayerScripts = localPlayer:WaitForChild("PlayerScripts")
-local HttpService = game:GetService("HttpService")
 
 -- Biến lưu hàm gốc
 local originalInvokeServer
 
--- Đường dẫn file output
-local outJson = "tdx/macros/recorder_output.json"
+-- Cache để lưu moving skills thay vì ghi file
+local movingSkillsCache = {}
 
 -- Lấy TowerClass để ánh xạ hash tới tower type
 local TowerClass
@@ -20,34 +24,9 @@ pcall(function()
     TowerClass = require(towerModule)
 end)
 
--- Tạo thư mục nếu chưa tồn tại
-pcall(function() makefolder("tdx") end)
-pcall(function() makefolder("tdx/macros") end)
-
--- Hàm ghi file an toàn
-local function safeWriteFile(path, content)
-    if writefile then
-        local success, err = pcall(writefile, path, content)
-        if not success then
-            warn("Lỗi khi ghi file: " .. tostring(err))
-        end
-    end
-end
-
--- Hàm đọc file an toàn
-local function safeReadFile(path)
-    if isfile and isfile(path) and readfile then
-        local success, content = pcall(readfile, path)
-        if success then
-            return content
-        end
-    end
-    return ""
-end
-
 -- Lấy thông tin wave và thời gian hiện tại
 local function getCurrentWaveAndTime()
-    local playerGui = localPlayer:FindFirstChildOfClass("PlayerGui")
+    local playerGui = player:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return nil, nil end
 
     local interface = playerGui:FindFirstChild("Interface")
@@ -89,27 +68,12 @@ local function getTowerXFromHash(hash)
     return nil
 end
 
--- Đọc file JSON hiện có
-local function loadExistingActions()
-    local content = safeReadFile(outJson)
-    if content == "" then return {} end
-
-    local ok, decoded = pcall(HttpService.JSONDecode, HttpService, content)
-    if ok and type(decoded) == "table" then
-        return decoded
-    end
-    return {}
-end
-
--- Cập nhật file JSON với entry mới
-local function addMovingSkillEntry(entry)
-    local existingActions = loadExistingActions()
-    table.insert(existingActions, entry)
-    
-    local ok, jsonStr = pcall(HttpService.JSONEncode, HttpService, existingActions)
-    if ok then
-        safeWriteFile(outJson, jsonStr)
-    end
+-- Cache moving skill thay vì ghi file
+local function cacheMovingSkill(entry)
+    table.insert(movingSkillsCache, entry)
+    print(string.format("📋 Cached moving skill: %s (X=%.1f) skill %d -> (%.1f, %.1f, %.1f) at wave %s", 
+        entry.towerType or "Unknown", entry.towermoving, entry.skillindex, 
+        entry.location.x, entry.location.y, entry.location.z, entry.wave or "?"))
 end
 
 -- Xử lý khi phát hiện moving skill
@@ -152,14 +116,12 @@ local function handleMovingSkill(hash, skillIndex, targetPos)
             z = targetPos.Z
         },
         wave = currentWave,
-        time = timeNumber
+        time = timeNumber,
+        towerType = towerType -- Thêm để debug
     }
     
-    -- Ghi vào file
-    addMovingSkillEntry(entry)
-    
-    print(string.format("✅ Recorded moving skill: %s (X=%.1f) skill %d -> (%.1f, %.1f, %.1f) at wave %s time %s", 
-        towerType, towerX, skillIndex, targetPos.X, targetPos.Y, targetPos.Z, currentWave or "?", currentTime or "?"))
+    -- Cache thay vì ghi file
+    cacheMovingSkill(entry)
 end
 
 -- Hook nguyên mẫu cho Ability Request
@@ -192,9 +154,97 @@ local function setupAbilityHook()
     end)
 end
 
+-- API để truy cập cache
+_G.TDX_MovingSkills = {
+    getCache = function()
+        return movingSkillsCache
+    end,
+    
+    clearCache = function()
+        movingSkillsCache = {}
+        print("🗑️ Moving skills cache cleared")
+    end,
+    
+    getCacheCount = function()
+        return #movingSkillsCache
+    end,
+    
+    getLastSkill = function()
+        return movingSkillsCache[#movingSkillsCache]
+    end,
+    
+    -- Chuyển đổi cache thành format recorder
+    convertToRecorderFormat = function()
+        local converted = {}
+        for _, entry in ipairs(movingSkillsCache) do
+            table.insert(converted, {
+                towermoving = entry.towermoving,
+                skillindex = entry.skillindex,
+                location = string.format("%.1f, %.1f, %.1f", entry.location.x, entry.location.y, entry.location.z),
+                wave = entry.wave,
+                time = entry.time
+            })
+        end
+        return converted
+    end,
+    
+    -- Xuất cache ra file JSON
+    exportToFile = function(filename)
+        filename = filename or "tdx/macros/moving_skills_export.json"
+        pcall(function() makefolder("tdx") end)
+        pcall(function() makefolder("tdx/macros") end)
+        
+        local converted = _G.TDX_MovingSkills.convertToRecorderFormat()
+        local ok, jsonStr = pcall(HttpService.JSONEncode, HttpService, converted)
+        if ok and writefile then
+            pcall(writefile, filename, jsonStr)
+            print("💾 Exported " .. #converted .. " moving skills to: " .. filename)
+            return true
+        end
+        return false
+    end,
+    
+    -- Tích hợp vào recorder output
+    integrateToRecorder = function()
+        local outJson = "tdx/macros/recorder_output.json"
+        if not (readfile and isfile and isfile(outJson)) then
+            print("❌ Recorder output file not found")
+            return false
+        end
+        
+        local content = ""
+        pcall(function() content = readfile(outJson) end)
+        
+        local existingActions = {}
+        if content ~= "" then
+            local ok, decoded = pcall(HttpService.JSONDecode, HttpService, content)
+            if ok and type(decoded) == "table" then
+                existingActions = decoded
+            end
+        end
+        
+        -- Thêm moving skills vào
+        for _, entry in ipairs(_G.TDX_MovingSkills.convertToRecorderFormat()) do
+            table.insert(existingActions, entry)
+        end
+        
+        local ok, jsonStr = pcall(HttpService.JSONEncode, HttpService, existingActions)
+        if ok and writefile then
+            pcall(writefile, outJson, jsonStr)
+            print("🔄 Integrated " .. #movingSkillsCache .. " moving skills into recorder output")
+            return true
+        end
+        return false
+    end
+}
+
 -- Khởi tạo hook
 setupAbilityHook()
 
 print("✅ TDX Moving Skills Recorder Hook đã hoạt động!")
 print("🎯 Tracking: Helicopter (skill 1,3), Cryo Helicopter (skill 1,3), Jet Trooper (skill 1)")
-print("📁 Dữ liệu sẽ được ghi vào: " .. outJson)
+print("📋 Dữ liệu được cache trong memory - Sử dụng _G.TDX_MovingSkills để truy cập")
+print("🔧 Commands available:")
+print("   _G.TDX_MovingSkills.getCache() - Xem cache")
+print("   _G.TDX_MovingSkills.exportToFile() - Xuất ra file") 
+print("   _G.TDX_MovingSkills.integrateToRecorder() - Tích hợp vào recorder")
