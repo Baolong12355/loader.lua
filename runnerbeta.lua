@@ -324,13 +324,17 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
     
+    print("[TDX Runner] Trying to use moving skill - axisValue:", axisValue, "skillIndex:", skillIndex, "location:", location)
+    
     while attempts < maxAttempts do
         local hash = GetTowerByAxis(axisValue)
         if hash then
+            print("[TDX Runner] Found tower hash:", hash, "for axis:", axisValue)
             local success = false
             
             if location == "no_pos" then
                 -- Skill không cần position (skill 3)
+                print("[TDX Runner] Using skill without position")
                 success = pcall(function()
                     Remotes.TowerUseAbilityRequest:InvokeServer(hash, skillIndex)
                 end)
@@ -343,18 +347,30 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
                 
                 if #coords == 3 then
                     local targetPos = Vector3.new(coords[1], coords[2], coords[3])
+                    print("[TDX Runner] Using skill with position:", targetPos)
                     success = pcall(function()
                         Remotes.TowerUseAbilityRequest:InvokeServer(hash, skillIndex, targetPos)
                     end)
+                else
+                    print("[TDX Runner] Invalid coordinates format:", location)
                 end
             end
             
-            if success then return true end
+            if success then 
+                print("[TDX Runner] Successfully used moving skill!")
+                return true 
+            else
+                print("[TDX Runner] Failed to use moving skill, attempt:", attempts + 1)
+            end
+        else
+            print("[TDX Runner] No tower found at axis:", axisValue)
         end
         
         attempts = attempts + 1
         task.wait(0.1)
     end
+    
+    print("[TDX Runner] Failed to use moving skill after", maxAttempts, "attempts")
     return false
 end
 
@@ -429,7 +445,8 @@ local function GetLastMovingSkillForTower(records)
     local lastLine = -1
     
     for _, record in ipairs(records) do
-        if record.entry.towermoving and record.entry.skillindex and record.line > lastLine then
+        -- Kiểm tra entry có towermoving, skillindex và location
+        if record.entry.towermoving and record.entry.skillindex and record.entry.location and record.line > lastLine then
             lastMovingSkill = record.entry
             lastLine = record.line
         end
@@ -524,6 +541,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                     -- Sau khi rebuild xong, dùng moving skill cuối cùng (nếu có)
                     if rebuildSuccess and lastMovingSkill then
                         task.wait(0.2) -- Đợi tower ổn định
+                        print("[TDX Runner] Sử dụng moving skill cuối cùng cho tower tại X:", x, "skillindex:", lastMovingSkill.skillindex, "location:", lastMovingSkill.location)
                         UseMovingSkillRetry(
                             tonumber(lastMovingSkill.towermoving), 
                             lastMovingSkill.skillindex, 
@@ -737,11 +755,13 @@ local function RunMacroRunner()
         -- THÊM: Xử lý moving skills trong macro chính
         elseif entry.towermoving and entry.skillindex and entry.location then
             local axis = tonumber(entry.towermoving)
-            UseMovingSkillRetry(axis, entry.skillindex, entry.location)
+            if axis then
+                UseMovingSkillRetry(axis, entry.skillindex, entry.location)
 
-            -- Thêm vào towerRecords để rebuild system biết
-            towerRecords[axis] = towerRecords[axis] or {}
-            table.insert(towerRecords[axis], { line = i, entry = entry })
+                -- Thêm vào towerRecords để rebuild system biết
+                towerRecords[axis] = towerRecords[axis] or {}
+                table.insert(towerRecords[axis], { line = i, entry = entry })
+            end
         end
 
         task.wait(globalEnv.TDX_Config.MacroStepDelay)
