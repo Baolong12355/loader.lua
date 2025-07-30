@@ -50,7 +50,7 @@ end
 local defaultConfig = {
     ["Macro Name"] = "e",
     ["PlaceMode"] = "Rewrite",
-    ["ForceRebuildEvenIfSold"] = false,
+    ["ForceRebuildEvenIfSold"] = true,
     ["MaxRebuildRetry"] = nil,
     ["SellAllDelay"] = 0.1,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
@@ -301,52 +301,38 @@ local function ChangeTargetRetry(axisValue, targetType)
     end
 end
 
--- NEW: Function để sử dụng moving skill
+-- Function để sử dụng moving skill
 local function UseMovingSkillRetry(axisValue, skillIndex, location)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
-    
-    -- Kiểm tra remote type
+
     local TowerUseAbilityRequest = Remotes:FindFirstChild("TowerUseAbilityRequest")
     if not TowerUseAbilityRequest then
-        print("❌ Không tìm thấy TowerUseAbilityRequest remote")
         return false
     end
-    
+
     local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
-    print(string.format("🔧 Remote type: %s, sử dụng %s", 
-        TowerUseAbilityRequest.ClassName, useFireServer and "FireServer" or "InvokeServer"))
-    
+
     while attempts < maxAttempts do
         local hash, tower = GetTowerByAxis(axisValue)
         if hash and tower then
-            -- Kiểm tra tower có ability handler không
             if not tower.AbilityHandler then
-                print(string.format("❌ Tower tại X=%.2f không có AbilityHandler", axisValue))
                 return false
             end
-            
-            -- Kiểm tra ability tại index có tồn tại không
+
             local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
             if not ability then
-                print(string.format("❌ Tower tại X=%.2f không có skill index %d", axisValue, skillIndex))
                 return false
             end
-            
-            -- Kiểm tra cooldown
+
             local cooldown = ability.CooldownRemaining or 0
             if cooldown > 0 then
-                print(string.format("⏰ Skill %d của tower X=%.2f đang cooldown: %.2fs", skillIndex, axisValue, cooldown))
                 -- Có thể chọn wait hoặc skip
                 -- task.wait(cooldown + 0.1)
             end
-            
-            print(string.format("🔧 Tower type: %s, Skill index: %d, Hash: %s", 
-                tostring(tower.Type), skillIndex, tostring(hash)))
-            
+
             local success = false
             if location == "no_pos" then
-                -- Skill không cần position (skill 3)
                 success = pcall(function()
                     if useFireServer then
                         TowerUseAbilityRequest:FireServer(hash, skillIndex)
@@ -354,9 +340,7 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
                         TowerUseAbilityRequest:InvokeServer(hash, skillIndex)
                     end
                 end)
-                print(string.format("✅ Sử dụng skill %d cho tower tại X=%.2f (no position)", skillIndex, axisValue))
             else
-                -- Skill cần position, parse location string thành Vector3
                 local x, y, z = location:match("([^,%s]+),%s*([^,%s]+),%s*([^,%s]+)")
                 if x and y and z then
                     local pos = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
@@ -367,18 +351,12 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
                             TowerUseAbilityRequest:InvokeServer(hash, skillIndex, pos)
                         end
                     end)
-                    print(string.format("✅ Sử dụng skill %d cho tower tại X=%.2f -> Vị trí: %.2f, %.2f, %.2f", 
-                        skillIndex, axisValue, pos.X, pos.Y, pos.Z))
-                else
-                    print(string.format("❌ Không thể parse location: '%s'", location))
                 end
             end
-            
+
             if success then
                 return true
             end
-        else
-            print(string.format("❌ Không tìm thấy tower tại X=%.2f", axisValue))
         end
         attempts = attempts + 1
         task.wait(0.1)
@@ -417,25 +395,17 @@ local function shouldChangeTarget(entry, currentWave, currentTime)
     return true
 end
 
--- NEW: Function để kiểm tra nếu nên sử dụng moving skill
+-- Function để kiểm tra nếu nên sử dụng moving skill
 local function shouldUseMovingSkill(entry, currentWave, currentTime)
-    -- Debug log
-    print(string.format("🔍 Kiểm tra moving skill: Entry wave='%s' vs Current='%s', Entry time=%s vs Current='%s'", 
-        tostring(entry.wave), tostring(currentWave), tostring(entry.time), tostring(currentTime)))
-    
     if entry.wave and entry.wave ~= currentWave then
-        print("❌ Wave không khớp")
         return false
     end
     if entry.time then
         local targetTimeStr = convertToTimeFormat(entry.time)
-        print(string.format("🕐 So sánh thời gian: Target='%s' vs Current='%s'", targetTimeStr, currentTime))
         if currentTime ~= targetTimeStr then
-            print("❌ Thời gian không khớp")
             return false
         end
     end
-    print("✅ Điều kiện khớp, sẽ sử dụng skill")
     return true
 end
 
@@ -465,15 +435,9 @@ local function StartTargetChangeMonitor(targetChangeEntries, gameUI)
     end)
 end
 
--- NEW: Function để monitor moving skills
+-- Function để monitor moving skills
 local function StartMovingSkillMonitor(movingSkillEntries, gameUI)
     local processedEntries = {}
-    
-    print(string.format("🎯 Khởi động Moving Skill Monitor với %d entries", #movingSkillEntries))
-    for i, entry in ipairs(movingSkillEntries) do
-        print(string.format("   Entry %d: Tower X=%.2f, Skill=%d, Wave='%s', Time=%s, Location='%s'", 
-            i, entry.towermoving, entry.skillindex, tostring(entry.wave), tostring(entry.time), entry.location))
-    end
 
     task.spawn(function()
         while true do
@@ -488,19 +452,11 @@ local function StartMovingSkillMonitor(movingSkillEntries, gameUI)
                         local skillIndex = entry.skillindex
                         local location = entry.location
 
-                        print(string.format("🚀 Thực hiện moving skill: Tower X=%.2f, Skill=%d, Location='%s'", 
-                            axisValue, skillIndex, location))
-                        
                         if UseMovingSkillRetry(axisValue, skillIndex, location) then
                             processedEntries[i] = true
-                            print(string.format("✅ Moving skill thành công cho entry %d", i))
-                        else
-                            print(string.format("❌ Moving skill thất bại cho entry %d", i))
                         end
                     end
                 end
-            else
-                print("❌ Không thể lấy thông tin wave/time từ UI")
             end
 
             task.wait(globalEnv.TDX_Config.TargetChangeCheckDelay)
@@ -539,7 +495,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     local rebuildAttempts = {}
     local soldPositions = {}
 
-    -- Tracking system cho towers đã chết (từ v19)
+    -- Tracking system cho towers đã chết
     local deadTowerTracker = {
         deadTowers = {},
         nextDeathId = 1
@@ -559,7 +515,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
         deadTowerTracker.deadTowers[x] = nil
     end
 
-    -- Worker system (từ v20) với cải tiến
+    -- Worker system
     local jobQueue = {}
     local activeJobs = {}
 
@@ -572,7 +528,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                     local x = job.x
                     local records = job.records
 
-                    -- NEW: Tìm moving skill cuối cùng cho tower này
+                    -- Tìm moving skill cuối cùng cho tower này
                     local lastMovingSkill = nil
                     for _, record in ipairs(records) do
                         if record.entry.towermoving then
@@ -605,7 +561,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                             end
 
                         elseif action.TowerUpgraded then
-                            -- Đảm bảo upgrade thành công, nếu fail thì retry
                             if not UpgradeTowerRetry(tonumber(action.TowerUpgraded), action.UpgradePath) then
                                 rebuildSuccess = false
                                 break
@@ -619,11 +574,10 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                                 soldPositions[tonumber(action.SellTower)] = true
                             end
 
-                        -- NEW: Xử lý moving skill - chỉ dùng cái cuối cùng
+                        -- Xử lý moving skill - chỉ dùng cái cuối cùng
                         elseif action.towermoving then
                             -- Chỉ thực hiện nếu đây là moving skill cuối cùng của tower này
                             if action == lastMovingSkill then
-                                print(string.format("🔄 Rebuild: Sử dụng moving skill cuối cùng cho tower X=%.2f", action.towermoving))
                                 UseMovingSkillRetry(action.towermoving, action.skillindex, action.location)
                                 task.wait(0.2) -- Thêm delay nhỏ sau khi dùng skill
                             end
@@ -638,7 +592,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
 
                     activeJobs[x] = nil
                 else
-                    RunService.Heartbeat:Wait() -- Sử dụng heartbeat thay vì task.wait
+                    RunService.Heartbeat:Wait()
                 end
             end
         end)
@@ -733,7 +687,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                 end
             end
 
-            RunService.Heartbeat:Wait() -- Sử dụng heartbeat để response nhanh nhất
+            RunService.Heartbeat:Wait()
         end
     end)
 end
@@ -764,14 +718,14 @@ local function RunMacroRunner()
     local towerRecords = {}
     local skipTypesMap = {}
     local targetChangeEntries = {}
-    local movingSkillEntries = {} -- NEW: Array cho moving skills
+    local movingSkillEntries = {}
     local rebuildSystemActive = false
 
-    -- NEW: Phân loại các entries theo loại
+    -- Phân loại các entries theo loại
     for i, entry in ipairs(macro) do
         if entry.TowerTargetChange then
             table.insert(targetChangeEntries, entry)
-        elseif entry.towermoving then -- NEW: Moving skill entries
+        elseif entry.towermoving then
             table.insert(movingSkillEntries, entry)
         end
     end
@@ -780,7 +734,7 @@ local function RunMacroRunner()
         StartTargetChangeMonitor(targetChangeEntries, gameUI)
     end
 
-    -- NEW: Start moving skill monitor
+    -- Start moving skill monitor
     if #movingSkillEntries > 0 then
         StartMovingSkillMonitor(movingSkillEntries, gameUI)
     end
@@ -842,7 +796,7 @@ local function RunMacroRunner()
             towerRecords[axis] = towerRecords[axis] or {}
             table.insert(towerRecords[axis], { line = i, entry = entry })
 
-        -- NEW: Xử lý moving skill entries trong main execution
+        -- Xử lý moving skill entries trong main execution
         elseif entry.towermoving and entry.skillindex and entry.location then
             -- Moving skills sẽ được xử lý bởi monitor, nhưng vẫn cần thêm vào towerRecords cho rebuild
             local axis = entry.towermoving
