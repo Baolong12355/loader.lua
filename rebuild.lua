@@ -24,7 +24,7 @@ local defaultConfig = {
     ["MaxRebuildRetry"] = nil,
     -- SKIP CONFIGURATIONS - để trống khi không cần dùng
     ["SkipTowersAtAxis"] = {}, -- VD: {-50, -30, 10} - skip các tower tại vị trí X này
-    ["SkipTowersByName"] = {"Slammer", "}, -- VD: {"Medic", "Commander"} - skip các tower có tên này
+    ["SkipTowersByName"] = {"Slammer", "Toxicnator"}, -- VD: {"Medic", "Commander"} - skip các tower có tên này
     ["SkipTowersByLine"] = {}, -- VD: {1, 5, 10} - skip các tower được place ở dòng này trong macro
 }
 
