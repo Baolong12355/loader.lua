@@ -1,8 +1,12 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
+local replStorage = game:GetService("ReplicatedStorage")
+local remotes = replStorage:WaitForChild("Remotes")
+local TowerUseAbilityRequest = remotes:WaitForChild("TowerUseAbilityRequest")
+local localPlayer = game:GetService("Players").LocalPlayer
+local PlayerScripts = localPlayer:WaitForChild("PlayerScripts")
 local HttpService = game:GetService("HttpService")
-local player = Players.LocalPlayer
-local PlayerScripts = player:WaitForChild("PlayerScripts")
+
+-- Biến lưu hàm gốc
+local originalInvokeServer
 
 -- Đường dẫn file output
 local outJson = "tdx/macros/recorder_output.json"
@@ -17,10 +21,8 @@ pcall(function()
 end)
 
 -- Tạo thư mục nếu chưa tồn tại
-if makefolder then
-    pcall(makefolder, "tdx")
-    pcall(makefolder, "tdx/macros")
-end
+pcall(function() makefolder("tdx") end)
+pcall(function() makefolder("tdx/macros") end)
 
 -- Hàm ghi file an toàn
 local function safeWriteFile(path, content)
@@ -45,7 +47,7 @@ end
 
 -- Lấy thông tin wave và thời gian hiện tại
 local function getCurrentWaveAndTime()
-    local playerGui = player:FindFirstChildOfClass("PlayerGui")
+    local playerGui = localPlayer:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return nil, nil end
 
     local interface = playerGui:FindFirstChild("Interface")
@@ -160,55 +162,38 @@ local function handleMovingSkill(hash, skillIndex, targetPos)
         towerType, towerX, skillIndex, targetPos.X, targetPos.Y, targetPos.Z, currentWave or "?", currentTime or "?"))
 end
 
--- Setup hook cho TowerUseAbilityRequest
-local function setupMovingSkillHook()
-    if not hookfunction or not hookmetamethod or not checkcaller then
-        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
-        return
-    end
-    
-    local remotes = ReplicatedStorage:WaitForChild("Remotes")
-    local TowerUseAbilityRequest = remotes:WaitForChild("TowerUseAbilityRequest")
-    
-    -- Hook InvokeServer trước
+-- Hook nguyên mẫu cho Ability Request
+local function setupAbilityHook()
     if TowerUseAbilityRequest:IsA("RemoteFunction") then
-        local originalInvokeServer = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
+        originalInvokeServer = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
             local args = {...}
-            
+
             -- Xử lý moving skill nếu có đủ args
             if #args >= 3 and typeof(args[1]) == "number" and typeof(args[2]) == "number" and typeof(args[3]) == "Vector3" then
                 handleMovingSkill(args[1], args[2], args[3])
             end
-            
-            -- Gọi hàm gốc và return kết quả
+
             return originalInvokeServer(self, ...)
         end)
     end
-    
+
     -- Hook namecall để bắt mọi trường hợp
     local originalNamecall
     originalNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if checkcaller() then 
-            return originalNamecall(self, ...)
-        end
-        
-        local method = getnamecallmethod()
-        if method == "InvokeServer" and self == TowerUseAbilityRequest then
+        if getnamecallmethod() == "InvokeServer" and self == TowerUseAbilityRequest then
             local args = {...}
-            
+
             -- Xử lý moving skill nếu có đủ args
             if #args >= 3 and typeof(args[1]) == "number" and typeof(args[2]) == "number" and typeof(args[3]) == "Vector3" then
                 handleMovingSkill(args[1], args[2], args[3])
             end
         end
-        
-        -- Gọi hàm gốc và return kết quả
         return originalNamecall(self, ...)
     end)
 end
 
 -- Khởi tạo hook
-setupMovingSkillHook()
+setupAbilityHook()
 
 print("✅ TDX Moving Skills Recorder Hook đã hoạt động!")
 print("🎯 Tracking: Helicopter (skill 1,3), Cryo Helicopter (skill 1,3), Jet Trooper (skill 1)")
