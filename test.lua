@@ -69,59 +69,15 @@ local function getTowerXFromHash(hash)
 end
 
 -- Cache moving skill thay vì ghi file
-local function cacheMovingSkill(entry)
-    table.insert(movingSkillsCache, entry)
-    print(string.format("📋 Cached moving skill: %s (X=%.1f) skill %d -> (%.1f, %.1f, %.1f) at wave %s", 
-        entry.towerType or "Unknown", entry.towermoving, entry.skillindex, 
-        entry.location.x, entry.location.y, entry.location.z, entry.wave or "?"))
-end
-
--- Xử lý khi phát hiện moving skill
-local function handleMovingSkill(hash, skillIndex, targetPos)
+local function cacheToMemory(entry)
     -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
     if _G and _G.TDX_REBUILD_RUNNING then
         return
     end
     -- ==================================================
     
-    local towerType = getTowerTypeFromHash(hash)
-    if not towerType then return end
-    
-    -- Kiểm tra xem có phải tower moving skill không
-    local isMovingSkill = false
-    
-    if towerType == "Helicopter" and (skillIndex == 1 or skillIndex == 3) then
-        isMovingSkill = true
-    elseif towerType == "Cryo Helicopter" and (skillIndex == 1 or skillIndex == 3) then
-        isMovingSkill = true
-    elseif towerType == "Jet Trooper" and skillIndex == 1 then
-        isMovingSkill = true
-    end
-    
-    if not isMovingSkill then return end
-    
-    local towerX = getTowerXFromHash(hash)
-    if not towerX then return end
-    
-    local currentWave, currentTime = getCurrentWaveAndTime()
-    local timeNumber = convertTimeToNumber(currentTime)
-    
-    -- Tạo entry theo format yêu cầu
-    local entry = {
-        towermoving = towerX,
-        skillindex = skillIndex,
-        location = {
-            x = targetPos.X,
-            y = targetPos.Y,
-            z = targetPos.Z
-        },
-        wave = currentWave,
-        time = timeNumber,
-        towerType = towerType -- Thêm để debug
-    }
-    
-    -- Cache thay vì ghi file
-    cacheMovingSkill(entry)
+    table.insert(movingSkillsCache, entry)
+    print(string.format("📋 Cached: %s", entry))
 end
 
 -- Hook nguyên mẫu cho Ability Request
@@ -130,9 +86,38 @@ local function setupAbilityHook()
         originalInvokeServer = hookfunction(TowerUseAbilityRequest.InvokeServer, function(self, ...)
             local args = {...}
 
-            -- Xử lý moving skill nếu có đủ args
+            -- Kiểm tra moving skill
             if #args >= 3 and typeof(args[1]) == "number" and typeof(args[2]) == "number" and typeof(args[3]) == "Vector3" then
-                handleMovingSkill(args[1], args[2], args[3])
+                local hash = args[1]
+                local skillIndex = args[2]
+                local targetPos = args[3]
+                
+                local towerType = getTowerTypeFromHash(hash)
+                local isMovingSkill = false
+                
+                if towerType == "Helicopter" and (skillIndex == 1 or skillIndex == 3) then
+                    isMovingSkill = true
+                elseif towerType == "Cryo Helicopter" and (skillIndex == 1 or skillIndex == 3) then
+                    isMovingSkill = true
+                elseif towerType == "Jet Trooper" and skillIndex == 1 then
+                    isMovingSkill = true
+                end
+                
+                if isMovingSkill then
+                    local towerX = getTowerXFromHash(hash)
+                    local currentWave, currentTime = getCurrentWaveAndTime()
+                    local timeNumber = convertTimeToNumber(currentTime)
+                    
+                    local logText = string.format("towermoving=%s|skillindex=%s|location=%s,%s,%s|wave=%s|time=%s",
+                        tostring(towerX),
+                        tostring(skillIndex),
+                        tostring(targetPos.X),
+                        tostring(targetPos.Y), 
+                        tostring(targetPos.Z),
+                        tostring(currentWave),
+                        tostring(timeNumber))
+                    cacheToMemory(logText)
+                end
             end
 
             return originalInvokeServer(self, ...)
@@ -145,9 +130,38 @@ local function setupAbilityHook()
         if getnamecallmethod() == "InvokeServer" and self == TowerUseAbilityRequest then
             local args = {...}
 
-            -- Xử lý moving skill nếu có đủ args
+            -- Kiểm tra moving skill
             if #args >= 3 and typeof(args[1]) == "number" and typeof(args[2]) == "number" and typeof(args[3]) == "Vector3" then
-                handleMovingSkill(args[1], args[2], args[3])
+                local hash = args[1]
+                local skillIndex = args[2]
+                local targetPos = args[3]
+                
+                local towerType = getTowerTypeFromHash(hash)
+                local isMovingSkill = false
+                
+                if towerType == "Helicopter" and (skillIndex == 1 or skillIndex == 3) then
+                    isMovingSkill = true
+                elseif towerType == "Cryo Helicopter" and (skillIndex == 1 or skillIndex == 3) then
+                    isMovingSkill = true
+                elseif towerType == "Jet Trooper" and skillIndex == 1 then
+                    isMovingSkill = true
+                end
+                
+                if isMovingSkill then
+                    local towerX = getTowerXFromHash(hash)
+                    local currentWave, currentTime = getCurrentWaveAndTime()
+                    local timeNumber = convertTimeToNumber(currentTime)
+                    
+                    local logText = string.format("towermoving=%s|skillindex=%s|location=%s,%s,%s|wave=%s|time=%s",
+                        tostring(towerX),
+                        tostring(skillIndex),
+                        tostring(targetPos.X),
+                        tostring(targetPos.Y),
+                        tostring(targetPos.Z),
+                        tostring(currentWave),
+                        tostring(timeNumber))
+                    cacheToMemory(logText)
+                end
             end
         end
         return originalNamecall(self, ...)
@@ -165,86 +179,19 @@ _G.TDX_MovingSkills = {
         print("🗑️ Moving skills cache cleared")
     end,
     
-    getCacheCount = function()
-        return #movingSkillsCache
-    end,
-    
-    getLastSkill = function()
-        return movingSkillsCache[#movingSkillsCache]
-    end,
-    
-    -- Chuyển đổi cache thành format recorder
-    convertToRecorderFormat = function()
-        local converted = {}
-        for _, entry in ipairs(movingSkillsCache) do
-            table.insert(converted, {
-                towermoving = entry.towermoving,
-                skillindex = entry.skillindex,
-                location = string.format("%.1f, %.1f, %.1f", entry.location.x, entry.location.y, entry.location.z),
-                wave = entry.wave,
-                time = entry.time
-            })
-        end
-        return converted
-    end,
-    
-    -- Xuất cache ra file JSON
     exportToFile = function(filename)
-        filename = filename or "tdx/macros/moving_skills_export.json"
+        filename = filename or "tdx/moving_skills_export.txt"
         pcall(function() makefolder("tdx") end)
-        pcall(function() makefolder("tdx/macros") end)
         
-        local converted = _G.TDX_MovingSkills.convertToRecorderFormat()
-        local ok, jsonStr = pcall(HttpService.JSONEncode, HttpService, converted)
-        if ok and writefile then
-            pcall(writefile, filename, jsonStr)
-            print("💾 Exported " .. #converted .. " moving skills to: " .. filename)
-            return true
+        local content = table.concat(movingSkillsCache, "\n")
+        if writefile then
+            pcall(writefile, filename, content)
+            print("💾 Exported " .. #movingSkillsCache .. " moving skills to: " .. filename)
         end
-        return false
-    end,
-    
-    -- Tích hợp vào recorder output
-    integrateToRecorder = function()
-        local outJson = "tdx/macros/recorder_output.json"
-        if not (readfile and isfile and isfile(outJson)) then
-            print("❌ Recorder output file not found")
-            return false
-        end
-        
-        local content = ""
-        pcall(function() content = readfile(outJson) end)
-        
-        local existingActions = {}
-        if content ~= "" then
-            local ok, decoded = pcall(HttpService.JSONDecode, HttpService, content)
-            if ok and type(decoded) == "table" then
-                existingActions = decoded
-            end
-        end
-        
-        -- Thêm moving skills vào
-        for _, entry in ipairs(_G.TDX_MovingSkills.convertToRecorderFormat()) do
-            table.insert(existingActions, entry)
-        end
-        
-        local ok, jsonStr = pcall(HttpService.JSONEncode, HttpService, existingActions)
-        if ok and writefile then
-            pcall(writefile, outJson, jsonStr)
-            print("🔄 Integrated " .. #movingSkillsCache .. " moving skills into recorder output")
-            return true
-        end
-        return false
     end
 }
 
 -- Khởi tạo hook
 setupAbilityHook()
 
-print("✅ TDX Moving Skills Recorder Hook đã hoạt động!")
-print("🎯 Tracking: Helicopter (skill 1,3), Cryo Helicopter (skill 1,3), Jet Trooper (skill 1)")
-print("📋 Dữ liệu được cache trong memory - Sử dụng _G.TDX_MovingSkills để truy cập")
-print("🔧 Commands available:")
-print("   _G.TDX_MovingSkills.getCache() - Xem cache")
-print("   _G.TDX_MovingSkills.exportToFile() - Xuất ra file") 
-print("   _G.TDX_MovingSkills.integrateToRecorder() - Tích hợp vào recorder")
+print("✅ TDX Moving Skills Hook activated - Ready to track moving skills")
