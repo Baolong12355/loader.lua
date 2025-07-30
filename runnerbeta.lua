@@ -1,4 +1,3 @@
-    error("Không thể tìm thấy Game UI")
 
 
 local HttpService = game:GetService("HttpService")
