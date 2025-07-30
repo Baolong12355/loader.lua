@@ -388,7 +388,7 @@ task.spawn(function()
                             end
                         end
                     end
-                    print("[TDX Rebuild] Đã reload record mới: ", macroPath)
+                    
                 end
             end
         end
