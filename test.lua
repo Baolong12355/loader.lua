@@ -172,6 +172,23 @@ local function IsMovingSkillTower(towerName, skillIndex)
     return false
 end
 
+-- THÊM: Kiểm tra skill có cần position không
+local function IsPositionRequiredSkill(towerName, skillIndex)
+    if not towerName or not skillIndex then return false end
+    
+    -- Skill 1: cần position (moving skill)
+    if skillIndex == 1 then
+        return true
+    end
+    
+    -- Skill 3: không cần position (buff/ability skill)
+    if skillIndex == 3 then
+        return false
+    end
+    
+    return true -- mặc định cần position
+end
+
 -- Cập nhật file JSON với dữ liệu mới
 local function updateJsonFile()
     if not HttpService then return end
@@ -211,7 +228,7 @@ end
 
 -- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
 local function parseMacroLine(line)
-    -- THÊM: Phân tích lệnh moving skill
+    -- THÊM: Phân tích lệnh moving skill WITH position
     local hash, skillIndex, x, y, z = line:match('TDX:useMovingSkill%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%)')
     if hash and skillIndex and x and y and z then
         local pos = hash2pos[tostring(hash)]
@@ -221,6 +238,22 @@ local function parseMacroLine(line)
                 towermoving = pos.x,
                 skillindex = tonumber(skillIndex),
                 location = string.format("%s, %s, %s", x, y, z),
+                wave = currentWave,
+                time = convertTimeToNumber(currentTime)
+            }}
+        end
+    end
+
+    -- THÊM: Phân tích lệnh skill WITHOUT position (skill 3)
+    local hash, skillIndex = line:match('TDX:useSkill%(([^,]+),%s*([^%)]+)%)')
+    if hash and skillIndex then
+        local pos = hash2pos[tostring(hash)]
+        if pos then
+            local currentWave, currentTime = getCurrentWaveAndTime()
+            return {{
+                towermoving = pos.x,
+                skillindex = tonumber(skillIndex),
+                location = "no_pos", -- skill 3 không có position
                 wave = currentWave,
                 time = convertTimeToNumber(currentTime)
             }}
@@ -422,16 +455,30 @@ local function handleRemote(name, args)
     -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
     if name == "TowerUseAbilityRequest" then
         local towerHash, skillIndex, targetPos = unpack(args)
-        if typeof(towerHash) == "number" and typeof(skillIndex) == "number" and typeof(targetPos) == "Vector3" then
+        if typeof(towerHash) == "number" and typeof(skillIndex) == "number" then
             local towerName = GetTowerNameByHash(towerHash)
             if IsMovingSkillTower(towerName, skillIndex) then
-                local code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
-                    tostring(towerHash), 
-                    skillIndex, 
-                    tostring(targetPos.X), 
-                    tostring(targetPos.Y), 
-                    tostring(targetPos.Z))
-                setPending("MovingSkill", code, towerHash)
+                local code
+                
+                -- Skill cần position (skill 1)
+                if IsPositionRequiredSkill(towerName, skillIndex) and typeof(targetPos) == "Vector3" then
+                    code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
+                        tostring(towerHash), 
+                        skillIndex, 
+                        tostring(targetPos.X), 
+                        tostring(targetPos.Y), 
+                        tostring(targetPos.Z))
+                
+                -- Skill không cần position (skill 3)
+                elseif not IsPositionRequiredSkill(towerName, skillIndex) then
+                    code = string.format("TDX:useSkill(%s, %d)", 
+                        tostring(towerHash), 
+                        skillIndex)
+                end
+                
+                if code then
+                    setPending("MovingSkill", code, towerHash)
+                end
             end
         end
     end
