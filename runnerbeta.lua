@@ -697,3 +697,4 @@ local success, err = pcall(RunMacroRunner)
 if not success then
     error("Lỗi Macro Runner: " .. tostring(err))
 end
+print("✅ TDXrunner Hook đã hoạt động!")
