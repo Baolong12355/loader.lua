@@ -20,7 +20,7 @@ local defaultConfig = {
     ["RebuildPlaceDelay"] = 0.3,
     ["MaxConcurrentRebuilds"] = 5,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
-    ["ForceRebuildEvenIfSold"] = false,
+    ["ForceRebuildEvenIfSold"] = true,
     ["MaxRebuildRetry"] = nil
 }
 
@@ -140,33 +140,61 @@ local function PlaceTowerEntry(entry)
     return false
 end
 
--- Nâng cấp tower với retry logic
+-- Function để lấy cost upgrade hiện tại
+local function GetCurrentUpgradeCost(tower, path)
+    if not tower or not tower.LevelHandler then return nil end
+    local maxLvl = tower.LevelHandler:GetMaxLevel()
+    local curLvl = tower.LevelHandler:GetLevelOnPath(path)
+    if curLvl >= maxLvl then return nil end
+    local ok, baseCost = pcall(function() return tower.LevelHandler:GetLevelUpgradeCost(path, 1) end)
+    if not ok then return nil end
+    local disc = 0
+    local ok2, d = pcall(function() return tower.BuffHandler and tower.BuffHandler:GetDiscount() or 0 end)
+    if ok2 and typeof(d) == "number" then disc = d end
+    return math.floor(baseCost * (1 - disc))
+end
+
+-- Nâng cấp tower với retry logic mạnh hơn
 local function UpgradeTowerEntry(entry)
     local axis = tonumber(entry.TowerUpgraded)
     local path = entry.UpgradePath
-    local hash, tower = GetTowerByAxis(axis)
+    local maxAttempts = 3 -- Retry tối đa 3 lần
+    local attempts = 0
     
-    if not hash or not tower then return false end
-    
-    local before = tower.LevelHandler:GetLevelOnPath(path)
-    WaitForCash(entry.UpgradeCost or 0)
-    
-    _G.TDX_REBUILD_RUNNING = true
-    local success = pcall(function()
-        Remotes.TowerUpgradeRequest:FireServer(hash, path, 1)
-    end)
-    _G.TDX_REBUILD_RUNNING = false
-    
-    if success then
-        -- Verify upgrade thành công
-        local startTime = tick()
-        repeat
+    while attempts < maxAttempts do
+        local hash, tower = GetTowerByAxis(axis)
+        if not hash or not tower then 
             task.wait(0.1)
-            local _, t = GetTowerByAxis(axis)
-            if t and t.LevelHandler:GetLevelOnPath(path) > before then 
-                return true 
-            end
-        until tick() - startTime > 3
+            attempts = attempts + 1
+            continue 
+        end
+        
+        local before = tower.LevelHandler:GetLevelOnPath(path)
+        local cost = GetCurrentUpgradeCost(tower, path)
+        if not cost then return true end -- Đã max level
+        
+        WaitForCash(cost) -- Dùng cost thực tế thay vì entry cost
+        
+        _G.TDX_REBUILD_RUNNING = true
+        local success = pcall(function()
+            Remotes.TowerUpgradeRequest:FireServer(hash, path, 1)
+        end)
+        _G.TDX_REBUILD_RUNNING = false
+        
+        if success then
+            -- Verify upgrade thành công
+            local startTime = tick()
+            repeat
+                task.wait(0.1)
+                local _, t = GetTowerByAxis(axis)
+                if t and t.LevelHandler:GetLevelOnPath(path) > before then 
+                    return true 
+                end
+            until tick() - startTime > 3
+        end
+        
+        attempts = attempts + 1
+        task.wait(0.1)
     end
     return false
 end
@@ -388,7 +416,7 @@ task.spawn(function()
                             end
                         end
                     end
-                    
+                    print("[TDX Rebuild] Đã reload record mới: ", macroPath)
                 end
             end
         end
@@ -449,7 +477,7 @@ task.spawn(function()
             end
         end
         
-        task.wait() -- Luôn reload record mới mỗi 1.5 giây
+        task.wait(1.5) -- Luôn reload record mới mỗi 1.5 giây
     end
 end)
 
