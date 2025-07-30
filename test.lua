@@ -24,9 +24,6 @@ local timeout = 2
 local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
 local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upgrade sinh đôi
 
--- THÊM: Hàng đợi cho moving skills
-local movingSkillQueue = {}
-
 -- Lấy TowerClass một cách an toàn
 local TowerClass
 pcall(function()
@@ -319,32 +316,6 @@ local function setPending(typeStr, code, hash)
     })
 end
 
--- THÊM: Thêm moving skill vào queue
-local function setMovingSkillPending(hash, skillIndex, targetPos)
-    table.insert(movingSkillQueue, {
-        hash = hash,
-        skillIndex = skillIndex,
-        targetPos = targetPos,
-        created = tick()
-    })
-end
-
--- THÊM: Xác nhận moving skill
-local function tryConfirmMovingSkill()
-    for i = #movingSkillQueue, 1, -1 do
-        local item = movingSkillQueue[i]
-        local code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
-            tostring(item.hash), 
-            item.skillIndex, 
-            tostring(item.targetPos.X), 
-            tostring(item.targetPos.Y), 
-            tostring(item.targetPos.Z))
-        processAndWriteAction(code)
-        table.remove(movingSkillQueue, i)
-        return
-    end
-end
-
 -- Xác nhận một yêu cầu từ hàng đợi và xử lý nó
 local function tryConfirm(typeStr, specificHash)
     for i = #pendingQueue, 1, -1 do
@@ -422,14 +393,8 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- THÊM: Xử lý sự kiện skill được sử dụng (giả định có event này)
--- Nếu không có event, moving skill sẽ được xác nhận ngay lập tức
-pcall(function()
-    ReplicatedStorage.Remotes.TowerUseAbilityRequest.OnClientEvent:Connect(function(data)
-        -- Xác nhận moving skill khi có phản hồi từ server
-        tryConfirmMovingSkill()
-    end)
-end)
+-- THÊM: Xử lý sự kiện skill được sử dụng (không cần thiết nữa)
+-- Moving skills sẽ được ghi nhận trực tiếp trong hook
 
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
@@ -445,10 +410,18 @@ local function handleRemote(name, args)
         if typeof(towerHash) == "number" and typeof(skillIndex) == "number" and typeof(targetPos) == "Vector3" then
             local towerName = GetTowerNameByHash(towerHash)
             if IsMovingSkillTower(towerName, skillIndex) then
-                setMovingSkillPending(towerHash, skillIndex, targetPos)
-                -- Xác nhận ngay lập tức vì không có event phản hồi riêng
-                task.wait(0.1) -- Delay nhỏ để đảm bảo thứ tự
-                tryConfirmMovingSkill()
+                -- Ghi nhận ngay lập tức không cần queue
+                local pos = hash2pos[tostring(towerHash)]
+                if pos then
+                    local currentWave, currentTime = getCurrentWaveAndTime()
+                    local code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
+                        tostring(towerHash), 
+                        skillIndex, 
+                        tostring(targetPos.X), 
+                        tostring(targetPos.Y), 
+                        tostring(targetPos.Z))
+                    processAndWriteAction(code)
+                end
                 return
             end
         end
@@ -515,14 +488,6 @@ task.spawn(function()
             if now - pendingQueue[i].created > timeout then
                 warn("❌ Không xác thực được: " .. pendingQueue[i].type .. " | Code: " .. pendingQueue[i].code)
                 table.remove(pendingQueue, i)
-            end
-        end
-        
-        -- THÊM: Dọn dẹp moving skill queue
-        for i = #movingSkillQueue, 1, -1 do
-            if now - movingSkillQueue[i].created > timeout then
-                warn("❌ Moving skill timeout: " .. tostring(movingSkillQueue[i].hash))
-                table.remove(movingSkillQueue, i)
             end
         end
     end
