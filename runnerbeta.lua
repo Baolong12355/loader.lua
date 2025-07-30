@@ -59,7 +59,7 @@ local defaultConfig = {
     ["RebuildCheckInterval"] = 0,
     ["MacroStepDelay"] = 0.1,
     ["MaxConcurrentRebuilds"] = 5,
-    ["RebuildPlaceDelay"] = 0.1  -- Thêm delay cho rebuild place
+    ["RebuildPlaceDelay"] = 0.3  -- Thêm delay cho rebuild place
 }
 
 local globalEnv = getGlobalEnv()
