@@ -110,27 +110,62 @@ if not TowerClass then
 end
 
 
+-- ==== AUTO SELL CONVERTED TOWERS ====
 local soldConvertedX = {}
+local activeSellTasks = {} -- Track active sell tasks
 
+-- Function để cleanup sell tasks đã hoàn thành
+local function cleanupSellTasks()
+    for axisX, taskThread in pairs(activeSellTasks) do
+        if coroutine.status(taskThread) == "dead" then
+            activeSellTasks[axisX] = nil
+        end
+    end
+end
+
+-- Function để xử lý sell một tower riêng lẻ
+local function processSellTower(hash, tower, axisX)
+    -- Kiểm tra nếu đang trong cache rebuild hoặc đã có task sell
+    if IsInRebuildCache(axisX) or activeSellTasks[axisX] then
+        return
+    end
+    
+    if not soldConvertedX[axisX] then
+        soldConvertedX[axisX] = true
+        
+        -- Tạo task riêng cho việc sell
+        activeSellTasks[axisX] = task.spawn(function()
+            task.wait(globalEnv.TDX_Config.AutoSellConvertDelay or 0.2)
+            
+            pcall(function()
+                Remotes.SellTower:FireServer(hash)
+            end)
+            
+            -- Task sẽ tự cleanup khi hoàn thành
+        end)
+    end
+end
+
+-- Main auto sell loop với parallel processing
 task.spawn(function()
     while true do
-        for hash, tower in pairs(TowerClass.GetTowers()) do
+        local towers = TowerClass.GetTowers()
+        
+        -- Xử lý từng tower song song
+        for hash, tower in pairs(towers) do
             if tower.Converted == true then
                 local spawnCFrame = tower.SpawnCFrame
                 if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                    local x = spawnCFrame.Position.X
-                    if not soldConvertedX[x] then
-                        soldConvertedX[x] = true
-                        task.spawn(function()
-                            pcall(function()
-                                Remotes.SellTower:FireServer(hash)
-                            end)
-                        end)
-                    end
+                    local axisX = spawnCFrame.Position.X
+                    processSellTower(hash, tower, axisX)
                 end
             end
         end
-        RunService.Heartbeat:Wait() -- Check mỗi frame
+        
+        -- Cleanup các task đã hoàn thành
+        cleanupSellTasks()
+        
+        RunService.Heartbeat:Wait()
     end
 end)
 
