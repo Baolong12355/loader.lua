@@ -109,7 +109,6 @@ if not TowerClass then
     error("Không thể load TowerClass - vui lòng đảm bảo bạn đang trong game TDX")
 end
 
--- ==== FAST AUTO SELL CONVERTED TOWERS ====
 local soldConvertedX = {}
 
 task.spawn(function()
@@ -130,9 +129,16 @@ task.spawn(function()
                         sellCount = sellCount + 1
                         
                         task.spawn(function()
-                            pcall(function()
+                            local success = pcall(function()
                                 Remotes.SellTower:FireServer(hash)
                             end)
+                            
+                            if not success then
+                                task.wait(0.1)
+                                pcall(function()
+                                    Remotes.SellTower:FireServer(hash)
+                                end)
+                            end
                         end)
                     end
                 end
