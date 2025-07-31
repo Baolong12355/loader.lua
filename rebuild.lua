@@ -32,6 +32,9 @@ local defaultConfig = {
 local globalEnv = getGlobalEnv()
 globalEnv.TDX_Config = globalEnv.TDX_Config or {}
 
+-- THÊM: Khởi tạo cache tower đang rebuild
+globalEnv.TDX_REBUILDING_TOWERS = globalEnv.TDX_REBUILDING_TOWERS or {}
+
 for key, value in pairs(defaultConfig) do
     if globalEnv.TDX_Config[key] == nil then
         globalEnv.TDX_Config[key] = value
@@ -72,6 +75,19 @@ end
 
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể load TowerClass!") end
+
+-- THÊM: Hàm quản lý cache rebuild
+local function AddToRebuildCache(axisX)
+    globalEnv.TDX_REBUILDING_TOWERS[axisX] = true
+end
+
+local function RemoveFromRebuildCache(axisX)
+    globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
+end
+
+local function IsInRebuildCache(axisX)
+    return globalEnv.TDX_REBUILDING_TOWERS[axisX] == true
+end
 
 -- ==== AUTO SELL CONVERTED TOWERS ====
 local soldConvertedX = {}
@@ -173,6 +189,11 @@ local function PlaceTowerEntry(entry)
     if #vecTab ~= 3 then return false end
 
     local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
+    local axisX = pos.X
+    
+    -- THÊM: Thêm vào cache rebuild
+    AddToRebuildCache(axisX)
+    
     WaitForCash(entry.TowerPlaceCost or 0)
 
     local args = {
@@ -182,11 +203,9 @@ local function PlaceTowerEntry(entry)
         tonumber(entry.Rotation or 0)
     }
 
-    _G.TDX_REBUILD_RUNNING = true
     local success = pcall(function() 
         Remotes.PlaceTower:InvokeServer(unpack(args)) 
     end)
-    _G.TDX_REBUILD_RUNNING = false
 
     if success then
         local startTime = tick()
@@ -196,9 +215,14 @@ local function PlaceTowerEntry(entry)
 
         if GetTowerByAxis(pos.X) then 
             task.wait(globalEnv.TDX_Config.RebuildPlaceDelay or 0.3)
+            -- THÊM: Xóa khỏi cache khi đặt thành công
+            RemoveFromRebuildCache(axisX)
             return true
         end
     end
+    
+    -- THÊM: Xóa khỏi cache khi thất bại
+    RemoveFromRebuildCache(axisX)
     return false
 end
 
@@ -223,6 +247,9 @@ local function UpgradeTowerEntry(entry)
     local maxAttempts = 3
     local attempts = 0
 
+    -- THÊM: Thêm vào cache rebuild
+    AddToRebuildCache(axis)
+
     while attempts < maxAttempts do
         local hash, tower = GetTowerByAxis(axis)
         if not hash or not tower then 
@@ -233,15 +260,17 @@ local function UpgradeTowerEntry(entry)
 
         local before = tower.LevelHandler:GetLevelOnPath(path)
         local cost = GetCurrentUpgradeCost(tower, path)
-        if not cost then return true end
+        if not cost then 
+            -- THÊM: Xóa khỏi cache khi không cần upgrade
+            RemoveFromRebuildCache(axis)
+            return true 
+        end
 
         WaitForCash(cost)
 
-        _G.TDX_REBUILD_RUNNING = true
         local success = pcall(function()
             Remotes.TowerUpgradeRequest:FireServer(hash, path, 1)
         end)
-        _G.TDX_REBUILD_RUNNING = false
 
         if success then
             local startTime = tick()
@@ -249,6 +278,8 @@ local function UpgradeTowerEntry(entry)
                 task.wait(0.1)
                 local _, t = GetTowerByAxis(axis)
                 if t and t.LevelHandler:GetLevelOnPath(path) > before then 
+                    -- THÊM: Xóa khỏi cache khi upgrade thành công
+                    RemoveFromRebuildCache(axis)
                     return true 
                 end
             until tick() - startTime > 3
@@ -257,6 +288,9 @@ local function UpgradeTowerEntry(entry)
         attempts = attempts + 1
         task.wait(0.1)
     end
+    
+    -- THÊM: Xóa khỏi cache khi thất bại
+    RemoveFromRebuildCache(axis)
     return false
 end
 
@@ -267,15 +301,28 @@ local function ChangeTargetEntry(entry)
 
     if not hash then return false end
 
-    _G.TDX_REBUILD_RUNNING = true
+    -- THÊM: Thêm vào cache rebuild
+    AddToRebuildCache(axis)
+
     pcall(function()
         Remotes.ChangeQueryType:FireServer(hash, entry.TargetWanted)
     end)
-    _G.TDX_REBUILD_RUNNING = false
+    
+    -- THÊM: Xóa khỏi cache sau khi thay đổi target
+    RemoveFromRebuildCache(axis)
     return true
 end
 
--- Function để sử dụng moving skill
+-- THÊM: Function để check xem skill có tồn tại không (từ runner.lua)
+local function HasSkill(axisValue, skillIndex)
+    local hash, tower = GetTowerByAxis(axisValue)
+    if not hash or not tower or not tower.AbilityHandler then
+        return false
+    end
+
+    local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
+    return ability ~= nil
+end
 local function UseMovingSkillEntry(entry)
     local axisValue = entry.towermoving
     local skillIndex = entry.skillindex
@@ -284,13 +331,25 @@ local function UseMovingSkillEntry(entry)
     local hash, tower = GetTowerByAxis(axisValue)
     if not hash or not tower then return false end
 
-    local TowerUseAbilityRequest = Remotes:FindFirstChild("TowerUseAbilityRequest")
-    if not TowerUseAbilityRequest then return false end
+    -- THÊM: Thêm vào cache rebuild
+    AddToRebuildCache(axisValue)
 
-    if not tower.AbilityHandler then return false end
+    local TowerUseAbilityRequest = Remotes:FindFirstChild("TowerUseAbilityRequest")
+    if not TowerUseAbilityRequest then 
+        RemoveFromRebuildCache(axisValue)
+        return false 
+    end
+
+    if not tower.AbilityHandler then 
+        RemoveFromRebuildCache(axisValue)
+        return false 
+    end
 
     local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
-    if not ability then return false end
+    if not ability then 
+        RemoveFromRebuildCache(axisValue)
+        return false 
+    end
 
     local cooldown = ability.CooldownRemaining or 0
     if cooldown > 0 then
@@ -298,8 +357,6 @@ local function UseMovingSkillEntry(entry)
     end
 
     local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
-
-    _G.TDX_REBUILD_RUNNING = true
     local success = false
 
     if location == "no_pos" then
@@ -324,11 +381,12 @@ local function UseMovingSkillEntry(entry)
         end
     end
 
-    _G.TDX_REBUILD_RUNNING = false
+    -- THÊM: Xóa khỏi cache sau khi sử dụng skill
+    RemoveFromRebuildCache(axisValue)
     return success
 end
 
--- Worker function với fixed sequence: Place -> Upgrade -> Target -> Moving
+-- SỬA: Worker function với moving skills đợi skill tồn tại (dựa trên runner.lua)
 local function RebuildTowerSequence(records)
     local placeRecord = nil
     local upgradeRecords = {}
@@ -358,7 +416,25 @@ local function RebuildTowerSequence(records)
         end
     end
 
-    -- Step 2: Upgrade towers
+    -- Step 2: Apply moving skills ASAP when skills become available (từ runner.lua)
+    if rebuildSuccess and #movingRecords > 0 then
+        -- Start a separate task to handle moving skills
+        task.spawn(function()
+            -- Get the last moving skill for this tower
+            local lastMovingRecord = movingRecords[#movingRecords]
+            local entry = lastMovingRecord.entry
+
+            -- Wait for skill to become available (không có timeout)
+            while not HasSkill(entry.towermoving, entry.skillindex) do
+                RunService.Heartbeat:Wait()
+            end
+
+            -- Use the skill immediately when available
+            UseMovingSkillEntry(entry)
+        end)
+    end
+
+    -- Step 3: Upgrade towers (in order) - Run in parallel with moving skills
     if rebuildSuccess then
         table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
         for _, record in ipairs(upgradeRecords) do
@@ -371,22 +447,13 @@ local function RebuildTowerSequence(records)
         end
     end
 
-    -- Step 3: Change targets
+    -- Step 4: Change targets
     if rebuildSuccess then
         for _, record in ipairs(targetRecords) do
             local entry = record.entry
             ChangeTargetEntry(entry)
             task.wait(0.05)
         end
-    end
-
-    -- Step 4: Apply moving skills
-    if rebuildSuccess and #movingRecords > 0 then
-        task.wait(0.2)
-        local lastMovingRecord = movingRecords[#movingRecords]
-        local entry = lastMovingRecord.entry
-        UseMovingSkillEntry(entry)
-        task.wait(0.1)
     end
 
     return rebuildSuccess
