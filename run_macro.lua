@@ -111,6 +111,7 @@ end
 
 -- ==== TÍCH HỢP AUTO SELL CONVERT + REBUILD ====
 local soldConvertedX = {}
+local soldConvertedX = {}
 
 task.spawn(function()
     while true do
