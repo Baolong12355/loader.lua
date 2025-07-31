@@ -110,63 +110,51 @@ if not TowerClass then
 end
 
 
--- Tối ưu script gốc của bạn - giữ đơn giản nhưng hiệu quả hơn
 local soldConvertedX = {}
-local sellInProgress = {} -- Track towers đang được sell để tránh spam
-local sellRetryCount = {} -- Track số lần retry
 
--- Version 1: Tối ưu script gốc (Recommended)
-local function StartOptimizedOriginalAutoSell()
-    task.spawn(function()
-        while true do
-            for hash, tower in pairs(TowerClass.GetTowers()) do
-                if tower.Converted == true then
-                    local spawnCFrame = tower.SpawnCFrame
-                    if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                        local x = spawnCFrame.Position.X
-                        
-                        -- Chỉ sell nếu chưa từng sell hoặc cần retry
-                        if not soldConvertedX[x] and not sellInProgress[x] then
-                            soldConvertedX[x] = true
-                            sellInProgress[x] = true
+task.spawn(function()
+    while true do
+        for hash, tower in pairs(TowerClass.GetTowers()) do
+            if tower.Converted == true then
+                local spawnCFrame = tower.SpawnCFrame
+                if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                    local x = spawnCFrame.Position.X
+                    if not soldConvertedX[x] then
+                        soldConvertedX[x] = true
+                        task.spawn(function()
+                            pcall(function()
+                                Remotes.SellTower:FireServer(hash)
+                            end)
                             
-                            task.spawn(function()
-                                local success = pcall(function()
+                            -- Delay 0.1 giây trước khi kiểm tra
+                            task.wait(0.1)
+                            
+                            -- Kiểm tra lại xem tower đã được sell chưa
+                            local stillExists = false
+                            for checkHash, checkTower in pairs(TowerClass.GetTowers()) do
+                                if checkHash == hash then
+                                    stillExists = true
+                                    break
+                                end
+                            end
+                            
+                            -- Nếu tower vẫn còn tồn tại, thử sell lại
+                            if stillExists then
+                                pcall(function()
                                     Remotes.SellTower:FireServer(hash)
                                 end)
-                                
-                                if success then
-                                    -- Đợi một chút để verify
-                                    task.wait(0.05)
-                                    
-                                    -- Check xem tower có còn converted không
-                                    local stillExists = false
-                                    for checkHash, checkTower in pairs(TowerClass.GetTowers()) do
-                                        if checkTower.Converted == true then
-                                            local checkSpawn = checkTower.SpawnCFrame
-                                            if checkSpawn and checkSpawn.Position.X == x then
-                                                stillExists = true
-                                                break
-                                            end
-                                        end
-                                    end
-                                    
-                                    if stillExists then
-                                        -- Vẫn còn, cho phép retry
-                                        soldConvertedX[x] = nil
-                                    end
-                                end
-                                
-                                sellInProgress[x] = nil
-                            end)
-                        end
+                                print("Retry selling tower at X:", x)
+                            else
+                                print("Successfully sold tower at X:", x)
+                            end
+                        end)
                     end
                 end
             end
-            RunService.Heartbeat:Wait()
         end
-    end)
-end
+        RunService.Heartbeat:Wait() -- Check mỗi frame
+    end
+end)
 
 local function GetTowerHashBySpawnX(targetX)
     for hash, tower in pairs(TowerClass.GetTowers()) do
