@@ -114,13 +114,21 @@ local soldConvertedX = {}
 
 task.spawn(function()
     while true do
+        local sellCount = 0
+        local checkCount = 0
+        
         for hash, tower in pairs(TowerClass.GetTowers()) do
-            if tower.Converted == true then
+            if checkCount >= 10 then break end
+            checkCount = checkCount + 1
+            
+            if tower.Converted == true and sellCount < 10 then
                 local spawnCFrame = tower.SpawnCFrame
                 if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
                     local x = spawnCFrame.Position.X
                     if not soldConvertedX[x] then
                         soldConvertedX[x] = true
+                        sellCount = sellCount + 1
+                        
                         task.spawn(function()
                             pcall(function()
                                 Remotes.SellTower:FireServer(hash)
@@ -130,7 +138,8 @@ task.spawn(function()
                 end
             end
         end
-        RunService.Heartbeat:Wait() -- Check mỗi frame
+        
+        RunService.Heartbeat:Wait()
     end
 end)
 
