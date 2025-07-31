@@ -116,36 +116,34 @@ task.spawn(function()
     while true do
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower.Converted == true then
-                local spawnCFrame = tower.SpawnCFrame
-                if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                    local x = spawnCFrame.Position.X
-                    if not soldConvertedX[x] then
-                        soldConvertedX[x] = true
-                        task.spawn(function()
+                if not soldConvertedX[hash] then
+                    soldConvertedX[hash] = true
+                    
+                    -- Tạo task riêng chỉ để sell tower này
+                    task.spawn(function()
+                        pcall(function()
+                            Remotes.SellTower:FireServer(hash)
+                        end)
+                        
+                        -- Delay 0.1 giây trước khi kiểm tra
+                        task.wait()
+                        
+                        -- Kiểm tra lại xem tower đã được sell chưa
+                        local stillExists = false
+                        for checkHash, checkTower in pairs(TowerClass.GetTowers()) do
+                            if checkHash == hash then
+                                stillExists = true
+                                break
+                            end
+                        end
+                        
+                        -- Nếu tower vẫn còn tồn tại, thử sell lại
+                        if stillExists then
                             pcall(function()
                                 Remotes.SellTower:FireServer(hash)
                             end)
-                            
-                            -- Delay 0.1 giây trước khi kiểm tra
-                            task.wait()
-                            
-                            -- Kiểm tra lại xem tower đã được sell chưa
-                            local stillExists = false
-                            for checkHash, checkTower in pairs(TowerClass.GetTowers()) do
-                                if checkHash == hash then
-                                    stillExists = true
-                                    break
-                                end
-                            end
-                            
-                            -- Nếu tower vẫn còn tồn tại, thử sell lại
-                            if stillExists then
-                                pcall(function()
-                                    Remotes.SellTower:FireServer(hash)
-                                end)
-                            end
-                        end)
-                    end
+                        end
+                    end)
                 end
             end
         end
