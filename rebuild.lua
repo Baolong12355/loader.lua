@@ -89,8 +89,7 @@ local function IsInRebuildCache(axisX)
     return globalEnv.TDX_REBUILDING_TOWERS[axisX] == true
 end
 
--- ==== AUTO SELL CONVERTED TOWERS ====
- local soldConvertedX = {}
+local soldConvertedX = {}
 
 task.spawn(function()
     while true do
@@ -112,7 +111,7 @@ task.spawn(function()
         end
         RunService.Heartbeat:Wait() -- Fastest possible check
     end
-end))
+end)
 
 local function GetTowerHashBySpawnX(targetX)
     for hash, tower in pairs(TowerClass.GetTowers()) do
