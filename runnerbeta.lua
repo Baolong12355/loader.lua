@@ -127,7 +127,7 @@ task.spawn(function()
                             end)
                             
                             -- Delay 0.1 giây trước khi kiểm tra
-                            task.wait(0.1)
+                            task.wait()
                             
                             -- Kiểm tra lại xem tower đã được sell chưa
                             local stillExists = false
