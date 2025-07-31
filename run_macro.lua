@@ -118,18 +118,26 @@ task.spawn(function()
             if tower.Converted == true then
                 local spawnCFrame = tower.SpawnCFrame
                 if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                    local pos = spawnCFrame.Position
-                    local x = pos.X
+                    local x = spawnCFrame.Position.X
                     if not soldConvertedX[x] then
-                        pcall(function()
-                            Remotes.SellTower:FireServer(hash)
-                        end)
                         soldConvertedX[x] = true
+                        task.spawn(function()
+                            local success = pcall(function()
+                                Remotes.SellTower:FireServer(hash)
+                            end)
+                            
+                            if not success then
+                                task.wait(0.1)
+                                pcall(function()
+                                    Remotes.SellTower:FireServer(hash)
+                                end)
+                            end
+                        end)
                     end
                 end
             end
         end
-        task.wait(0.2)
+        RunService.Heartbeat:Wait()
     end
 end)
 
