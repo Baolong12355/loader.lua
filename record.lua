@@ -24,6 +24,15 @@ local timeout = 2
 local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
 local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upgrade sinh đôi
 
+-- THÊM: Universal compatibility functions
+local function getGlobalEnv()
+    if getgenv then return getgenv() end
+    if getfenv then return getfenv() end
+    return _G
+end
+
+local globalEnv = getGlobalEnv()
+
 -- Lấy TowerClass một cách an toàn
 local TowerClass
 pcall(function()
@@ -314,11 +323,60 @@ end
 
 -- Xử lý một dòng lệnh, phân tích và ghi vào file JSON
 local function processAndWriteAction(commandString)
-    -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
-    if _G and _G.TDX_REBUILD_RUNNING then
-        return
+    -- SỬA: Cải thiện điều kiện ngăn log hành động khi rebuild
+    if globalEnv.TDX_REBUILDING_TOWERS then
+        -- Phân tích command để lấy axis X
+        local axisX = nil
+        
+        -- Kiểm tra nếu là PlaceTower
+        local a1, towerName, vec, rot = commandString:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
+        if vec then
+            axisX = tonumber(vec)
+        end
+        
+        -- Kiểm tra nếu là UpgradeTower
+        if not axisX then
+            local hash = commandString:match('TDX:upgradeTower%(([^,]+),')
+            if hash then
+                local pos = hash2pos[tostring(hash)]
+                if pos then
+                    axisX = pos.x
+                end
+            end
+        end
+        
+        -- Kiểm tra nếu là ChangeQueryType
+        if not axisX then
+            local hash = commandString:match('TDX:changeQueryType%(([^,]+),')
+            if hash then
+                local pos = hash2pos[tostring(hash)]
+                if pos then
+                    axisX = pos.x
+                end
+            end
+        end
+        
+        -- Kiểm tra nếu là UseMovingSkill
+        if not axisX then
+            local hash = commandString:match('TDX:useMovingSkill%(([^,]+),')
+            if not hash then
+                hash = commandString:match('TDX:useSkill%(([^,]+),')
+            end
+            if hash then
+                local pos = hash2pos[tostring(hash)]
+                if pos then
+                    axisX = pos.x
+                end
+            end
+        end
+        
+        -- Nếu tower đang được rebuild thì bỏ qua log
+        if axisX and globalEnv.TDX_REBUILDING_TOWERS[axisX] then
+            return
+        end
     end
-    -- ==================================================
+    
+    -- Tiếp tục xử lý bình thường nếu không phải rebuild
     local entries = parseMacroLine(commandString)
     if entries then
         for _, entry in ipairs(entries) do
@@ -439,11 +497,7 @@ end)
 
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
-    -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
-    if _G and _G.TDX_REBUILD_RUNNING then
-        return
-    end
-    -- ==================================================
+    -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
     -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
     if name == "TowerUseAbilityRequest" then
@@ -562,3 +616,4 @@ setupHooks()
 
 print("✅ TDX Recorder Moving Skills Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
+print("🔄 Đã tích hợp với hệ thống rebuild mới!")
