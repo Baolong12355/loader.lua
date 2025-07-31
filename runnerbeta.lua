@@ -113,36 +113,56 @@ local soldConvertedX = {}
 
 task.spawn(function()
     while true do
-        local sellCount = 0
-        local checkCount = 0
+        local totalTowers = 0
+        local convertedTowers = 0
+        local soldAttempts = 0
         
         for hash, tower in pairs(TowerClass.GetTowers()) do
-            if checkCount >= 10 then break end
-            checkCount = checkCount + 1
+            totalTowers = totalTowers + 1
             
-            if tower.Converted == true and sellCount < 10 then
+            if tower.Converted == true then
+                convertedTowers = convertedTowers + 1
+                print("Found converted tower:", hash, "at", tower.SpawnCFrame and tower.SpawnCFrame.Position or "NO POSITION")
+                
                 local spawnCFrame = tower.SpawnCFrame
                 if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
                     local x = spawnCFrame.Position.X
+                    print("Tower X position:", x, "Already sold:", soldConvertedX[x] and "YES" or "NO")
+                    
                     if not soldConvertedX[x] then
                         soldConvertedX[x] = true
-                        sellCount = sellCount + 1
+                        soldAttempts = soldAttempts + 1
+                        print("Attempting to sell tower:", hash)
                         
                         task.spawn(function()
                             local success = pcall(function()
                                 Remotes.SellTower:FireServer(hash)
                             end)
                             
-                            if not success then
+                            if success then
+                                print("Successfully sold tower:", hash)
+                            else
+                                print("Failed to sell tower:", hash, "- Retrying...")
                                 task.wait(0.1)
-                                pcall(function()
+                                local retrySuccess = pcall(function()
                                     Remotes.SellTower:FireServer(hash)
                                 end)
+                                if retrySuccess then
+                                    print("Retry successful for tower:", hash)
+                                else
+                                    print("Retry failed for tower:", hash)
+                                end
                             end
                         end)
                     end
+                else
+                    print("Tower has no valid SpawnCFrame:", hash)
                 end
             end
+        end
+        
+        if totalTowers > 0 then
+            print("Debug - Total towers:", totalTowers, "Converted:", convertedTowers, "Sell attempts:", soldAttempts)
         end
         
         RunService.Heartbeat:Wait()
