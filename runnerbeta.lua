@@ -110,105 +110,59 @@ if not TowerClass then
 end
 
 
--- Ultra Fast Parallel Auto Sell Convert System
-local activeSellJobs = {} -- Track các job sell đang chạy
-local sellJobCount = 0 -- Đếm số job đang active
-local maxConcurrentSells = 10 -- Số lượng sell song song tối đa
+-- Tối ưu script gốc của bạn - giữ đơn giản nhưng hiệu quả hơn
+local soldConvertedX = {}
+local sellInProgress = {} -- Track towers đang được sell để tránh spam
+local sellRetryCount = {} -- Track số lần retry
 
--- Fast tower detection cache
-local lastKnownConverted = {}
-local convertedCache = {}
-
--- Performance optimized tower getter
-local function FastGetAllConvertedTowers()
-    local converted = {}
-    local towers = TowerClass.GetTowers()
-    
-    for hash, tower in pairs(towers) do
-        if tower.Converted == true then
-            local spawnCFrame = tower.SpawnCFrame
-            if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                local x = spawnCFrame.Position.X
-                converted[x] = {
-                    hash = hash,
-                    tower = tower,
-                    position = spawnCFrame.Position
-                }
-            end
-        end
-    end
-    
-    return converted
-end
-
--- Ultra fast sell job với immediate retry
-local function CreateFastSellJob(x, towerData)
-    if activeSellJobs[x] then
-        return -- Job đã tồn tại cho tower này
-    end
-    
-    activeSellJobs[x] = true
-    sellJobCount = sellJobCount + 1
-    
-    task.spawn(function()
-        local maxAttempts = 10
-        local attempts = 0
-        local sellDelay = 0.1 -- Minimal delay
-        
-        while attempts < maxAttempts do
-            attempts = attempts + 1
-            
-            -- Quick check xem tower có còn converted không
-            local currentHash, currentTower = GetTowerHashBySpawnX(x)
-            if not currentHash or not currentTower or not currentTower.Converted then
-                -- Tower không còn converted, job hoàn thành
-                break
-            end
-            
-            -- Thực hiện sell với error handling
-            local sellSuccess = pcall(function()
-                Remotes.SellTower:FireServer(currentHash)
-            end)
-            
-            if sellSuccess then
-                -- Micro delay để server xử lý
-                task.wait(sellDelay)
-                
-                -- Verify sell thành công
-                local verifyHash, verifyTower = GetTowerHashBySpawnX(x)
-                if not verifyHash or not verifyTower or not verifyTower.Converted then
-                    -- Sell thành công
-                    break
-                end
-            end
-            
-            -- Short delay trước retry tiếp theo
-            if attempts < maxAttempts then
-                task.wait(sellDelay)
-            end
-        end
-        
-        -- Cleanup job
-        activeSellJobs[x] = nil
-        sellJobCount = sellJobCount - 1
-    end)
-end
-
--- Main detection loop với maximum speed
-local function StartUltraFastAutoSell()
+-- Version 1: Tối ưu script gốc (Recommended)
+local function StartOptimizedOriginalAutoSell()
     task.spawn(function()
         while true do
-            -- Get all converted towers cùng lúc
-            local currentConverted = FastGetAllConvertedTowers()
-            
-            -- Process tất cả towers song song
-            for x, towerData in pairs(currentConverted) do
-                if not activeSellJobs[x] and sellJobCount < maxConcurrentSells then
-                    CreateFastSellJob(x, towerData)
+            for hash, tower in pairs(TowerClass.GetTowers()) do
+                if tower.Converted == true then
+                    local spawnCFrame = tower.SpawnCFrame
+                    if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                        local x = spawnCFrame.Position.X
+                        
+                        -- Chỉ sell nếu chưa từng sell hoặc cần retry
+                        if not soldConvertedX[x] and not sellInProgress[x] then
+                            soldConvertedX[x] = true
+                            sellInProgress[x] = true
+                            
+                            task.spawn(function()
+                                local success = pcall(function()
+                                    Remotes.SellTower:FireServer(hash)
+                                end)
+                                
+                                if success then
+                                    -- Đợi một chút để verify
+                                    task.wait(0.05)
+                                    
+                                    -- Check xem tower có còn converted không
+                                    local stillExists = false
+                                    for checkHash, checkTower in pairs(TowerClass.GetTowers()) do
+                                        if checkTower.Converted == true then
+                                            local checkSpawn = checkTower.SpawnCFrame
+                                            if checkSpawn and checkSpawn.Position.X == x then
+                                                stillExists = true
+                                                break
+                                            end
+                                        end
+                                    end
+                                    
+                                    if stillExists then
+                                        -- Vẫn còn, cho phép retry
+                                        soldConvertedX[x] = nil
+                                    end
+                                end
+                                
+                                sellInProgress[x] = nil
+                            end)
+                        end
+                    end
                 end
             end
-            
-            -- Immediate next check - no delay
             RunService.Heartbeat:Wait()
         end
     end)
