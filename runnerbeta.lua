@@ -109,7 +109,7 @@ if not TowerClass then
     error("Không thể load TowerClass - vui lòng đảm bảo bạn đang trong game TDX")
 end
 
--- ==== TÍCH HỢP AUTO SELL CONVERT + REBUILD ====
+-- ==== FAST AUTO SELL CONVERTED TOWERS ====
 local soldConvertedX = {}
 
 task.spawn(function()
@@ -118,18 +118,19 @@ task.spawn(function()
             if tower.Converted == true then
                 local spawnCFrame = tower.SpawnCFrame
                 if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                    local pos = spawnCFrame.Position
-                    local x = pos.X
+                    local x = spawnCFrame.Position.X
                     if not soldConvertedX[x] then
-                        pcall(function()
-                            Remotes.SellTower:FireServer(hash)
-                        end)
                         soldConvertedX[x] = true
+                        task.spawn(function()
+                            pcall(function()
+                                Remotes.SellTower:FireServer(hash)
+                            end)
+                        end)
                     end
                 end
             end
         end
-        task.wait()
+        RunService.Heartbeat:Wait() -- Check mỗi frame
     end
 end)
 
