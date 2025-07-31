@@ -125,6 +125,25 @@ task.spawn(function()
                             pcall(function()
                                 Remotes.SellTower:FireServer(hash)
                             end)
+                            
+                            -- Delay 0.1 giây trước khi kiểm tra
+                            task.wait()
+                            
+                            -- Kiểm tra lại xem tower đã được sell chưa
+                            local stillExists = false
+                            for checkHash, checkTower in pairs(TowerClass.GetTowers()) do
+                                if checkHash == hash then
+                                    stillExists = true
+                                    break
+                                end
+                            end
+                            
+                            -- Nếu tower vẫn còn tồn tại, thử sell lại
+                            if stillExists then
+                                pcall(function()
+                                    Remotes.SellTower:FireServer(hash)
+                                end)
+                            end
                         end)
                     end
                 end
@@ -308,7 +327,7 @@ local function HasSkill(axisValue, skillIndex)
     if not hash or not tower or not tower.AbilityHandler then
         return false
     end
-
+    
     local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
     return ability ~= nil
 end
@@ -563,12 +582,12 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                             -- Get the last moving skill for this tower
                             local lastMovingRecord = movingRecords[#movingRecords]
                             local action = lastMovingRecord.entry
-
+                            
                             -- Wait for skill to become available (không có timeout)
                             while not HasSkill(action.towermoving, action.skillindex) do
                                 RunService.Heartbeat:Wait()
                             end
-
+                            
                             -- Use the skill immediately when available
                             UseMovingSkillRetry(action.towermoving, action.skillindex, action.location)
                         end)
