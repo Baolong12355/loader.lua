@@ -90,7 +90,7 @@ local function IsInRebuildCache(axisX)
 end
 
 -- ==== AUTO SELL CONVERTED TOWERS ====
-local local soldConvertedX = {}
+ local soldConvertedX = {}
 
 task.spawn(function()
     while true do
