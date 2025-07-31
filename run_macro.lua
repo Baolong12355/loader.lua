@@ -48,7 +48,7 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["Macro Name"] = "o",
+    ["Macro Name"] = "i",
     ["PlaceMode"] = "Rewrite",
     ["ForceRebuildEvenIfSold"] = true, -- Changed to true by default
     ["MaxRebuildRetry"] = nil,
@@ -109,8 +109,7 @@ if not TowerClass then
     error("Không thể load TowerClass - vui lòng đảm bảo bạn đang trong game TDX")
 end
 
--- ==== TÍCH HỢP AUTO SELL CONVERT + REBUILD ====
-local soldConvertedX = {}
+
 local soldConvertedX = {}
 
 task.spawn(function()
@@ -123,22 +122,15 @@ task.spawn(function()
                     if not soldConvertedX[x] then
                         soldConvertedX[x] = true
                         task.spawn(function()
-                            local success = pcall(function()
+                            pcall(function()
                                 Remotes.SellTower:FireServer(hash)
                             end)
-                            
-                            if not success then
-                                task.wait(0.1)
-                                pcall(function()
-                                    Remotes.SellTower:FireServer(hash)
-                                end)
-                            end
                         end)
                     end
                 end
             end
         end
-        RunService.Heartbeat:Wait()
+        RunService.Heartbeat:Wait() -- Check mỗi frame
     end
 end)
 
@@ -308,6 +300,17 @@ local function ChangeTargetRetry(axisValue, targetType)
         attempts = attempts + 1
         task.wait(0.1)
     end
+end
+
+-- Function để check xem skill có tồn tại không
+local function HasSkill(axisValue, skillIndex)
+    local hash, tower = GetTowerByAxis(axisValue)
+    if not hash or not tower or not tower.AbilityHandler then
+        return false
+    end
+
+    local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
+    return ability ~= nil
 end
 
 -- Function để sử dụng moving skill
@@ -501,7 +504,7 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     local jobQueue = {}
     local activeJobs = {}
 
-    -- Worker function - Improved rebuild sequence: Place -> Upgrade -> Target -> Moving
+    -- Worker function - Updated to wait for skill availability instead of all upgrades
     local function RebuildWorker()
         task.spawn(function()
             while true do
@@ -553,7 +556,25 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                         end
                     end
 
-                    -- Step 2: Upgrade towers (in order)
+                    -- Step 2: Apply moving skills ASAP when skills become available
+                    if rebuildSuccess and #movingRecords > 0 then
+                        -- Start a separate task to handle moving skills
+                        task.spawn(function()
+                            -- Get the last moving skill for this tower
+                            local lastMovingRecord = movingRecords[#movingRecords]
+                            local action = lastMovingRecord.entry
+
+                            -- Wait for skill to become available (không có timeout)
+                            while not HasSkill(action.towermoving, action.skillindex) do
+                                RunService.Heartbeat:Wait()
+                            end
+
+                            -- Use the skill immediately when available
+                            UseMovingSkillRetry(action.towermoving, action.skillindex, action.location)
+                        end)
+                    end
+
+                    -- Step 3: Upgrade towers (in order) - Run in parallel with moving skills
                     if rebuildSuccess then
                         table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
                         for _, record in ipairs(upgradeRecords) do
@@ -566,22 +587,13 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                         end
                     end
 
-                    -- Step 3: Change targets
+                    -- Step 4: Change targets
                     if rebuildSuccess then
                         for _, record in ipairs(targetRecords) do
                             local action = record.entry
                             ChangeTargetRetry(tonumber(action.TowerTargetChange), action.TargetWanted)
                             task.wait(0.05)
                         end
-                    end
-
-                    -- Step 4: Apply moving skills (only the last one for each tower)
-                    if rebuildSuccess and #movingRecords > 0 then
-                        -- Get the last moving skill for this tower
-                        local lastMovingRecord = movingRecords[#movingRecords]
-                        local action = lastMovingRecord.entry
-                        UseMovingSkillRetry(action.towermoving, action.skillindex, action.location)
-                        task.wait(0.2)
                     end
 
                     -- Handle other actions (sell, etc.)
