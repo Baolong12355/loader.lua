@@ -143,9 +143,6 @@ task.spawn(function()
                                 pcall(function()
                                     Remotes.SellTower:FireServer(hash)
                                 end)
-                                print("Retry selling tower at X:", x)
-                            else
-                                print("Successfully sold tower at X:", x)
                             end
                         end)
                     end
