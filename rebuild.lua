@@ -90,7 +90,7 @@ local function IsInRebuildCache(axisX)
 end
 
 -- ==== AUTO SELL CONVERTED TOWERS ====
-local soldConvertedX = {}
+local local soldConvertedX = {}
 
 task.spawn(function()
     while true do
@@ -98,21 +98,21 @@ task.spawn(function()
             if tower.Converted == true then
                 local spawnCFrame = tower.SpawnCFrame
                 if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                    local pos = spawnCFrame.Position
-                    local x = pos.X
+                    local x = spawnCFrame.Position.X
                     if not soldConvertedX[x] then
-                        pcall(function()
-                            Remotes.SellTower:FireServer(hash)
-                        end)
                         soldConvertedX[x] = true
-                        task.wait(globalEnv.TDX_Config.AutoSellConvertDelay or 0.2)
+                        task.spawn(function()
+                            pcall(function()
+                                Remotes.SellTower:FireServer(hash)
+                            end)
+                        end)
                     end
                 end
             end
         end
-        task.wait(0.2)
+        RunService.Heartbeat:Wait() -- Fastest possible check
     end
-end)
+end))
 
 local function GetTowerHashBySpawnX(targetX)
     for hash, tower in pairs(TowerClass.GetTowers()) do
