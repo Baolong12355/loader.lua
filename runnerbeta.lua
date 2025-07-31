@@ -109,63 +109,28 @@ if not TowerClass then
     error("Không thể load TowerClass - vui lòng đảm bảo bạn đang trong game TDX")
 end
 
+
 local soldConvertedX = {}
 
 task.spawn(function()
     while true do
-        local totalTowers = 0
-        local convertedTowers = 0
-        local soldAttempts = 0
-        
         for hash, tower in pairs(TowerClass.GetTowers()) do
-            totalTowers = totalTowers + 1
-            
             if tower.Converted == true then
-                convertedTowers = convertedTowers + 1
-                print("Found converted tower:", hash, "at", tower.SpawnCFrame and tower.SpawnCFrame.Position or "NO POSITION")
-                
                 local spawnCFrame = tower.SpawnCFrame
                 if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
                     local x = spawnCFrame.Position.X
-                    print("Tower X position:", x, "Already sold:", soldConvertedX[x] and "YES" or "NO")
-                    
                     if not soldConvertedX[x] then
                         soldConvertedX[x] = true
-                        soldAttempts = soldAttempts + 1
-                        print("Attempting to sell tower:", hash)
-                        
                         task.spawn(function()
-                            local success = pcall(function()
+                            pcall(function()
                                 Remotes.SellTower:FireServer(hash)
                             end)
-                            
-                            if success then
-                                print("Successfully sold tower:", hash)
-                            else
-                                print("Failed to sell tower:", hash, "- Retrying...")
-                                task.wait(0.1)
-                                local retrySuccess = pcall(function()
-                                    Remotes.SellTower:FireServer(hash)
-                                end)
-                                if retrySuccess then
-                                    print("Retry successful for tower:", hash)
-                                else
-                                    print("Retry failed for tower:", hash)
-                                end
-                            end
                         end)
                     end
-                else
-                    print("Tower has no valid SpawnCFrame:", hash)
                 end
             end
         end
-        
-        if totalTowers > 0 then
-            print("Debug - Total towers:", totalTowers, "Converted:", convertedTowers, "Sell attempts:", soldAttempts)
-        end
-        
-        RunService.Heartbeat:Wait()
+        RunService.Heartbeat:Wait() -- Check mỗi frame
     end
 end)
 
