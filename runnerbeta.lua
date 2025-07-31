@@ -48,7 +48,7 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["Macro Name"] = "o",
+    ["Macro Name"] = "i",
     ["PlaceMode"] = "Rewrite",
     ["ForceRebuildEvenIfSold"] = true,
     ["MaxRebuildRetry"] = nil,
