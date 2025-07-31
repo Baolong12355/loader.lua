@@ -22,10 +22,11 @@ local defaultConfig = {
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
-    -- SKIP CONFIGURATIONS - để trống khi không cần dùng
-    ["SkipTowersAtAxis"] = {}, -- VD: {-50, -30, 10} - skip các tower tại vị trí X này
-    ["SkipTowersByName"] = {"Slammer", "Toxicnator"}, -- VD: {"Medic", "Commander"} - skip các tower có tên này
-    ["SkipTowersByLine"] = {}, -- VD: {1, 5, 10} - skip các tower được place ở dòng này trong macro
+    ["AutoSellConvertDelay"] = 0.2,
+    -- SKIP CONFIGURATIONS
+    ["SkipTowersAtAxis"] = {},
+    ["SkipTowersByName"] = {"Slammer", "Toxicnator"},
+    ["SkipTowersByLine"] = {},
 }
 
 local globalEnv = getGlobalEnv()
@@ -72,6 +73,31 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể load TowerClass!") end
 
+-- ==== AUTO SELL CONVERTED TOWERS ====
+local soldConvertedX = {}
+
+task.spawn(function()
+    while true do
+        for hash, tower in pairs(TowerClass.GetTowers()) do
+            if tower.Converted == true then
+                local spawnCFrame = tower.SpawnCFrame
+                if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                    local pos = spawnCFrame.Position
+                    local x = pos.X
+                    if not soldConvertedX[x] then
+                        pcall(function()
+                            Remotes.SellTower:FireServer(hash)
+                        end)
+                        soldConvertedX[x] = true
+                        task.wait(globalEnv.TDX_Config.AutoSellConvertDelay or 0.2)
+                    end
+                end
+            end
+        end
+        task.wait(0.2)
+    end
+end)
+
 local function GetTowerHashBySpawnX(targetX)
     for hash, tower in pairs(TowerClass.GetTowers()) do
         local spawnCFrame = tower.SpawnCFrame
@@ -107,37 +133,34 @@ end
 -- ==================== SKIP LOGIC ====================
 local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
     local config = globalEnv.TDX_Config
-    
+
     -- Skip theo axis X
     if config.SkipTowersAtAxis then
         for _, skipAxis in ipairs(config.SkipTowersAtAxis) do
             if axisX == skipAxis then
-                print("[TDX Rebuild] Skipped tower at axis X =", axisX, "(axis skip rule)")
                 return true
             end
         end
     end
-    
+
     -- Skip theo tên tower
     if config.SkipTowersByName then
         for _, skipName in ipairs(config.SkipTowersByName) do
             if towerName == skipName then
-                print("[TDX Rebuild] Skipped tower:", towerName, "at axis X =", axisX, "(name skip rule)")
                 return true
             end
         end
     end
-    
-    -- Skip theo line number (dòng trong macro)
+
+    -- Skip theo line number
     if config.SkipTowersByLine and firstPlaceLine then
         for _, skipLine in ipairs(config.SkipTowersByLine) do
             if firstPlaceLine == skipLine then
-                print("[TDX Rebuild] Skipped tower:", towerName, "at line", firstPlaceLine, "(line skip rule)")
                 return true
             end
         end
     end
-    
+
     return false
 end
 
@@ -166,14 +189,12 @@ local function PlaceTowerEntry(entry)
     _G.TDX_REBUILD_RUNNING = false
 
     if success then
-        -- Chờ xuất hiện tower với timeout
         local startTime = tick()
         repeat 
             task.wait(0.1)
         until tick() - startTime > 3 or GetTowerByAxis(pos.X)
 
         if GetTowerByAxis(pos.X) then 
-            -- Thêm delay sau khi place thành công để tránh dupe
             task.wait(globalEnv.TDX_Config.RebuildPlaceDelay or 0.3)
             return true
         end
@@ -195,11 +216,11 @@ local function GetCurrentUpgradeCost(tower, path)
     return math.floor(baseCost * (1 - disc))
 end
 
--- Nâng cấp tower với retry logic mạnh hơn
+-- Nâng cấp tower với retry logic
 local function UpgradeTowerEntry(entry)
     local axis = tonumber(entry.TowerUpgraded)
     local path = entry.UpgradePath
-    local maxAttempts = 3 -- Retry tối đa 3 lần
+    local maxAttempts = 3
     local attempts = 0
 
     while attempts < maxAttempts do
@@ -212,9 +233,9 @@ local function UpgradeTowerEntry(entry)
 
         local before = tower.LevelHandler:GetLevelOnPath(path)
         local cost = GetCurrentUpgradeCost(tower, path)
-        if not cost then return true end -- Đã max level
+        if not cost then return true end
 
-        WaitForCash(cost) -- Dùng cost thực tế thay vì entry cost
+        WaitForCash(cost)
 
         _G.TDX_REBUILD_RUNNING = true
         local success = pcall(function()
@@ -223,7 +244,6 @@ local function UpgradeTowerEntry(entry)
         _G.TDX_REBUILD_RUNNING = false
 
         if success then
-            -- Verify upgrade thành công
             local startTime = tick()
             repeat
                 task.wait(0.1)
@@ -310,7 +330,6 @@ end
 
 -- Worker function với fixed sequence: Place -> Upgrade -> Target -> Moving
 local function RebuildTowerSequence(records)
-    -- Organize records by type với thứ tự cố định
     local placeRecord = nil
     local upgradeRecords = {}
     local targetRecords = {}
@@ -339,7 +358,7 @@ local function RebuildTowerSequence(records)
         end
     end
 
-    -- Step 2: Upgrade towers (in order) - chỉ làm khi place thành công
+    -- Step 2: Upgrade towers
     if rebuildSuccess then
         table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
         for _, record in ipairs(upgradeRecords) do
@@ -348,11 +367,11 @@ local function RebuildTowerSequence(records)
                 rebuildSuccess = false
                 break
             end
-            task.wait(0.1) -- Small delay between upgrades
+            task.wait(0.1)
         end
     end
 
-    -- Step 3: Change targets - chỉ làm khi upgrade hoàn thành
+    -- Step 3: Change targets
     if rebuildSuccess then
         for _, record in ipairs(targetRecords) do
             local entry = record.entry
@@ -361,12 +380,9 @@ local function RebuildTowerSequence(records)
         end
     end
 
-    -- Step 4: Apply moving skills - CHỈ làm khi TẤT CẢ place, upgrade, target đã hoàn thành
+    -- Step 4: Apply moving skills
     if rebuildSuccess and #movingRecords > 0 then
-        -- Đợi thêm một chút để đảm bảo mọi thứ đã xong
         task.wait(0.2)
-
-        -- Get the last moving skill for this tower
         local lastMovingRecord = movingRecords[#movingRecords]
         local entry = lastMovingRecord.entry
         UseMovingSkillEntry(entry)
@@ -398,13 +414,12 @@ task.spawn(function()
                     local towerName = job.towerName
                     local firstPlaceLine = job.firstPlaceLine
 
-                    -- ===== KIỂM TRA SKIP TRƯỚC KHI REBUILD =====
+                    -- Kiểm tra skip trước khi rebuild
                     if not ShouldSkipTower(x, towerName, firstPlaceLine) then
                         if RebuildTowerSequence(records) then
                             rebuildAttempts[x] = 0
                         end
                     else
-                        -- Reset attempts để không retry liên tục khi skip
                         rebuildAttempts[x] = 0
                     end
 
@@ -422,13 +437,12 @@ task.spawn(function()
     end
 
     while true do
-        -- Reload macro record nếu có thay đổi/new data
+        -- Reload macro record nếu có thay đổi
         local macroContent = safeReadFile(macroPath)
         if macroContent and #macroContent > 10 then
             local macroHash = tostring(#macroContent) .. "|" .. tostring(macroContent:sub(1,50))
             if macroHash ~= lastMacroHash then
                 lastMacroHash = macroHash
-                -- Parse lại macro file
                 local ok, macro = pcall(function() return HttpService:JSONDecode(macroContent) end)
                 if ok and type(macro) == "table" then
                     towersByAxis = {}
@@ -465,7 +479,6 @@ task.spawn(function()
                             end
                         end
                     end
-                    print("[TDX Rebuild] Đã reload record mới: ", macroPath)
                 end
             end
         end
@@ -475,13 +488,11 @@ task.spawn(function()
             if globalEnv.TDX_Config.ForceRebuildEvenIfSold or not soldAxis[x] then
                 local hash, tower = GetTowerByAxis(x)
                 if not hash or not tower then
-                    -- Tower không tồn tại (chết HOẶC bị bán)
-                    if not activeJobs[x] then -- Chưa có job rebuild
+                    if not activeJobs[x] then
                         rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
                         local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
 
                         if not maxRetry or rebuildAttempts[x] <= maxRetry then
-                            -- Get tower type và line number for skip checking
                             local towerType = nil
                             local firstPlaceRecord = nil
                             local firstPlaceLine = nil
@@ -495,7 +506,6 @@ task.spawn(function()
                                 end
                             end
 
-                            -- Add to queue với priority
                             activeJobs[x] = true
                             local priority = GetTowerPriority(towerType or "Unknown")
                             table.insert(jobQueue, { 
@@ -507,7 +517,6 @@ task.spawn(function()
                                 firstPlaceLine = firstPlaceLine
                             })
 
-                            -- Sort by priority, then by death time (older first)
                             table.sort(jobQueue, function(a, b) 
                                 if a.priority == b.priority then
                                     return a.deathTime < b.deathTime
@@ -517,11 +526,9 @@ task.spawn(function()
                         end
                     end
                 else
-                    -- Tower sống, cleanup attempts
                     rebuildAttempts[x] = 0
                     if activeJobs[x] then
                         activeJobs[x] = nil
-                        -- Remove from queue if exists
                         for i = #jobQueue, 1, -1 do
                             if jobQueue[i].x == x then
                                 table.remove(jobQueue, i)
@@ -536,18 +543,3 @@ task.spawn(function()
         task.wait()  
     end
 end)
-
--- ========== HƯỚNG DẪN SỬ DỤNG SKIP ==========
-print("=== TDX Macro Rebuild with Skip Features ===")
-print("Skip configurations:")
-print("• SkipTowersAtAxis: Skip towers tại vị trí X cụ thể")
-print("• SkipTowersByName: Skip towers theo tên")  
-print("• SkipTowersByLine: Skip towers theo dòng trong macro")
-print("")
-print("Ví dụ sử dụng:")
-print('_G.TDX_Config.SkipTowersAtAxis = {-50, -30, 10}')
-print('_G.TDX_Config.SkipTowersByName = {"Medic", "Commander"}')
-print('_G.TDX_Config.SkipTowersByLine = {1, 5, 10}')
-print("")
-print("Để tắt skip: gán [] cho config tương ứng")
-print("Script đã hoạt động!")
