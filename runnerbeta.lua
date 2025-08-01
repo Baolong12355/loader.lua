@@ -114,40 +114,44 @@ local soldConvertedX = {}
 
 task.spawn(function()
     while true do
+        -- Cleanup: Xóa tracking cho towers không còn converted hoặc không tồn tại
+        for hash in pairs(soldConvertedX) do
+            local tower = nil
+            for checkHash, checkTower in pairs(TowerClass.GetTowers()) do
+                if checkHash == hash then
+                    tower = checkTower
+                    break
+                end
+            end
+            
+            -- Nếu tower không tồn tại hoặc không còn converted, xóa khỏi tracking
+            if not tower or tower.Converted ~= true then
+                soldConvertedX[hash] = nil
+            end
+        end
+        
+        -- Check và sell converted towers
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower.Converted == true then
-                if not soldConvertedX[hash] then
-                    soldConvertedX[hash] = true
+                local spawnCFrame = tower.SpawnCFrame
+                if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                    local x = spawnCFrame.Position.X
                     
-                    -- Tạo task riêng chỉ để sell tower này
-                    task.spawn(function()
-                        pcall(function()
-                            Remotes.SellTower:FireServer(hash)
-                        end)
+                    -- Chỉ sell nếu chưa từng sell tower hash này
+                    if not soldConvertedX[hash] then
+                        soldConvertedX[hash] = true
                         
-                        -- Delay 0.1 giây trước khi kiểm tra
-                        task.wait()
-                        
-                        -- Kiểm tra lại xem tower đã được sell chưa
-                        local stillExists = false
-                        for checkHash, checkTower in pairs(TowerClass.GetTowers()) do
-                            if checkHash == hash then
-                                stillExists = true
-                                break
-                            end
-                        end
-                        
-                        -- Nếu tower vẫn còn tồn tại, thử sell lại
-                        if stillExists then
+                        task.spawn(function()
                             pcall(function()
                                 Remotes.SellTower:FireServer(hash)
                             end)
-                        end
-                    end)
+                        end)
+                    end
                 end
             end
         end
-        RunService.Heartbeat:Wait() -- Check mỗi frame
+        
+        RunService.Heartbeat:Wait()
     end
 end)
 
