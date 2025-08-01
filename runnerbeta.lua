@@ -114,19 +114,26 @@ local soldConvertedX = {}
 
 task.spawn(function()
     while true do
-        -- Cleanup: Xóa tracking cho towers không còn converted hoặc không tồn tại
-        for hash in pairs(soldConvertedX) do
-            local tower = nil
-            for checkHash, checkTower in pairs(TowerClass.GetTowers()) do
-                if checkHash == hash then
-                    tower = checkTower
-                    break
+        -- Cleanup: Xóa tracking cho X positions không còn có converted towers
+        for x in pairs(soldConvertedX) do
+            local hasConvertedAtX = false
+            
+            -- Check xem có tower nào converted tại X này không
+            for hash, tower in pairs(TowerClass.GetTowers()) do
+                if tower.Converted == true then
+                    local spawnCFrame = tower.SpawnCFrame
+                    if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                        if spawnCFrame.Position.X == x then
+                            hasConvertedAtX = true
+                            break
+                        end
+                    end
                 end
             end
             
-            -- Nếu tower không tồn tại hoặc không còn converted, xóa khỏi tracking
-            if not tower or tower.Converted ~= true then
-                soldConvertedX[hash] = nil
+            -- Nếu không có converted tower nào tại X này, xóa khỏi tracking
+            if not hasConvertedAtX then
+                soldConvertedX[x] = nil
             end
         end
         
@@ -137,9 +144,16 @@ task.spawn(function()
                 if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
                     local x = spawnCFrame.Position.X
                     
-                    -- Chỉ sell nếu chưa từng sell tower hash này
-                    if not soldConvertedX[hash] then
-                        soldConvertedX[hash] = true
+                    if soldConvertedX[x] then
+                        -- Đã từng sell tower converted tại X này
+                        -- Nhưng bây giờ lại có tower converted → nghĩa là tower mới bị convert
+                        -- Reset cache và sell tower mới này
+                        soldConvertedX[x] = nil
+                    end
+                    
+                    -- Sell nếu chưa tracking X này
+                    if not soldConvertedX[x] then
+                        soldConvertedX[x] = true
                         
                         task.spawn(function()
                             pcall(function()
