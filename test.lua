@@ -488,10 +488,22 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- THÊM: Xử lý sự kiện skip wave
+-- SỬA LỖI: Xử lý sự kiện skip wave - GHI NGAY LẬP TỨC KHÔNG CẦN XÁC NHẬN
 ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function(data)
-    -- Skip vote được confirm ngay lập tức khi có response từ server
-    tryConfirm("Skip")
+    -- Skip vote được ghi ngay lập tức khi có response từ server
+    local currentWave, currentTime = getCurrentWaveAndTime()
+    if currentWave and currentTime then
+        local timeNumber = convertTimeToNumber(currentTime)
+        if timeNumber then
+            local entry = {
+                SkipWhen = timeNumber,
+                SkipWave = currentWave
+            }
+            table.insert(recordedActions, entry)
+            updateJsonFile()
+            print("✅ Đã ghi skip wave: " .. currentWave .. " at " .. currentTime)
+        end
+    end
 end)
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
@@ -514,21 +526,11 @@ end)
 
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
-    -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
-
-    -- THÊM: Xử lý SkipWaveVoteCast
+    -- SỬA LỖI: Xử lý SkipWaveVoteCast - chỉ tạo pending nếu vote = true
     if name == "SkipWaveVoteCast" then
         local voteValue = args[1]
-        if voteValue == true then -- Chỉ ghi khi vote skip (true)
-            local currentWave, currentTime = getCurrentWaveAndTime()
-            if currentWave and currentTime then
-                local timeNumber = convertTimeToNumber(currentTime)
-                if timeNumber then
-                    local code = string.format('TDX:skipWave("%s", %d)', currentWave, timeNumber)
-                    setPending("Skip", code)
-                end
-            end
-        end
+        -- Skip wave không cần pending queue, sẽ được xử lý trực tiếp trong OnClientEvent
+        return
     end
 
     -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
@@ -649,7 +651,7 @@ setupHooks()
 print("✅ TDX Recorder với Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⏭️ Đã thêm hook skip wave!")
+print("⏭️ Đã sửa lỗi skip wave - không cần xác nhận!")
 
 -- Return về server để tránh lỗi
 return true
