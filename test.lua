@@ -24,6 +24,15 @@ local timeout = 2
 local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
 local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upgrade sinh đôi
 
+-- THÊM: Universal compatibility functions
+local function getGlobalEnv()
+    if getgenv then return getgenv() end
+    if getfenv then return getfenv() end
+    return _G
+end
+
+local globalEnv = getGlobalEnv()
+
 -- Lấy TowerClass một cách an toàn
 local TowerClass
 pcall(function()
@@ -67,13 +76,13 @@ end
 -- SỬA: Lấy vị trí SpawnCFrame của tower (thay vì position hiện tại)
 local function GetTowerSpawnPosition(tower)
     if not tower then return nil end
-    
+
     -- Sử dụng SpawnCFrame để khớp với Runner
     local spawnCFrame = tower.SpawnCFrame
     if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
         return spawnCFrame.Position
     end
-    
+
     return nil
 end
 
@@ -221,6 +230,15 @@ end
 
 -- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
 local function parseMacroLine(line)
+    -- THÊM: Phân tích lệnh skip wave
+    local wave, time = line:match('TDX:skipWave%(([^,]+),%s*([^%)]+)%)')
+    if wave and time then
+        return {{
+            SkipWhen = time,
+            SkipWave = wave
+        }}
+    end
+
     -- THÊM: Phân tích lệnh moving skill WITH position
     local hash, skillIndex, x, y, z = line:match('TDX:useMovingSkill%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%)')
     if hash and skillIndex and x and y and z then
@@ -314,11 +332,60 @@ end
 
 -- Xử lý một dòng lệnh, phân tích và ghi vào file JSON
 local function processAndWriteAction(commandString)
-    -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
-    if _G and _G.TDX_REBUILD_RUNNING then
-        return
+    -- SỬA: Cải thiện điều kiện ngăn log hành động khi rebuild
+    if globalEnv.TDX_REBUILDING_TOWERS then
+        -- Phân tích command để lấy axis X
+        local axisX = nil
+        
+        -- Kiểm tra nếu là PlaceTower
+        local a1, towerName, vec, rot = commandString:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
+        if vec then
+            axisX = tonumber(vec)
+        end
+        
+        -- Kiểm tra nếu là UpgradeTower
+        if not axisX then
+            local hash = commandString:match('TDX:upgradeTower%(([^,]+),')
+            if hash then
+                local pos = hash2pos[tostring(hash)]
+                if pos then
+                    axisX = pos.x
+                end
+            end
+        end
+        
+        -- Kiểm tra nếu là ChangeQueryType
+        if not axisX then
+            local hash = commandString:match('TDX:changeQueryType%(([^,]+),')
+            if hash then
+                local pos = hash2pos[tostring(hash)]
+                if pos then
+                    axisX = pos.x
+                end
+            end
+        end
+        
+        -- Kiểm tra nếu là UseMovingSkill
+        if not axisX then
+            local hash = commandString:match('TDX:useMovingSkill%(([^,]+),')
+            if not hash then
+                hash = commandString:match('TDX:useSkill%(([^,]+),')
+            end
+            if hash then
+                local pos = hash2pos[tostring(hash)]
+                if pos then
+                    axisX = pos.x
+                end
+            end
+        end
+        
+        -- Nếu tower đang được rebuild thì bỏ qua log
+        if axisX and globalEnv.TDX_REBUILDING_TOWERS[axisX] then
+            return
+        end
     end
-    -- ==================================================
+    
+    -- Tiếp tục xử lý bình thường nếu không phải rebuild
     local entries = parseMacroLine(commandString)
     if entries then
         for _, entry in ipairs(entries) do
@@ -419,6 +486,12 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
+-- THÊM: Xử lý sự kiện skip wave
+ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function(data)
+    -- Skip vote được confirm ngay lập tức khi có response từ server
+    tryConfirm("Skip")
+end)
+
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
 pcall(function()
     -- Tạo một event listener giả cho moving skills
@@ -439,11 +512,19 @@ end)
 
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
-    -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
-    if _G and _G.TDX_REBUILD_RUNNING then
-        return
+    -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
+
+    -- THÊM: Xử lý SkipWaveVoteCast
+    if name == "SkipWaveVoteCast" then
+        local currentWave, currentTime = getCurrentWaveAndTime()
+        if currentWave and currentTime then
+            local timeNumber = convertTimeToNumber(currentTime)
+            if timeNumber then
+                local code = string.format('TDX:skipWave("%s", %d)', currentWave, timeNumber)
+                setPending("Skip", code)
+            end
+        end
     end
-    -- ==================================================
 
     -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
     if name == "TowerUseAbilityRequest" then
@@ -560,5 +641,7 @@ end)
 preserveSuperFunctions()
 setupHooks()
 
-print("✅ TDX Recorder Moving Skills Hook đã hoạt động!")
+print("✅ TDX Recorder với Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
+print("🔄 Đã tích hợp với hệ thống rebuild mới!")
+print("⏭️ Đã thêm hook skip wave!")
