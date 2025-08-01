@@ -83,8 +83,8 @@ getgenv().TDX_Config = {
     ["Auto Skill"] = true,
     ["Map"] = "Tower Battles",
     ["Macros"] = "run",
-    ["Macro Name"] = "x",
-    ["Auto Difficulty"] = "Tower Battles"
+    ["Macro Name"] = "i",
+    ["Auto Difficulty"] = "TowerBattlesNightmare"
 }
 
 -- Run main loader
