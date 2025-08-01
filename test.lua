@@ -488,28 +488,11 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- SỬA LỖI: Xử lý sự kiện skip wave - Thêm debug và fallback
-pcall(function()
-    ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function(data)
-        print("🔍 SkipWaveVoteCast OnClientEvent triggered with data:", data)
-        
-        -- Skip vote được ghi ngay lập tức khi có response từ server
-        local currentWave, currentTime = getCurrentWaveAndTime()
-        print("🔍 Current wave:", currentWave, "Current time:", currentTime)
-        
-        if currentWave and currentTime then
-            local timeNumber = convertTimeToNumber(currentTime)
-            if timeNumber then
-                local entry = {
-                    SkipWhen = timeNumber,
-                    SkipWave = currentWave
-                }
-                table.insert(recordedActions, entry)
-                updateJsonFile()
-                print("✅ Đã ghi skip wave: " .. currentWave .. " at " .. currentTime)
-            end
-        end
-    end)
+-- Xử lý sự kiện thay đổi mục tiêu
+ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
+    if data and data[1] then
+        tryConfirm("Target")
+    end
 end)
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
@@ -596,92 +579,4 @@ local function handleRemote(name, args)
 
     if name == "TowerUpgradeRequest" then
         local hash, path, count = unpack(args)
-        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
-            setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
-        end
-    elseif name == "PlaceTower" then
-        local a1, towerName, vec, rot = unpack(args)
-        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
-            local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
-            setPending("Place", code)
-        end
-    elseif name == "SellTower" then
-        setPending("Sell", "TDX:sellTower("..tostring(args[1])..")")
-    elseif name == "ChangeQueryType" then
-        setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
-    end
-end
-
--- Hook các hàm remote
-local function setupHooks()
-    if not hookfunction or not hookmetamethod or not checkcaller then
-        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
-        return
-    end
-
-    -- Hook FireServer
-    local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-        handleRemote(self.Name, {...})
-        return oldFireServer(self, ...)
-    end)
-
-    -- Hook InvokeServer - ĐẶC BIỆT QUAN TRỌNG CHO TowerUseAbilityRequest
-    local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-        handleRemote(self.Name, {...})
-        return oldInvokeServer(self, ...)
-    end)
-
-    -- Hook namecall - QUAN TRỌNG NHẤT CHO ABILITY REQUEST
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if checkcaller() then return oldNamecall(self, ...) end
-        local method = getnamecallmethod()
-        if method == "FireServer" or method == "InvokeServer" then
-            handleRemote(self.Name, {...})
-        end
-        return oldNamecall(self, ...)
-    end)
-end
-
---==============================================================================
---=                         VÒNG LẶP & KHỞI TẠO                               =
---==============================================================================
-
--- Vòng lặp dọn dẹp hàng đợi chờ
-task.spawn(function()
-    while task.wait(0.5) do
-        local now = tick()
-        for i = #pendingQueue, 1, -1 do
-            if now - pendingQueue[i].created > timeout then
-                warn("❌ Không xác thực được: " .. pendingQueue[i].type .. " | Code: " .. pendingQueue[i].code)
-                table.remove(pendingQueue, i)
-            end
-        end
-    end
-end)
-
--- SỬA: Vòng lặp cập nhật vị trí SpawnCFrame của tower
-task.spawn(function()
-    while task.wait() do
-        if TowerClass and TowerClass.GetTowers then
-            for hash, tower in pairs(TowerClass.GetTowers()) do
-                local pos = GetTowerSpawnPosition(tower)
-                if pos then
-                    hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
-                end
-            end
-        end
-    end
-end)
-
--- Khởi tạo
-preserveSuperFunctions()
-setupHooks()
-
-print("✅ TDX Recorder với Skip Wave Hook đã hoạt động!")
-print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
-print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⏭️ Đã sửa lỗi skip wave - không cần xác nhận!")
-
--- Return về server để tránh lỗi
-return true
+        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number
