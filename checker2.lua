@@ -90,6 +90,15 @@ local function checkLobby()
     sendToWebhook({type = "lobby", stats = stats})
 end
 
+local function waitForGameOverScreen()
+    -- Chỉ đợi màn hình GameOver hiện ra và visible
+    local gui = LocalPlayer.PlayerGui:WaitForChild("Interface")
+    local gos = gui:WaitForChild("GameOverScreen", 60)
+    if not gos then return end
+    repeat wait() until gos.Visible
+    return gos
+end
+
 -- Lấy số từ text, ví dụ "x3" => 3, không được thì trả về 1
 local function extractNumber(str)
     if not str then return 1 end
@@ -98,15 +107,9 @@ local function extractNumber(str)
 end
 
 local function checkGameOver()
-    -- Đơn giản hóa: chỉ đợi GameOverScreen visible
-    local gui = LocalPlayer.PlayerGui:WaitForChild("Interface")
-    local gos = gui:WaitForChild("GameOverScreen", 60)
+    -- Đợi GameOverScreen visible rồi check thông tin luôn
+    local gos = waitForGameOverScreen()
     if not gos then return end
-    
-    -- Đợi cho đến khi GameOverScreen visible
-    repeat 
-        wait(0.1) 
-    until gos.Visible
     
     local main = gos.Main
     local rewards, withTokens = nil, false
@@ -190,4 +193,4 @@ if isLobby() then
     checkLobby()
 else
     checkGameOver()
-endl
+end
