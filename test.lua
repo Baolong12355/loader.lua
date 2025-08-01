@@ -233,8 +233,10 @@ local function parseMacroLine(line)
     -- THÊM: Phân tích lệnh skip wave
     local wave, time = line:match('TDX:skipWave%(([^,]+),%s*([^%)]+)%)')
     if wave and time then
+        -- Xử lý wave string (loại bỏ dấu ngoặc kép nếu có)
+        wave = tostring(wave):gsub('^%s*"(.-)"%s*$', '%1')
         return {{
-            SkipWhen = time,
+            SkipWhen = tonumber(time),
             SkipWave = wave
         }}
     end
