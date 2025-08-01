@@ -89,33 +89,62 @@ local function IsInRebuildCache(axisX)
     return globalEnv.TDX_REBUILDING_TOWERS[axisX] == true
 end
 
+-- ==== IMPROVED AUTO SELL CONVERTED TOWERS ====
 local soldConvertedX = {}
 
 task.spawn(function()
     while true do
+        -- Cleanup: Xóa tracking cho X positions không còn có converted towers
+        for x in pairs(soldConvertedX) do
+            local hasConvertedAtX = false
+            
+            -- Check xem có tower nào converted tại X này không
+            for hash, tower in pairs(TowerClass.GetTowers()) do
+                if tower.Converted == true then
+                    local spawnCFrame = tower.SpawnCFrame
+                    if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                        if spawnCFrame.Position.X == x then
+                            hasConvertedAtX = true
+                            break
+                        end
+                    end
+                end
+            end
+            
+            -- Nếu không có converted tower nào tại X này, xóa khỏi tracking
+            if not hasConvertedAtX then
+                soldConvertedX[x] = nil
+            end
+        end
+        
+        -- Check và sell converted towers
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower.Converted == true then
                 local spawnCFrame = tower.SpawnCFrame
                 if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
                     local x = spawnCFrame.Position.X
+                    
+                    if soldConvertedX[x] then
+                        -- Đã từng sell tower converted tại X này
+                        -- Nhưng bây giờ lại có tower converted → nghĩa là tower mới bị convert
+                        -- Reset cache và sell tower mới này
+                        soldConvertedX[x] = nil
+                    end
+                    
+                    -- Sell nếu chưa tracking X này
                     if not soldConvertedX[x] then
                         soldConvertedX[x] = true
+                        
                         task.spawn(function()
-                            local success = pcall(function()
+                            pcall(function()
                                 Remotes.SellTower:FireServer(hash)
                             end)
-                            
-                            if not success then
-                                task.wait(0.1)
-                                pcall(function()
-                                    Remotes.SellTower:FireServer(hash)
-                                end)
-                            end
                         end)
                     end
                 end
             end
         end
+        
         RunService.Heartbeat:Wait()
     end
 end)
