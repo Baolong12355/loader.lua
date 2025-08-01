@@ -516,12 +516,15 @@ local function handleRemote(name, args)
 
     -- THÊM: Xử lý SkipWaveVoteCast
     if name == "SkipWaveVoteCast" then
-        local currentWave, currentTime = getCurrentWaveAndTime()
-        if currentWave and currentTime then
-            local timeNumber = convertTimeToNumber(currentTime)
-            if timeNumber then
-                local code = string.format('TDX:skipWave("%s", %d)', currentWave, timeNumber)
-                setPending("Skip", code)
+        local voteValue = args[1]
+        if voteValue == true then -- Chỉ ghi khi vote skip (true)
+            local currentWave, currentTime = getCurrentWaveAndTime()
+            if currentWave and currentTime then
+                local timeNumber = convertTimeToNumber(currentTime)
+                if timeNumber then
+                    local code = string.format('TDX:skipWave("%s", %d)', currentWave, timeNumber)
+                    setPending("Skip", code)
+                end
             end
         end
     end
