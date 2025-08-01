@@ -110,6 +110,7 @@ if not TowerClass then
 end
 
 
+-- ==== AUTO SELL CONVERTED TOWERS - RUNNER ====
 local soldConvertedX = {}
 
 task.spawn(function()
@@ -155,11 +156,10 @@ task.spawn(function()
                     if not soldConvertedX[x] then
                         soldConvertedX[x] = true
                         
-                        task.spawn(function()
-                            pcall(function()
-                                Remotes.SellTower:FireServer(hash)
-                            end)
+                        pcall(function()
+                            Remotes.SellTower:FireServer(hash)
                         end)
+                        task.wait(0.1)
                     end
                 end
             end
