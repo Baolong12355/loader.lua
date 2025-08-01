@@ -488,22 +488,28 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- SỬA LỖI: Xử lý sự kiện skip wave - GHI NGAY LẬP TỨC KHÔNG CẦN XÁC NHẬN
-ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function(data)
-    -- Skip vote được ghi ngay lập tức khi có response từ server
-    local currentWave, currentTime = getCurrentWaveAndTime()
-    if currentWave and currentTime then
-        local timeNumber = convertTimeToNumber(currentTime)
-        if timeNumber then
-            local entry = {
-                SkipWhen = timeNumber,
-                SkipWave = currentWave
-            }
-            table.insert(recordedActions, entry)
-            updateJsonFile()
-            print("✅ Đã ghi skip wave: " .. currentWave .. " at " .. currentTime)
+-- SỬA LỖI: Xử lý sự kiện skip wave - Thêm debug và fallback
+pcall(function()
+    ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function(data)
+        print("🔍 SkipWaveVoteCast OnClientEvent triggered with data:", data)
+        
+        -- Skip vote được ghi ngay lập tức khi có response từ server
+        local currentWave, currentTime = getCurrentWaveAndTime()
+        print("🔍 Current wave:", currentWave, "Current time:", currentTime)
+        
+        if currentWave and currentTime then
+            local timeNumber = convertTimeToNumber(currentTime)
+            if timeNumber then
+                local entry = {
+                    SkipWhen = timeNumber,
+                    SkipWave = currentWave
+                }
+                table.insert(recordedActions, entry)
+                updateJsonFile()
+                print("✅ Đã ghi skip wave: " .. currentWave .. " at " .. currentTime)
+            end
         end
-    end
+    end)
 end)
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
@@ -526,11 +532,35 @@ end)
 
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
-    -- SỬA LỖI: Xử lý SkipWaveVoteCast - chỉ tạo pending nếu vote = true
+    print("🔍 Remote called:", name, "Args:", args)
+    
+    -- SỬA LỖI: Xử lý SkipWaveVoteCast - GHI NGAY LẬP TỨC KHI FIRE
     if name == "SkipWaveVoteCast" then
         local voteValue = args[1]
-        -- Skip wave không cần pending queue, sẽ được xử lý trực tiếp trong OnClientEvent
-        return
+        print("🔍 SkipWaveVoteCast called with vote:", voteValue)
+        
+        if voteValue == true then -- Chỉ ghi khi vote skip (true)
+            local currentWave, currentTime = getCurrentWaveAndTime()
+            print("🔍 Getting current wave and time:", currentWave, currentTime)
+            
+            if currentWave and currentTime then
+                local timeNumber = convertTimeToNumber(currentTime)
+                if timeNumber then
+                    local entry = {
+                        SkipWhen = timeNumber,
+                        SkipWave = currentWave
+                    }
+                    table.insert(recordedActions, entry)
+                    updateJsonFile()
+                    print("✅ Đã ghi skip wave ngay lập tức: " .. currentWave .. " at " .. currentTime)
+                else
+                    print("❌ Không thể convert time:", currentTime)
+                end
+            else
+                print("❌ Không lấy được wave/time")
+            end
+        end
+        return -- Không cần pending
     end
 
     -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
