@@ -50,7 +50,7 @@ end
 local defaultConfig = {
     ["Macro Name"] = "i",
     ["PlaceMode"] = "Rewrite",
-    ["ForceRebuildEvenIfSold"] = true, -- Changed to true by default
+    ["ForceRebuildEvenIfSold"] = false, -- Changed to true by default
     ["MaxRebuildRetry"] = nil,
     ["SellAllDelay"] = 0.1,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
@@ -110,44 +110,62 @@ if not TowerClass then
 end
 
 
+-- ==== AUTO SELL CONVERTED TOWERS - RUNNER ====
 local soldConvertedX = {}
 
 task.spawn(function()
     while true do
+        -- Cleanup: Xóa tracking cho X positions không còn có converted towers
+        for x in pairs(soldConvertedX) do
+            local hasConvertedAtX = false
+
+            -- Check xem có tower nào converted tại X này không
+            for hash, tower in pairs(TowerClass.GetTowers()) do
+                if tower.Converted == true then
+                    local spawnCFrame = tower.SpawnCFrame
+                    if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                        if spawnCFrame.Position.X == x then
+                            hasConvertedAtX = true
+                            break
+                        end
+                    end
+                end
+            end
+
+            -- Nếu không có converted tower nào tại X này, xóa khỏi tracking
+            if not hasConvertedAtX then
+                soldConvertedX[x] = nil
+            end
+        end
+
+        -- Check và sell converted towers
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower.Converted == true then
-                if not soldConvertedX[hash] then
-                    soldConvertedX[hash] = true
+                local spawnCFrame = tower.SpawnCFrame
+                if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                    local x = spawnCFrame.Position.X
 
-                    -- Tạo task riêng chỉ để sell tower này
-                    task.spawn(function()
+                    if soldConvertedX[x] then
+                        -- Đã từng sell tower converted tại X này
+                        -- Nhưng bây giờ lại có tower converted → nghĩa là tower mới bị convert
+                        -- Reset cache và sell tower mới này
+                        soldConvertedX[x] = nil
+                    end
+
+                    -- Sell nếu chưa tracking X này
+                    if not soldConvertedX[x] then
+                        soldConvertedX[x] = true
+
                         pcall(function()
                             Remotes.SellTower:FireServer(hash)
                         end)
-
-                        -- Delay 0.1 giây trước khi kiểm tra
-                        task.wait()
-
-                        -- Kiểm tra lại xem tower đã được sell chưa
-                        local stillExists = false
-                        for checkHash, checkTower in pairs(TowerClass.GetTowers()) do
-                            if checkHash == hash then
-                                stillExists = true
-                                break
-                            end
-                        end
-
-                        -- Nếu tower vẫn còn tồn tại, thử sell lại
-                        if stillExists then
-                            pcall(function()
-                                Remotes.SellTower:FireServer(hash)
-                            end)
-                        end
-                    end)
+                        task.wait(0.1)
+                    end
                 end
             end
         end
-        RunService.Heartbeat:Wait() -- Check mỗi frame
+
+        RunService.Heartbeat:Wait()
     end
 end)
 
