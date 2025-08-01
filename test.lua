@@ -650,3 +650,6 @@ print("✅ TDX Recorder với Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
 print("⏭️ Đã thêm hook skip wave!")
+
+-- Return về server để tránh lỗi
+return true
