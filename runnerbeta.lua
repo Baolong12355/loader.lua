@@ -50,7 +50,7 @@ end
 local defaultConfig = {
     ["Macro Name"] = "i",
     ["PlaceMode"] = "Rewrite",
-    ["ForceRebuildEvenIfSold"] = true, -- Changed to true by default
+    ["ForceRebuildEvenIfSold"] = false, -- Changed to true by default
     ["MaxRebuildRetry"] = nil,
     ["SellAllDelay"] = 0.1,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
