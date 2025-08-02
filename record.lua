@@ -596,8 +596,17 @@ local function setupHooks()
                     local code = "TDX:skipWave()"
                     processAndWriteAction(code)
                     print("✅ Skip Wave đã được ghi nhận!")
+                    
+                    -- Chuyển boolean thành string để server hiểu được
+                    -- true -> "true", false -> "false"
+                    args[1] = tostring(voteValue)
+                    return oldNamecall(self, unpack(args))
+                elseif typeof(voteValue) == "boolean" and voteValue == false then
+                    -- Chuyển false thành string để tránh lỗi
+                    args[1] = tostring(voteValue)
+                    return oldNamecall(self, unpack(args))
                 end
-                -- Để server call chạy bình thường, không can thiệp
+                -- Nếu đã là string thì để nguyên
                 return oldNamecall(self, ...)
             end
             
