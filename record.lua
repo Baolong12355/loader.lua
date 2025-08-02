@@ -514,8 +514,7 @@ local function handleRemote(name, args)
     if name == "SkipWaveVoteCast" then
         local voteValue = args[1]
         if typeof(voteValue) == "boolean" and voteValue == true then
-            local currentWave, currentTime = getCurrentWaveAndTime()
-            local code = string.format("TDX:skipWaveVote()")
+            local code = "TDX:skipWaveVote()"
             -- Xử lý trực tiếp thay vì setPending vì không có confirmation event
             processAndWriteAction(code)
         end
