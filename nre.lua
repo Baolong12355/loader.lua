@@ -19,7 +19,7 @@ local stats = {
 -- Config
 local config = {
     enableLogging = true,
-    enableFileLog = false,
+    enableFileLog = true,
     enableStats = true,
     logFileName = "skip_vote_monitor.log",
     maxHistorySize = 1000
@@ -74,16 +74,22 @@ end
 -- Write to file log
 local function writeToFile(logEntry)
     if config.enableFileLog then
-        local success, error = pcall(function()
-            local existingContent = ""
-            if isfile(config.logFileName) then
-                existingContent = readfile(config.logFileName)
+        local success, err = pcall(function()
+            -- Use appendfile for better performance
+            if writefile and appendfile then
+                if not isfile(config.logFileName) then
+                    writefile(config.logFileName, "=== Skip Wave Vote Monitor Log ===\n")
+                end
+                appendfile(config.logFileName, logEntry .. "\n")
+            else
+                warn("❌ File functions not available")
             end
-            writefile(config.logFileName, existingContent .. logEntry .. "\n")
         end)
         
         if not success then
-            warn("❌ Failed to write to log file:", error)
+            warn("❌ Failed to write to log file:", err)
+        else
+            print("💾 Logged to file:", config.logFileName)
         end
     end
 end
@@ -116,12 +122,18 @@ monitor_hook = hookmetamethod(game, "__namecall", function(self, ...)
         -- Advanced logging with player info
         local player = game:GetService("Players").LocalPlayer
         if player then
+            -- Convert args to strings for safe concatenation
+            local argsStrings = {}
+            for i, arg in ipairs(args) do
+                argsStrings[i] = tostring(arg)
+            end
+            
             local detailedLog = string.format(
                 "[%s] Player: %s | Vote: %s | Args: %s",
                 os.date("%H:%M:%S", timestamp),
                 player.Name,
                 vote and "SKIP" or "CONTINUE",
-                table.concat(args, ", ")
+                table.concat(argsStrings, ", ")
             )
             
             if config.enableLogging then
