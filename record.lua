@@ -486,11 +486,7 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- THÊM: Xử lý sự kiện skip wave vote cast
-ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function(data)
-    -- Xác nhận các yêu cầu skip wave đang chờ
-    tryConfirm("SkipWave")
-end)
+-- THÊM: Skip wave không có response event, được xử lý trực tiếp trong handleRemote
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
 pcall(function()
@@ -514,7 +510,7 @@ end)
 local function handleRemote(name, args)
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
-    -- THÊM: Xử lý SkipWaveVoteCast
+    -- THÊM: Xử lý SkipWaveVoteCast - xử lý trực tiếp vì không có response event
     if name == "SkipWaveVoteCast" then
         local voteValue = args[1]
         if typeof(voteValue) == "boolean" and voteValue == true then
@@ -523,7 +519,8 @@ local function handleRemote(name, args)
                 currentWave or "Unknown", 
                 tostring(convertTimeToNumber(currentTime)) or "Unknown"
             )
-            setPending("SkipWave", code)
+            -- Xử lý trực tiếp thay vì setPending vì không có confirmation event
+            processAndWriteAction(code)
         end
     end
 
