@@ -137,7 +137,7 @@ end
 
 setupSkipWaveHook()
 
-print("✅ TDX Skip Wave Recorder đã hoạt động!")
+print("✅ TRecorder đã hoạt động!")
 print("📁 File output: " .. outJson)
 print("🎯 Chỉ ghi Skip Wave, bỏ qua các action khác")
 print("🔍 Sẽ log tất cả remote calls để debug")
