@@ -27,7 +27,7 @@ local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upg
 -- THÊM: Biến theo dõi trạng thái skip wave
 local skipWaveState = {
     votingEnabled = false,
-    pendingSkip = false,
+    pendingSkip = false, -- Sẽ lưu command string thay vì boolean
     lastVoteTime = 0
 }
 
@@ -502,12 +502,11 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- SỬA: Xử lý sự kiện skip wave vote với logic mới - lấy thời gian chính xác
+-- SỬA: Xử lý sự kiện skip wave vote với logic mới - confirm bằng command đã lưu
 ReplicatedStorage.Remotes.SkipWaveVoteStateUpdate.OnClientEvent:Connect(function(data)
     if not data then return end
     
     local votingEnabled = data.VotingEnabled
-    local currentTime = tick()
     
     -- Khi voting được bật, reset trạng thái
     if votingEnabled and not skipWaveState.votingEnabled then
@@ -518,12 +517,8 @@ ReplicatedStorage.Remotes.SkipWaveVoteStateUpdate.OnClientEvent:Connect(function
     
     -- Khi voting bị tắt và chúng ta có pending skip
     if not votingEnabled and skipWaveState.votingEnabled and skipWaveState.pendingSkip then
-        -- SỬA: Lấy thời gian hiện tại ngay khi skip được xác nhận
-        local currentWave, currentTime = getCurrentWaveAndTime()
-        local skipCommand = string.format("TDX:skipWave(%s, %s)", currentWave, convertTimeToNumber(currentTime))
-        
-        -- Confirm skip wave action với thời gian chính xác
-        processAndWriteAction(skipCommand)
+        -- SỬA: Sử dụng command đã lưu với thời gian chính xác
+        processAndWriteAction(skipWaveState.pendingSkip)
         
         
         -- Reset trạng thái
@@ -555,11 +550,15 @@ end)
 local function handleRemote(name, args)
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
-    -- SỬA: Xử lý SkipWaveVoteCast với logic mới
+    -- SỬA: Xử lý SkipWaveVoteCast với logic mới - lấy thời gian ngay khi vote
     if name == "SkipWaveVoteCast" then
         if args and args[1] == true and skipWaveState.votingEnabled then
-            -- Đánh dấu rằng chúng ta đã vote skip
-            skipWaveState.pendingSkip = true
+            -- Lấy thời gian ngay khi bắt được remote vote
+            local currentWave, currentTime = getCurrentWaveAndTime()
+            local skipCommand = string.format("TDX:skipWave(%s, %s)", currentWave, convertTimeToNumber(currentTime))
+            
+            -- Lưu command với thời gian chính xác
+            skipWaveState.pendingSkip = skipCommand
             skipWaveState.lastVoteTime = tick()
             
         end
