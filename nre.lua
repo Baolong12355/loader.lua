@@ -623,7 +623,7 @@ end)
 preserveSuperFunctions()
 setupHooks()
 
-print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
+print("✅ TDX Recorderg Skills + Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
 print("⏭️ Skip Wave chỉ LOG thực tế (không fake được)!")
