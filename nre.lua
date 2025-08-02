@@ -230,14 +230,7 @@ end
 
 -- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
 local function parseMacroLine(line)
-    -- THÊM: Phân tích lệnh skip wave
-    if line:match('TDX:skipWave%(%)') then
-        local currentWave, currentTime = getCurrentWaveAndTime()
-        return {{
-            SkipWhen = currentWave,
-            SkipWave = convertTimeToNumber(currentTime)
-        }}
-    end
+    -- NOTE: Bỏ parse skipWave vì không fake được, chỉ log thực tế
 
     -- THÊM: Phân tích lệnh moving skill WITH position
     local hash, skillIndex, x, y, z = line:match('TDX:useMovingSkill%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%)')
@@ -513,12 +506,7 @@ end)
 local function handleRemote(name, args)
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
-    -- THÊM: Xử lý SkipWaveVoteCast
-    if name == "SkipWaveVoteCast" then
-        if args and args[1] == true then
-            setPending("SkipWave", "TDX:skipWave()")
-        end
-    end
+    -- THÊM: Xử lý SkipWaveVoteCast (chỉ log, không fake được nên bỏ khỏi handleRemote)
 
     -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
     if name == "TowerUseAbilityRequest" then
@@ -638,4 +626,4 @@ setupHooks()
 print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⏭️ Đã thêm hook Skip Wave Vote!")
+print("⏭️ Skip Wave chỉ LOG thực tế (không fake được)!")
