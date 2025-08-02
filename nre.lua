@@ -479,9 +479,40 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- THÊM: Xử lý sự kiện skip wave vote
-ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function()
-    tryConfirm("SkipWave")
+-- THÊM: Xử lý sự kiện skip wave vote - DEBUG VERSION
+pcall(function()
+    print("🔍 [DEBUG] Đang setup SkipWaveVoteCast listener...")
+    
+    local skipRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("SkipWaveVoteCast", 5)
+    if not skipRemote then
+        warn("❌ [DEBUG] Không tìm thấy SkipWaveVoteCast remote!")
+        return
+    end
+    
+    print("✅ [DEBUG] Tìm thấy SkipWaveVoteCast remote:", skipRemote)
+    
+    skipRemote.OnClientEvent:Connect(function(...)
+        local args = {...}
+        print("🎯 [DEBUG] SkipWaveVoteCast triggered với args:", HttpService:JSONEncode(args))
+        
+        -- Ghi trực tiếp vào log thay vì dùng pending queue
+        local currentWave, currentTime = getCurrentWaveAndTime()
+        print("🔍 [DEBUG] Wave hiện tại:", currentWave, "Time:", currentTime)
+        
+        local entry = {
+            SkipWhen = currentWave,
+            SkipWave = convertTimeToNumber(currentTime)
+        }
+        
+        print("📋 [DEBUG] Entry được tạo:", HttpService:JSONEncode(entry))
+        
+        table.insert(recordedActions, entry)
+        updateJsonFile()
+        
+        print("📋 Đã ghi Skip Wave Vote: " .. tostring(currentWave) .. " tại " .. tostring(currentTime))
+    end)
+    
+    print("✅ [DEBUG] SkipWaveVoteCast listener đã được setup!")
 end)
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
@@ -504,7 +535,7 @@ end)
 
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
-    -- Debug cho tất cả remotes
+    -- Debug cho skip wave
     if name == "SkipWaveVoteCast" then
         print("🔍 [DEBUG] handleRemote caught SkipWaveVoteCast:", HttpService:JSONEncode(args))
     end
