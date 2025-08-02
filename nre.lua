@@ -593,7 +593,7 @@ local function handleRemote(name, args)
             if skipWhen and skipWave then
                 local code = string.format("SkipWhen:%s:SkipWave:%s", tostring(skipWhen), tostring(skipWave))
                 setPending("SkipWave", code)
-
+                print("🗳️ Skip Wave Vote: true at " .. tostring(skipWhen) .. " Time " .. tostring(skipWave))
             end
         end
     end
