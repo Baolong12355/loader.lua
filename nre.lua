@@ -420,6 +420,61 @@ end
 --=                      XỬ LÝ SỰ KIỆN & HOOKS                                 =
 --==============================================================================
 
+-- Xử lý các lệnh gọi remote
+local function handleRemote(name, args)
+    if name == "SkipWaveVoteCast" then
+        handleSkipWaveVote(args)
+    end
+
+    -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
+    if name == "TowerUseAbilityRequest" then
+        local towerHash, skillIndex, targetPos = unpack(args)
+        if typeof(towerHash) == "number" and typeof(skillIndex) == "number" then
+            local towerName = GetTowerNameByHash(towerHash)
+            if IsMovingSkillTower(towerName, skillIndex) then
+                local code
+
+                -- Skill cần position (skill 1)
+                if IsPositionRequiredSkill(towerName, skillIndex) and typeof(targetPos) == "Vector3" then
+                    code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
+                        tostring(towerHash), 
+                        skillIndex, 
+                        tostring(targetPos.X), 
+                        tostring(targetPos.Y), 
+                        tostring(targetPos.Z))
+
+                -- Skill không cần position (skill 3)
+                elseif not IsPositionRequiredSkill(towerName, skillIndex) then
+                    code = string.format("TDX:useSkill(%s, %d)", 
+                        tostring(towerHash), 
+                        skillIndex)
+                end
+
+                if code then
+                    setPending("MovingSkill", code, towerHash)
+                end
+            end
+        end
+    end
+
+    if name == "TowerUpgradeRequest" then
+        local hash, path, count = unpack(args)
+        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
+            setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
+        end
+    elseif name == "PlaceTower" then
+        local a1, towerName, vec, rot = unpack(args)
+        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
+            local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
+            setPending("Place", code)
+        end
+    elseif name == "SellTower" then
+        setPending("Sell", "TDX:sellTower("..tostring(args[1])..")")
+    elseif name == "ChangeQueryType" then
+        setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
+    end
+end
+
 -- Thêm một yêu cầu vào hàng đợi chờ xác nhận
 local function setPending(typeStr, code, hash)
     table.insert(pendingQueue, {
@@ -442,6 +497,42 @@ local function tryConfirm(typeStr, specificHash)
             end
         end
     end
+end
+
+-- Hook các hàm remote
+local function setupHooks()
+    if not hookfunction or not hookmetamethod or not checkcaller then
+        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
+        return
+    end
+
+    -- Hook FireServer
+    local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+        if not checkcaller() then
+            handleRemote(self.Name, {...})
+        end
+        return oldFireServer(self, ...)
+    end)
+
+    -- Hook InvokeServer
+    local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+        if not checkcaller() then
+            handleRemote(self.Name, {...})
+        end
+        return oldInvokeServer(self, ...)
+    end)
+
+    -- Hook namecall
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        if not checkcaller() then
+            local method = getnamecallmethod()
+            if method == "FireServer" or method == "InvokeServer" then
+                handleRemote(self.Name, {...})
+            end
+        end
+        return oldNamecall(self, ...)
+    end)
 end
 
 -- Xử lý sự kiện đặt/bán tower
@@ -524,98 +615,6 @@ pcall(function()
         end
     end)
 end)
-
--- Xử lý các lệnh gọi remote
-local function handleRemote(name, args)
-    -- THÊM: Xử lý SkipWaveVoteCast
-    if name == "SkipWaveVoteCast" then
-        handleSkipWaveVote(args)
-    end
-
-    -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
-    if name == "TowerUseAbilityRequest" then
-        local towerHash, skillIndex, targetPos = unpack(args)
-        if typeof(towerHash) == "number" and typeof(skillIndex) == "number" then
-            local towerName = GetTowerNameByHash(towerHash)
-            if IsMovingSkillTower(towerName, skillIndex) then
-                local code
-
-                -- Skill cần position (skill 1)
-                if IsPositionRequiredSkill(towerName, skillIndex) and typeof(targetPos) == "Vector3" then
-                    code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
-                        tostring(towerHash), 
-                        skillIndex, 
-                        tostring(targetPos.X), 
-                        tostring(targetPos.Y), 
-                        tostring(targetPos.Z))
-
-                -- Skill không cần position (skill 3)
-                elseif not IsPositionRequiredSkill(towerName, skillIndex) then
-                    code = string.format("TDX:useSkill(%s, %d)", 
-                        tostring(towerHash), 
-                        skillIndex)
-                end
-
-                if code then
-                    setPending("MovingSkill", code, towerHash)
-                end
-            end
-        end
-    end
-
-    if name == "TowerUpgradeRequest" then
-        local hash, path, count = unpack(args)
-        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
-            setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
-        end
-    elseif name == "PlaceTower" then
-        local a1, towerName, vec, rot = unpack(args)
-        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
-            local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
-            setPending("Place", code)
-        end
-    elseif name == "SellTower" then
-        setPending("Sell", "TDX:sellTower("..tostring(args[1])..")")
-    elseif name == "ChangeQueryType" then
-        setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
-    end
-end
-
--- Hook các hàm remote
-local function setupHooks()
-    if not hookfunction or not hookmetamethod or not checkcaller then
-        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
-        return
-    end
-
-    -- Hook FireServer
-    local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-        if not checkcaller() then
-            handleRemote(self.Name, {...})
-        end
-        return oldFireServer(self, ...)
-    end)
-
-    -- Hook InvokeServer
-    local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-        if not checkcaller() then
-            handleRemote(self.Name, {...})
-        end
-        return oldInvokeServer(self, ...)
-    end)
-
-    -- Hook namecall
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if not checkcaller() then
-            local method = getnamecallmethod()
-            if method == "FireServer" or method == "InvokeServer" then
-                handleRemote(self.Name, {...})
-            end
-        end
-        return oldNamecall(self, ...)
-    end)
-end
 
 --==============================================================================
 --=                         VÒNG LẶP & KHỞI TẠO                               =
