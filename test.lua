@@ -231,13 +231,11 @@ end
 -- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
 local function parseMacroLine(line)
     -- THÊM: Phân tích lệnh skip wave
-    local wave, time = line:match('TDX:skipWave%(([^,]+),%s*([^%)]+)%)')
-    if wave and time then
-        -- Xử lý wave string (loại bỏ dấu ngoặc kép nếu có)
-        wave = tostring(wave):gsub('^%s*"(.-)"%s*$', '%1')
+    local skipWave, skipTime = line:match('SkipWhen:([^:]+):SkipWave:([^$]+)')
+    if skipWave and skipTime then
         return {{
-            SkipWhen = tonumber(time),
-            SkipWave = wave
+            SkipWhen = skipWave,
+            SkipWave = skipTime
         }}
     end
 
@@ -338,13 +336,13 @@ local function processAndWriteAction(commandString)
     if globalEnv.TDX_REBUILDING_TOWERS then
         -- Phân tích command để lấy axis X
         local axisX = nil
-        
+
         -- Kiểm tra nếu là PlaceTower
         local a1, towerName, vec, rot = commandString:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
         if vec then
             axisX = tonumber(vec)
         end
-        
+
         -- Kiểm tra nếu là UpgradeTower
         if not axisX then
             local hash = commandString:match('TDX:upgradeTower%(([^,]+),')
@@ -355,7 +353,7 @@ local function processAndWriteAction(commandString)
                 end
             end
         end
-        
+
         -- Kiểm tra nếu là ChangeQueryType
         if not axisX then
             local hash = commandString:match('TDX:changeQueryType%(([^,]+),')
@@ -366,7 +364,7 @@ local function processAndWriteAction(commandString)
                 end
             end
         end
-        
+
         -- Kiểm tra nếu là UseMovingSkill
         if not axisX then
             local hash = commandString:match('TDX:useMovingSkill%(([^,]+),')
@@ -380,13 +378,13 @@ local function processAndWriteAction(commandString)
                 end
             end
         end
-        
+
         -- Nếu tower đang được rebuild thì bỏ qua log
         if axisX and globalEnv.TDX_REBUILDING_TOWERS[axisX] then
             return
         end
     end
-    
+
     -- Tiếp tục xử lý bình thường nếu không phải rebuild
     local entries = parseMacroLine(commandString)
     if entries then
@@ -488,12 +486,7 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- Xử lý sự kiện thay đổi mục tiêu
-ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
-    if data and data[1] then
-        tryConfirm("Target")
-    end
-end)
+-- THÊM: Skip wave không có response event, được xử lý trực tiếp trong handleRemote
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
 pcall(function()
@@ -515,35 +508,20 @@ end)
 
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
-    print("🔍 Remote called:", name, "Args:", args)
-    
-    -- SỬA LỖI: Xử lý SkipWaveVoteCast - GHI NGAY LẬP TỨC KHI FIRE
+    -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
+
+    -- THÊM: Xử lý SkipWaveVoteCast - xử lý trực tiếp vì không có response event
     if name == "SkipWaveVoteCast" then
         local voteValue = args[1]
-        print("🔍 SkipWaveVoteCast called with vote:", voteValue)
-        
-        if voteValue == true then -- Chỉ ghi khi vote skip (true)
+        if typeof(voteValue) == "boolean" and voteValue == true then
             local currentWave, currentTime = getCurrentWaveAndTime()
-            print("🔍 Getting current wave and time:", currentWave, currentTime)
-            
-            if currentWave and currentTime then
-                local timeNumber = convertTimeToNumber(currentTime)
-                if timeNumber then
-                    local entry = {
-                        SkipWhen = timeNumber,
-                        SkipWave = currentWave
-                    }
-                    table.insert(recordedActions, entry)
-                    updateJsonFile()
-                    print("✅ Đã ghi skip wave ngay lập tức: " .. currentWave .. " at " .. currentTime)
-                else
-                    print("❌ Không thể convert time:", currentTime)
-                end
-            else
-                print("❌ Không lấy được wave/time")
-            end
+            local code = string.format("SkipWhen:%s:SkipWave:%s", 
+                currentWave or "Unknown", 
+                tostring(convertTimeToNumber(currentTime)) or "Unknown"
+            )
+            -- Xử lý trực tiếp thay vì setPending vì không có confirmation event
+            processAndWriteAction(code)
         end
-        return -- Không cần pending
     end
 
     -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
@@ -579,4 +557,89 @@ local function handleRemote(name, args)
 
     if name == "TowerUpgradeRequest" then
         local hash, path, count = unpack(args)
-        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number
+        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
+            setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
+        end
+    elseif name == "PlaceTower" then
+        local a1, towerName, vec, rot = unpack(args)
+        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
+            local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
+            setPending("Place", code)
+        end
+    elseif name == "SellTower" then
+        setPending("Sell", "TDX:sellTower("..tostring(args[1])..")")
+    elseif name == "ChangeQueryType" then
+        setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
+    end
+end
+
+-- Hook các hàm remote
+local function setupHooks()
+    if not hookfunction or not hookmetamethod or not checkcaller then
+        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
+        return
+    end
+
+    -- Hook FireServer
+    local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+        handleRemote(self.Name, {...})
+        return oldFireServer(self, ...)
+    end)
+
+    -- Hook InvokeServer - ĐẶC BIỆT QUAN TRỌNG CHO TowerUseAbilityRequest
+    local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+        handleRemote(self.Name, {...})
+        return oldInvokeServer(self, ...)
+    end)
+
+    -- Hook namecall - QUAN TRỌNG NHẤT CHO ABILITY REQUEST
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        if checkcaller() then return oldNamecall(self, ...) end
+        local method = getnamecallmethod()
+        if method == "FireServer" or method == "InvokeServer" then
+            handleRemote(self.Name, {...})
+        end
+        return oldNamecall(self, ...)
+    end)
+end
+
+--==============================================================================
+--=                         VÒNG LẶP & KHỞI TẠO                               =
+--==============================================================================
+
+-- Vòng lặp dọn dẹp hàng đợi chờ
+task.spawn(function()
+    while task.wait(0.5) do
+        local now = tick()
+        for i = #pendingQueue, 1, -1 do
+            if now - pendingQueue[i].created > timeout then
+                warn("❌ Không xác thực được: " .. pendingQueue[i].type .. " | Code: " .. pendingQueue[i].code)
+                table.remove(pendingQueue, i)
+            end
+        end
+    end
+end)
+
+-- SỬA: Vòng lặp cập nhật vị trí SpawnCFrame của tower
+task.spawn(function()
+    while task.wait() do
+        if TowerClass and TowerClass.GetTowers then
+            for hash, tower in pairs(TowerClass.GetTowers()) do
+                local pos = GetTowerSpawnPosition(tower)
+                if pos then
+                    hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+                end
+            end
+        end
+    end
+end)
+
+-- Khởi tạo
+preserveSuperFunctions()
+setupHooks()
+
+print("✅ TDX Recorder với Skip Wave Hook đã hoạt động!")
+print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
+print("🔄 Đã tích hợp với hệ thống rebuild mới!")
+print("⏭️ Đã thêm hook cho Skip Wave Vote Cast!")
