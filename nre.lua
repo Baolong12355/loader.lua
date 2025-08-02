@@ -504,6 +504,11 @@ end)
 
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
+    -- Debug cho tất cả remotes
+    if name == "SkipWaveVoteCast" then
+        print("🔍 [DEBUG] handleRemote caught SkipWaveVoteCast:", HttpService:JSONEncode(args))
+    end
+    
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
     -- THÊM: Xử lý SkipWaveVoteCast (chỉ log, không fake được nên bỏ khỏi handleRemote)
@@ -620,10 +625,14 @@ task.spawn(function()
 end)
 
 -- Khởi tạo
+print("🔍 [DEBUG] Bắt đầu khởi tạo...")
 preserveSuperFunctions()
+print("🔍 [DEBUG] preserveSuperFunctions() hoàn thành")
 setupHooks()
+print("🔍 [DEBUG] setupHooks() hoàn thành")
 
-print("✅ TDX Recorderg Skills + Skip Wave Hook đã hoạt động!")
+print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
 print("⏭️ Skip Wave chỉ LOG thực tế (không fake được)!")
+print("🔍 [DEBUG] Tất cả đã sẵn sàng!")
