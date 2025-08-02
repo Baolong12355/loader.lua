@@ -230,12 +230,12 @@ end
 
 -- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
 local function parseMacroLine(line)
-    -- THÊM: Phân tích lệnh skip wave
-    local skipWave, skipTime = line:match('SkipWhen:([^:]+):SkipWave:([^$]+)')
-    if skipWave and skipTime then
+    -- THÊM: Phân tích lệnh skip wave (chỉ khi vote true)
+    if line:match('TDX:skipWaveVote%(%)') then
+        local currentWave, currentTime = getCurrentWaveAndTime()
         return {{
-            SkipWhen = skipWave,
-            SkipWave = skipTime
+            SkipWhen = currentWave,
+            SkipWave = tostring(convertTimeToNumber(currentTime))
         }}
     end
 
@@ -510,15 +510,12 @@ end)
 local function handleRemote(name, args)
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
-    -- THÊM: Xử lý SkipWaveVoteCast - xử lý trực tiếp vì không có response event
+    -- THÊM: Xử lý SkipWaveVoteCast - chỉ ghi khi vote true
     if name == "SkipWaveVoteCast" then
         local voteValue = args[1]
         if typeof(voteValue) == "boolean" and voteValue == true then
             local currentWave, currentTime = getCurrentWaveAndTime()
-            local code = string.format("SkipWhen:%s:SkipWave:%s", 
-                currentWave or "Unknown", 
-                tostring(convertTimeToNumber(currentTime)) or "Unknown"
-            )
+            local code = string.format("TDX:skipWaveVote()")
             -- Xử lý trực tiếp thay vì setPending vì không có confirmation event
             processAndWriteAction(code)
         end
