@@ -191,9 +191,6 @@ local function IsPositionRequiredSkill(towerName, skillIndex)
     return true -- mặc định cần position
 end
 
--- Khai báo trước hàm processAndWriteAction
-local processAndWriteAction
-
 -- Cập nhật file JSON với dữ liệu mới
 local function updateJsonFile()
     if not HttpService then return end
@@ -335,27 +332,8 @@ local function parseMacroLine(line)
     return nil
 end
 
--- THÊM: Hàm xử lý skip wave vote
-local function handleSkipWaveVote(args)
-    if args and args[1] ~= nil then
-        local voteValue = args[1]
-        
-        -- Ghi vào file JSON
-        local currentWave, currentTime = getCurrentWaveAndTime()
-        local code = string.format("SkipWhen:%s:SkipWave:%s", currentTime or "unknown", currentWave or "unknown")
-        processAndWriteAction(code)
-        
-        -- Lưu trạng thái vote vào global environment
-        globalEnv.LAST_SKIP_WAVE_VOTE = {
-            value = voteValue,
-            timestamp = tick(),
-            player = player.Name
-        }
-    end
-end
-
 -- Xử lý một dòng lệnh, phân tích và ghi vào file JSON
-processAndWriteAction = function(commandString)
+local function processAndWriteAction(commandString)
     -- SỬA: Cải thiện điều kiện ngăn log hành động khi rebuild
     if globalEnv.TDX_REBUILDING_TOWERS then
         -- Phân tích command để lấy axis X
@@ -416,6 +394,25 @@ processAndWriteAction = function(commandString)
             table.insert(recordedActions, entry)
         end
         updateJsonFile()
+    end
+end
+
+-- THÊM: Hàm xử lý skip wave vote
+local function handleSkipWaveVote(args)
+    if args and args[1] ~= nil then
+        local voteValue = args[1]
+        
+        -- Ghi vào file JSON
+        local currentWave, currentTime = getCurrentWaveAndTime()
+        local code = string.format("SkipWhen:%s:SkipWave:%s", currentTime or "unknown", currentWave or "unknown")
+        processAndWriteAction(code)
+        
+        -- Lưu trạng thái vote vào global environment
+        globalEnv.LAST_SKIP_WAVE_VOTE = {
+            value = voteValue,
+            timestamp = tick(),
+            player = player.Name
+        }
     end
 end
 
@@ -599,7 +596,7 @@ local function setupHooks()
         return oldFireServer(self, ...)
     end)
 
-    -- Hook InvokeServer - ĐẶC BIỆT QUAN TRỌNG CHO TowerUseAbilityRequest
+    -- Hook InvokeServer
     local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
         if not checkcaller() then
             handleRemote(self.Name, {...})
@@ -607,7 +604,7 @@ local function setupHooks()
         return oldInvokeServer(self, ...)
     end)
 
-    -- Hook namecall - QUAN TRỌNG NHẤT CHO ABILITY REQUEST VÀ SKIP WAVE
+    -- Hook namecall
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         if not checkcaller() then
@@ -655,7 +652,5 @@ end)
 preserveSuperFunctions()
 setupHooks()
 
-print("✅ TDX RecordeWave Hook đã hoạt động!")
+print("✅ TDX Recorder với SkipWave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
-print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("🗳️ Hỗ trợ ghi nhận skip wave votes!")
