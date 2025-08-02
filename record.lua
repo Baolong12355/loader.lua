@@ -504,10 +504,17 @@ pcall(function()
     end)
 end)
 
--- Xử lý các lệnh gọi remote (trừ SkipWaveVoteCast được xử lý trực tiếp trong namecall)
+-- Xử lý các lệnh gọi remote (bao gồm SkipWaveVoteCast)
 local function handleRemote(name, args)
-    -- Skip SkipWaveVoteCast vì đã xử lý trong namecall hook
+    -- THÊM: Xử lý SkipWaveVoteCast trực tiếp
     if name == "SkipWaveVoteCast" then
+        local voteValue = args[1]
+        if typeof(voteValue) == "boolean" and voteValue == true then
+            -- Xử lý trực tiếp (không cần pending vì skip wave không có server response)
+            local code = "TDX:skipWave()"
+            processAndWriteAction(code)
+            print("✅ Skip Wave đã được ghi nhận!")
+        end
         return
     end
 
@@ -587,28 +594,6 @@ local function setupHooks()
         if method == "FireServer" or method == "InvokeServer" then
             local args = {...}
             local remoteName = self.Name
-            
-            -- SỬA: Xử lý đặc biệt cho SkipWaveVoteCast 
-            if remoteName == "SkipWaveVoteCast" and method == "FireServer" then
-                local voteValue = args[1]
-                if typeof(voteValue) == "boolean" and voteValue == true then
-                    -- Ghi nhận skip wave NGAY LẬP TỨC (không cần chờ server response)
-                    local code = "TDX:skipWave()"
-                    processAndWriteAction(code)
-                    print("✅ Skip Wave đã được ghi nhận!")
-                    
-                    -- Chuyển boolean thành string để server hiểu được
-                    -- true -> "true", false -> "false"
-                    args[1] = tostring(voteValue)
-                    return oldNamecall(self, unpack(args))
-                elseif typeof(voteValue) == "boolean" and voteValue == false then
-                    -- Chuyển false thành string để tránh lỗi
-                    args[1] = tostring(voteValue)
-                    return oldNamecall(self, unpack(args))
-                end
-                -- Nếu đã là string thì để nguyên
-                return oldNamecall(self, ...)
-            end
             
             -- Xử lý tất cả remote calls thông qua handleRemote
             handleRemote(remoteName, args)
