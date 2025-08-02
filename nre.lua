@@ -131,6 +131,16 @@ local function getCurrentWaveAndTime()
     return wave, time
 end
 
+-- Chuyển đổi chuỗi thời gian (vd: "1:23") thành số (vd: 123)
+local function convertTimeToNumber(timeStr)
+    if not timeStr then return nil end
+    local mins, secs = timeStr:match("(%d+):(%d+)")
+    if mins and secs then
+        return tonumber(mins) * 100 + tonumber(secs)
+    end
+    return nil
+end
+
 -- THÊM: Lấy thông tin wave và time để ghi skip wave
 local function getSkipWaveInfo()
     local currentWave, currentTime = getCurrentWaveAndTime()
@@ -139,9 +149,6 @@ local function getSkipWaveInfo()
     end
     return nil, nil
 end
-
--- Chuyển đổi chuỗi thời gian (vd: "1:23") thành số (vd: 123)
-local function convertTimeToNumber(timeStr)
     if not timeStr then return nil end
     local mins, secs = timeStr:match("(%d+):(%d+)")
     if mins and secs then
@@ -586,14 +593,12 @@ local function handleRemote(name, args)
     elseif name == "ChangeQueryType" then
         setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
     elseif name == "SkipWaveVoteCast" then
-        -- THÊM: Xử lý skip wave vote - CHỈ GHI KHI VOTE = TRUE
         local voteValue = args[1]
         if typeof(voteValue) == "boolean" and voteValue == true then
             local skipWhen, skipWave = getSkipWaveInfo()
             if skipWhen and skipWave then
                 local code = string.format("SkipWhen:%s:SkipWave:%s", tostring(skipWhen), tostring(skipWave))
                 setPending("SkipWave", code)
-                print("🗳️ Skip Wave Vote: true at " .. tostring(skipWhen) .. " Time " .. tostring(skipWave))
             end
         end
     end
