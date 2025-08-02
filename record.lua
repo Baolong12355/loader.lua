@@ -504,17 +504,10 @@ pcall(function()
     end)
 end)
 
--- Xử lý các lệnh gọi remote (bao gồm SkipWaveVoteCast)
+-- Xử lý các lệnh gọi remote (trừ SkipWaveVoteCast được xử lý trực tiếp trong namecall)
 local function handleRemote(name, args)
-    -- THÊM: Xử lý SkipWaveVoteCast trực tiếp
+    -- Skip SkipWaveVoteCast vì đã xử lý trong namecall hook
     if name == "SkipWaveVoteCast" then
-        local voteValue = args[1]
-        if typeof(voteValue) == "boolean" and voteValue == true then
-            -- Xử lý trực tiếp (không cần pending vì skip wave không có server response)
-            local code = "TDX:skipWave()"
-            processAndWriteAction(code)
-            print("✅ Skip Wave đã được ghi nhận!")
-        end
         return
     end
 
@@ -594,6 +587,21 @@ local function setupHooks()
         if method == "FireServer" or method == "InvokeServer" then
             local args = {...}
             local remoteName = self.Name
+            
+            -- SỬA: Xử lý đặc biệt cho SkipWaveVoteCast để tránh lỗi argument type
+            if remoteName == "SkipWaveVoteCast" and method == "FireServer" then
+                local voteValue = args[1]
+                if typeof(voteValue) == "boolean" and voteValue == true then
+                    -- Ghi nhận skip wave
+                    local code = "TDX:skipWave()"
+                    processAndWriteAction(code)
+                    print("✅ Skip Wave đã được ghi nhận!")
+                    
+                    -- Chuyển đổi boolean thành string để tránh lỗi server
+                    args[1] = tostring(voteValue)
+                    return oldNamecall(self, unpack(args))
+                end
+            end
             
             -- Xử lý tất cả remote calls thông qua handleRemote
             handleRemote(remoteName, args)
