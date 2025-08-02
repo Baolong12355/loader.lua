@@ -392,25 +392,10 @@ local function processAndWriteAction(commandString)
             table.insert(recordedActions, entry)
         end
         updateJsonFile()
+        
+        -- THÊM: Log ra console khi có action được ghi
+        print("📝 Recorded action: " .. commandString)
     end
-end
-
--- SỬA: Hàm xử lý Skip Wave ngay lập tức
-local function processSkipWaveInstant()
-    local currentWave, currentTime = getCurrentWaveAndTime()
-    local skipEntry = {
-        SkipWhen = currentWave,
-        SkipWave = convertTimeToNumber(currentTime)
-    }
-    
-    -- In ra console
-    print("⏭️ Skip Wave đã được ghi nhận:")
-    print("   Wave: " .. tostring(currentWave))
-    print("   Time: " .. tostring(currentTime))
-    
-    -- Ghi vào JSON
-    table.insert(recordedActions, skipEntry)
-    updateJsonFile()
 end
 
 --==============================================================================
@@ -425,6 +410,9 @@ local function setPending(typeStr, code, hash)
         created = tick(),
         hash = hash
     })
+    
+    -- THÊM: Log ra console khi có pending
+    print("⏳ Pending " .. typeStr .. ": " .. code)
 end
 
 -- Xác nhận một yêu cầu từ hàng đợi và xử lý nó
@@ -435,6 +423,9 @@ local function tryConfirm(typeStr, specificHash)
             if not specificHash or string.find(item.code, tostring(specificHash)) then
                 processAndWriteAction(item.code) -- Thay thế việc ghi file txt
                 table.remove(pendingQueue, i)
+                
+                -- THÊM: Log ra console khi confirm
+                print("✅ Confirmed " .. typeStr .. ": " .. item.code)
                 return
             end
         end
@@ -504,10 +495,9 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- SỬA: Xử lý sự kiện skip wave NGAY LẬP TỨC (không dùng pending)
+-- THÊM: Xử lý sự kiện skip wave vote
 ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function()
-    print("🎯 Bắt được SkipWaveVoteCast event!")
-    processSkipWaveInstant()
+    tryConfirm("SkipWave")
 end)
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
@@ -528,15 +518,30 @@ pcall(function()
     end)
 end)
 
+-- THÊM: Auto pending cho skip wave mỗi 0.1 giây
+task.spawn(function()
+    while task.wait(0.1) do
+        -- Auto confirm tất cả skip wave pending sau 0.1 giây
+        for i = #pendingQueue, 1, -1 do
+            local item = pendingQueue[i]
+            if item.type == "SkipWave" and tick() - item.created > 0.1 then
+                processAndWriteAction(item.code)
+                table.remove(pendingQueue, i)
+                print("⏭️ Auto confirmed SkipWave: " .. item.code)
+            end
+        end
+    end
+end)
+
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
-    -- SỬA: Xử lý SkipWaveVoteCast - LOG NGAY LẬP TỨC
+    -- THÊM: Xử lý SkipWaveVoteCast
     if name == "SkipWaveVoteCast" then
         if args and args[1] == true then
-            print("🎯 Bắt được SkipWaveVoteCast remote call!")
-            processSkipWaveInstant()
+            setPending("SkipWave", "TDX:skipWave()")
+            print("⏭️ Skip wave vote detected!")
         end
     end
 
@@ -566,6 +571,7 @@ local function handleRemote(name, args)
 
                 if code then
                     setPending("MovingSkill", code, towerHash)
+                    print("🚁 Moving skill detected: " .. towerName .. " skill " .. skillIndex)
                 end
             end
         end
@@ -658,4 +664,6 @@ setupHooks()
 print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⏭️ Skip Wave được log NGAY LẬP TỨC (không dùng pending)!")
+print("⏭️ Đã thêm hook Skip Wave Vote!")
+print("🔄 Auto pending Skip Wave mỗi 0.1 giây!")
+print("📝 Console logging đã được kích hoạt!")
