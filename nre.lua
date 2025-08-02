@@ -504,7 +504,7 @@ ReplicatedStorage.Remotes.SkipWaveVoteStateUpdate.OnClientEvent:Connect(function
     if votingEnabled and not skipWaveState.votingEnabled then
         skipWaveState.votingEnabled = true
         skipWaveState.pendingSkip = false
-        print("🗳️ Skip wave voting đã được bật")
+        
     end
     
     -- Khi voting bị tắt và chúng ta có pending skip
@@ -547,7 +547,7 @@ local function handleRemote(name, args)
             -- Đánh dấu rằng chúng ta đã vote skip
             skipWaveState.pendingSkip = true
             skipWaveState.lastVoteTime = tick()
-            print("🗳️ Đã vote skip wave, đang chờ xác nhận...")
+            
         end
     end
 
