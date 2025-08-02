@@ -110,18 +110,14 @@ local function setupSkipWaveHook()
                 print("📋 Vote Value:", voteValue, "| Type:", typeof(voteValue))
                 
                 if typeof(voteValue) == "boolean" and voteValue == true then
-                    local currentWave, currentTime = getCurrentWaveAndTime()
-                    print("🌊 Current Wave:", currentWave, "| Time:", currentTime)
+                    -- GỬI SERVER Ở DẠNG TXT, KHÔNG PHẢI JSON!
+                    local txtCommand = "TDX:skipWave()"
                     
-                    local skipEntry = {
-                        SkipWhen = currentWave,
-                        SkipWave = tostring(convertTimeToNumber(currentTime))
-                    }
+                    print("📝 TXT Command:", txtCommand)
+                    print("✅ Skip Wave command tạo thành công!")
                     
-                    print("📝 Skip Entry:", HttpService:JSONEncode(skipEntry))
-                    table.insert(recordedActions, skipEntry)
-                    updateJsonFile()
-                    print("✅ Skip Wave đã được ghi vào file!")
+                    -- Có thể ghi vào file txt hoặc gửi lên server
+                    -- Tùy vào cách server nhận
                 else
                     print("❌ Vote value không hợp lệ")
                 end
