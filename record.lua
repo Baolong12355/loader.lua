@@ -84,36 +84,6 @@ end
 --=                      XỬ LÝ SKIP WAVE                                       =
 --==============================================================================
 
--- Phân tích TXT command thành JSON (từ bản cũ)
-local function parseMacroLine(line)
-    -- Phân tích lệnh skip wave
-    if line:match('TDX:skipWave%(%)') then
-        local currentWave, currentTime = getCurrentWaveAndTime()
-        return {{
-            SkipWhen = currentWave,
-            SkipWave = tostring(convertTimeToNumber(currentTime))
-        }}
-    end
-    return nil
-end
-
--- Xử lý TXT command và ghi JSON (từ bản cũ)
-local function processAndWriteAction(commandString)
-    print("🔄 Processing command:", commandString)
-    
-    local entries = parseMacroLine(commandString)
-    if entries then
-        for _, entry in ipairs(entries) do
-            print("📝 Adding entry:", HttpService:JSONEncode(entry))
-            table.insert(recordedActions, entry)
-        end
-        updateJsonFile()
-        print("✅ Command processed and saved!")
-    else
-        print("❌ Could not parse command")
-    end
-end
-
 -- Hook namecall để bắt Skip Wave
 local function setupSkipWaveHook()
     if not hookmetamethod or not checkcaller then
@@ -140,14 +110,24 @@ local function setupSkipWaveHook()
                 print("📋 Vote Value:", voteValue, "| Type:", typeof(voteValue))
                 
                 if typeof(voteValue) == "boolean" and voteValue == true then
-                    -- TẠO TXT COMMAND như bản cũ
+                    -- Tạo TXT command
                     local txtCommand = "TDX:skipWave()"
                     print("📝 TXT Command:", txtCommand)
                     
-                    -- XỬ LÝ QUA processAndWriteAction như bản cũ
-                    processAndWriteAction(txtCommand)
+                    -- Parse TXT thành JSON format (giống như trong processAndWriteAction)
+                    local currentWave, currentTime = getCurrentWaveAndTime()
+                    local skipEntry = {
+                        SkipWhen = currentWave,
+                        SkipWave = tostring(convertTimeToNumber(currentTime))
+                    }
                     
-                    print("✅ Skip Wave processed!")
+                    print("🌊 Current Wave:", currentWave, "| Time:", currentTime)
+                    print("📋 JSON Entry:", HttpService:JSONEncode(skipEntry))
+                    
+                    -- Ghi vào file JSON
+                    table.insert(recordedActions, skipEntry)
+                    updateJsonFile()
+                    print("✅ Skip Wave đã được ghi vào JSON!")
                 else
                     print("❌ Vote value không hợp lệ")
                 end
@@ -167,7 +147,7 @@ end
 
 setupSkipWaveHook()
 
-print("✅ TDXWave Recorder đã hoạt động!")
+print("✅ TDX Skip Wave Recorder đã hoạt động!")
 print("📁 File output: " .. outJson)
 print("🎯 Chỉ ghi Skip Wave, bỏ qua các action khác")
 print("🔍 Sẽ log tất cả remote calls để debug")
