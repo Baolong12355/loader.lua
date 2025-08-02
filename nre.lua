@@ -230,14 +230,15 @@ end
 
 -- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
 local function parseMacroLine(line)
-    -- THÊM: Phân tích lệnh skip wave vote với format SkipWhen:time:SkipWave:wave
-    local time, wave = line:match('SkipWhen:([^:]+):SkipWave:(.+)')
-    if time and wave then
+    -- THÊM: Phân tích lệnh skip wave vote với format SkipWhen:time:SkipWave:wave:Args:args
+    local time, wave, argsStr = line:match('SkipWhen:([^:]+):SkipWave:([^:]+):Args:(.+)')
+    if time and wave and argsStr then
         return {{
             SkipWhen = convertTimeToNumber(time),
             time = time,
             SkipWave = wave,
-            wave = wave
+            wave = wave,
+            args = argsStr
         }}
     end
 
@@ -402,16 +403,30 @@ local function handleSkipWaveVote(args)
     if args and args[1] ~= nil then
         local voteValue = args[1]
         
-        -- Ghi vào file JSON
+        -- Mã hóa args thành string
+        local argsString = ""
+        if HttpService then
+            local success, jsonString = pcall(HttpService.JSONEncode, HttpService, args)
+            if success then
+                argsString = jsonString
+            else
+                argsString = tostring(args[1])
+            end
+        else
+            argsString = tostring(args[1])
+        end
+        
+        -- Ghi vào file JSON với args được mã hóa
         local currentWave, currentTime = getCurrentWaveAndTime()
-        local code = string.format("SkipWhen:%s:SkipWave:%s", currentTime or "unknown", currentWave or "unknown")
+        local code = string.format("SkipWhen:%s:SkipWave:%s:Args:%s", currentTime or "unknown", currentWave or "unknown", argsString)
         processAndWriteAction(code)
         
         -- Lưu trạng thái vote vào global environment
         globalEnv.LAST_SKIP_WAVE_VOTE = {
             value = voteValue,
             timestamp = tick(),
-            player = player.Name
+            player = player.Name,
+            args = argsString
         }
     end
 end
@@ -511,7 +526,7 @@ local function setupHooks()
         if not checkcaller() then
             handleRemote(self.Name, {...})
         end
-        return oldFireServer(self, ...)
+        return tostring(oldFireServer(self, ...))
     end)
 
     -- Hook InvokeServer
@@ -519,7 +534,7 @@ local function setupHooks()
         if not checkcaller() then
             handleRemote(self.Name, {...})
         end
-        return oldInvokeServer(self, ...)
+        return tostring(oldInvokeServer(self, ...))
     end)
 
     -- Hook namecall
@@ -531,7 +546,7 @@ local function setupHooks()
                 handleRemote(self.Name, {...})
             end
         end
-        return oldNamecall(self, ...)
+        return tostring(oldNamecall(self, ...))
     end)
 end
 
