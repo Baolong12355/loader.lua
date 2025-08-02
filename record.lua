@@ -233,9 +233,10 @@ local function parseMacroLine(line)
     -- THÊM: Phân tích lệnh skip wave (theo format TDX library)
     if line:match('TDX:skipWave%(%)') then
         local currentWave, currentTime = getCurrentWaveAndTime()
+        local timeNum = convertTimeToNumber(currentTime)
         return {{
-            SkipWhen = currentWave,
-            SkipWave = tostring(convertTimeToNumber(currentTime))
+            SkipWhen = tostring(currentWave),
+            SkipWave = tostring(timeNum or 0)
         }}
     end
 
@@ -334,9 +335,9 @@ end
 local function createSkipWaveCommand(currentWave, currentTime)
     local timeNum = convertTimeToNumber(currentTime)
     if currentWave and timeNum then
-        return string.format("SkipWhen:%s:SkipWave:%s", currentWave, timeNum)
+        return string.format("SkipWhen:%s:SkipWave:%d", tostring(currentWave), timeNum)
     end
-    return "SkipWhen:?:SkipWave:?"
+    return "SkipWhen:?:SkipWave:0"
 end
 
 -- Xử lý một dòng lệnh, phân tích và ghi vào file JSON
@@ -516,6 +517,12 @@ end)
 -- THÊM: Xử lý Skip Wave với TXT format cho server
 local function handleSkipWave()
     local currentWave, currentTime = getCurrentWaveAndTime()
+    
+    -- Đảm bảo dữ liệu hợp lệ
+    if not currentWave or not currentTime then
+        warn("❌ Không thể lấy thông tin wave/time hiện tại")
+        return "SkipWhen:?:SkipWave:0"
+    end
     
     -- Tạo TXT command cho server (không phải JSON)
     local txtCommand = createSkipWaveCommand(currentWave, currentTime)
