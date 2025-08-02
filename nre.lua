@@ -24,6 +24,13 @@ local timeout = 2
 local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
 local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upgrade sinh đôi
 
+-- THÊM: Biến theo dõi trạng thái skip wave
+local skipWaveState = {
+    votingEnabled = false,
+    pendingSkip = false,
+    lastVoteTime = 0
+}
+
 -- THÊM: Universal compatibility functions
 local function getGlobalEnv()
     if getgenv then return getgenv() end
@@ -486,9 +493,30 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- THÊM: Xử lý sự kiện skip wave vote
-ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function()
-    tryConfirm("SkipWave")
+-- SỬA: Xử lý sự kiện skip wave vote với logic mới
+ReplicatedStorage.Remotes.SkipWaveVoteStateUpdate.OnClientEvent:Connect(function(data)
+    if not data then return end
+    
+    local votingEnabled = data.VotingEnabled
+    local currentTime = tick()
+    
+    -- Khi voting được bật, reset trạng thái
+    if votingEnabled and not skipWaveState.votingEnabled then
+        skipWaveState.votingEnabled = true
+        skipWaveState.pendingSkip = false
+        print("🗳️ Skip wave voting đã được bật")
+    end
+    
+    -- Khi voting bị tắt và chúng ta có pending skip
+    if not votingEnabled and skipWaveState.votingEnabled and skipWaveState.pendingSkip then
+        -- Confirm skip wave action
+        processAndWriteAction("TDX:skipWave()")
+        
+        -- Reset trạng thái
+        skipWaveState.pendingSkip = false
+    end
+    
+    skipWaveState.votingEnabled = votingEnabled
 end)
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
@@ -509,28 +537,17 @@ pcall(function()
     end)
 end)
 
--- THÊM: Auto pending cho skip wave mỗi 0.1 giây
-task.spawn(function()
-    while task.wait() do
-        -- Auto confirm tất cả skip wave pending sau 0.1 giây
-        for i = #pendingQueue, 1, -1 do
-            local item = pendingQueue[i]
-            if item.type == "SkipWave" and tick() - item.created > 0.1 then
-                processAndWriteAction(item.code)
-                table.remove(pendingQueue, i)
-            end
-        end
-    end
-end)
-
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
-    -- THÊM: Xử lý SkipWaveVoteCast
+    -- SỬA: Xử lý SkipWaveVoteCast với logic mới
     if name == "SkipWaveVoteCast" then
-        if args and args[1] == true then
-            setPending("SkipWave", "TDX:skipWave()")
+        if args and args[1] == true and skipWaveState.votingEnabled then
+            -- Đánh dấu rằng chúng ta đã vote skip
+            skipWaveState.pendingSkip = true
+            skipWaveState.lastVoteTime = tick()
+            print("🗳️ Đã vote skip wave, đang chờ xác nhận...")
         end
     end
 
@@ -652,5 +669,5 @@ setupHooks()
 print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⏭️ Đã thêm hook Skip Wave Vote!")
-print("🔄 Auto pending Skip Wave mỗi 0.1 giây!")
+print("⏭️ Đã cải tiến logic Skip Wave Vote!")
+print("🗳️ Skip wave sẽ được ghi khi vote thành công!")
