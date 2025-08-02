@@ -655,7 +655,7 @@ end)
 preserveSuperFunctions()
 setupHooks()
 
-print("✅ TDX Recorder với SkipWave Hook đã hoạt động!")
+print("✅ TDX RecordeWave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
 print("🗳️ Hỗ trợ ghi nhận skip wave votes!")
