@@ -3,42 +3,14 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 
-print("🔬 SkipWave Hook Test - Thử Tất Cả Phương Pháp")
+print("🎯 Enhanced SkipWave Test - With Server Response")
 print("="..string.rep("=", 50))
 
--- File output cho test
-local outTxt = "tdx/macros/skipwave_test.txt"
+-- Biến để track
+local skipCount = 0
+local serverResponses = {}
 
--- Tạo thư mục
-if makefolder then
-    pcall(makefolder, "tdx")
-    pcall(makefolder, "tdx/macros")
-end
-
--- Xóa file cũ
-if isfile and isfile(outTxt) and delfile then
-    pcall(delfile, outTxt)
-end
-
--- Hàm ghi file test
-local function writeTest(method, data)
-    local content = string.format("[%s] Method: %s | Data: %s\n", 
-        os.date("%H:%M:%S"), method, tostring(data))
-    
-    if appendfile then
-        pcall(appendfile, outTxt, content)
-    elseif writefile then
-        local existing = ""
-        if isfile and isfile(outTxt) and readfile then
-            existing = pcall(readfile, outTxt) and readfile(outTxt) or ""
-        end
-        pcall(writefile, outTxt, existing .. content)
-    end
-    
-    print("📝 " .. content:gsub("\n", ""))
-end
-
--- Lấy thông tin wave hiện tại
+-- Lấy wave hiện tại
 local function getCurrentWave()
     local playerGui = player:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return "Unknown" end
@@ -52,232 +24,308 @@ local function getCurrentWave()
     return gameInfoBar.Wave.WaveText.Text
 end
 
-print("🎯 Bắt đầu thiết lập các hook...")
+-- Lấy thời gian hiện tại
+local function getCurrentTime()
+    local playerGui = player:FindFirstChildOfClass("PlayerGui")
+    if not playerGui then return "Unknown" end
+    
+    local interface = playerGui:FindFirstChild("Interface")
+    if not interface then return "Unknown" end
+    
+    local gameInfoBar = interface:FindFirstChild("GameInfoBar")
+    if not gameInfoBar then return "Unknown" end
+    
+    return gameInfoBar.TimeLeft.TimeLeftText.Text
+end
 
---==============================================================================
---=                    PHƯƠNG PHÁP 1: HOOK TRỰC TIẾP REMOTE                    =
---==============================================================================
-
-print("🔧 Method 1: Hook trực tiếp lên Remote")
-pcall(function()
-    local skipRemote = ReplicatedStorage:WaitForChild("Remotes", 5)
-    if skipRemote then
-        skipRemote = skipRemote:WaitForChild("SkipWaveVoteCast", 2)
-        if skipRemote then
-            local originalFireServer = skipRemote.FireServer
-            
-            skipRemote.FireServer = function(self, voteValue)
-                writeTest("Method1-DirectRemote", string.format("Vote: %s (%s) | Wave: %s", 
-                    tostring(voteValue), typeof(voteValue), getCurrentWave()))
-                
-                -- Gọi original
-                return originalFireServer(self, voteValue)
-            end
-            
-            print("✅ Method 1: Hook trực tiếp Remote - THÀNH CÔNG")
-        else
-            print("❌ Method 1: Không tìm thấy SkipWaveVoteCast remote")
-        end
-    else
-        print("❌ Method 1: Không tìm thấy Remotes folder")
+-- Chuyển đổi time string thành number
+local function convertTimeToNumber(timeStr)
+    if not timeStr then return nil end
+    local mins, secs = timeStr:match("(%d+):(%d+)")
+    if mins and secs then
+        return tonumber(mins) * 100 + tonumber(secs)
     end
-end)
+    return nil
+end
 
---==============================================================================
---=                    PHƯƠNG PHÁP 2: HOOKFUNCTION                             =
---==============================================================================
-
-print("🔧 Method 2: HookFunction")
-if hookfunction then
-    pcall(function()
-        local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-            if self.Name == "SkipWaveVoteCast" then
-                local args = {...}
-                writeTest("Method2-HookFunction", string.format("Args: %s | Wave: %s", 
-                    HttpService:JSONEncode(args), getCurrentWave()))
+-- Xử lý skip wave với server response
+local function handleSkipWave(method, args, serverResponse)
+    skipCount = skipCount + 1
+    local wave = getCurrentWave()
+    local time = getCurrentTime()
+    local timeNumber = convertTimeToNumber(time)
+    
+    print(string.format("🚀 [%s] SKIP WAVE #%d", method, skipCount))
+    print(string.format("   📊 Wave: %s | Time: %s (%s)", wave, time, timeNumber or "N/A"))
+    print(string.format("   📋 Args: %s", HttpService:JSONEncode(args)))
+    
+    -- Hiển thị server response nếu có
+    if serverResponse ~= nil then
+        print(string.format("   🌐 Server Response: %s", tostring(serverResponse)))
+        print(string.format("   📡 Response Type: %s", type(serverResponse)))
+        
+        -- Nếu response là table, hiển thị chi tiết
+        if type(serverResponse) == "table" then
+            local success, jsonStr = pcall(HttpService.JSONEncode, HttpService, serverResponse)
+            if success then
+                print(string.format("   📦 Response JSON: %s", jsonStr))
             end
-            return oldFireServer(self, ...)
-        end)
-        print("✅ Method 2: HookFunction - THÀNH CÔNG")
-    end)
-else
-    print("❌ Method 2: HookFunction không khả dụng")
+        end
+        
+        -- Lưu response để phân tích
+        table.insert(serverResponses, {
+            count = skipCount,
+            wave = wave,
+            time = time,
+            timeNumber = timeNumber,
+            args = args,
+            response = serverResponse,
+            timestamp = tick()
+        })
+    else
+        print("   🌐 Server Response: (No response - FireServer)")
+    end
+    
+    print(string.format("   🕐 Timestamp: %s", os.date("%H:%M:%S")))
+    print("")
+    
+    -- Tạo command format TDX với thông tin chi tiết
+    local command = "TDX:skipWave()"
+    print(string.format("   💾 Command: %s", command))
+    
+    -- Thêm thông tin cho macro format
+    if timeNumber then
+        print(string.format("   📝 Macro Format: SkipWhen=%s, SkipWave=%s", wave, timeNumber))
+    end
+    print("")
 end
 
 --==============================================================================
---=                    PHƯƠNG PHÁP 3: HOOKMETAMETHOD                           =
+--=                         HOOK FIRESERVER                                    =
 --==============================================================================
 
-print("🔧 Method 3: HookMetamethod")
+print("🔧 Thiết lập Hook cho FireServer (RemoteEvent)")
+if hookfunction then
+    pcall(function()
+        local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+            -- Chỉ xử lý SkipWaveVoteCast
+            if self.Name == "SkipWaveVoteCast" then
+                local args = {...}
+                handleSkipWave("FireServer-Hook", args, nil) -- FireServer không có return value
+            end
+            
+            -- Gọi original function
+            return oldFireServer(self, ...)
+        end)
+        print("✅ FireServer Hook - THÀNH CÔNG")
+    end)
+else
+    print("❌ hookfunction không khả dụng cho FireServer")
+end
+
+--==============================================================================
+--=                        HOOK INVOKESERVER                                   =
+--==============================================================================
+
+print("🔧 Thiết lập Hook cho InvokeServer (RemoteFunction)")
+if hookfunction then
+    pcall(function()
+        local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+            -- Chỉ xử lý nếu có RemoteFunction tên SkipWaveVoteCast (ít khả năng)
+            if self.Name == "SkipWaveVoteCast" then
+                local args = {...}
+                local result = oldInvokeServer(self, ...)
+                handleSkipWave("InvokeServer-Hook", args, result)
+                return result
+            end
+            
+            -- Gọi original function cho các remote khác
+            return oldInvokeServer(self, ...)
+        end)
+        print("✅ InvokeServer Hook - THÀNH CÔNG")
+    end)
+else
+    print("❌ hookfunction không khả dụng cho InvokeServer")
+end
+
+--==============================================================================
+--=                       HOOK METAMETHOD                                      =
+--==============================================================================
+
+print("🔧 Thiết lập Hook cho __namecall")
 if hookmetamethod and checkcaller then
     pcall(function()
         local oldNamecall
         oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+            -- Bỏ qua nếu là internal call
             if checkcaller() then return oldNamecall(self, ...) end
             
             local method = getnamecallmethod()
+            
+            -- Xử lý FireServer
             if method == "FireServer" and self.Name == "SkipWaveVoteCast" then
                 local args = {...}
-                writeTest("Method3-HookMetamethod", string.format("Args: %s | Wave: %s", 
-                    HttpService:JSONEncode(args), getCurrentWave()))
+                handleSkipWave("Namecall-FireServer", args, nil)
+            
+            -- Xử lý InvokeServer (nếu có)
+            elseif method == "InvokeServer" and self.Name == "SkipWaveVoteCast" then
+                local args = {...}
+                local result = oldNamecall(self, ...)
+                handleSkipWave("Namecall-InvokeServer", args, result)
+                return result
             end
             
+            -- Gọi original function
             return oldNamecall(self, ...)
         end)
-        print("✅ Method 3: HookMetamethod - THÀNH CÔNG")
+        print("✅ Namecall Hook - THÀNH CÔNG")
     end)
 else
-    print("❌ Method 3: HookMetamethod hoặc checkcaller không khả dụng")
+    print("❌ hookmetamethod hoặc checkcaller không khả dụng")
 end
 
 --==============================================================================
---=              PHƯƠNG PHÁP 4: MONITOR REMOTES FOLDER                         =
+--=                      HOOK CLIENT EVENTS                                    =
 --==============================================================================
 
-print("🔧 Method 4: Monitor Remotes Folder")
+print("🔧 Thiết lập Hook cho Client Events")
 pcall(function()
-    local function connectToRemote()
-        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-        if remotes then
-            local skipRemote = remotes:FindFirstChild("SkipWaveVoteCast")
-            if skipRemote and skipRemote:IsA("RemoteEvent") then
-                -- Thử hook OnClientEvent (nếu có response)
-                skipRemote.OnClientEvent:Connect(function(...)
-                    writeTest("Method4-OnClientEvent", string.format("Response: %s | Wave: %s", 
-                        HttpService:JSONEncode({...}), getCurrentWave()))
-                end)
+    -- Hook sự kiện có thể liên quan đến skip wave
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    if remotes then
+        -- Tìm các event có thể liên quan đến skip wave response
+        for _, remote in pairs(remotes:GetChildren()) do
+            if remote:IsA("RemoteEvent") and 
+               (string.find(remote.Name:lower(), "skip") or 
+                string.find(remote.Name:lower(), "wave") or
+                string.find(remote.Name:lower(), "vote")) then
                 
-                print("✅ Method 4: Monitor OnClientEvent - THÀNH CÔNG")
-            end
-        end
-    end
-    
-    connectToRemote()
-    
-    -- Theo dõi khi remote được thêm
-    ReplicatedStorage.DescendantAdded:Connect(function(child)
-        if child.Name == "SkipWaveVoteCast" then
-            task.wait(0.1)
-            connectToRemote()
-        end
-    end)
-end)
-
---==============================================================================
---=                    PHƯƠNG PHÁP 5: SIMULATE CLICK                           =
---==============================================================================
-
-print("🔧 Method 5: Monitor UI Click")
-pcall(function()
-    local function findSkipButton()
-        local playerGui = player:FindFirstChildOfClass("PlayerGui")
-        if not playerGui then return end
-        
-        -- Tìm skip button trong UI
-        for _, gui in ipairs(playerGui:GetDescendants()) do
-            if gui:IsA("GuiButton") or gui:IsA("TextButton") then
-                local text = gui.Text or ""
-                if text:lower():find("skip") or gui.Name:lower():find("skip") then
-                    
-                    -- Hook vào MouseButton1Click
-                    gui.MouseButton1Click:Connect(function()
-                        writeTest("Method5-UIClick", string.format("Button: %s | Text: %s | Wave: %s", 
-                            gui.Name, text, getCurrentWave()))
+                pcall(function()
+                    remote.OnClientEvent:Connect(function(...)
+                        local args = {...}
+                        print(string.format("📡 Client Event [%s]: %s", 
+                              remote.Name, 
+                              HttpService:JSONEncode(args)))
+                        
+                        -- Lưu event data
+                        table.insert(serverResponses, {
+                            type = "ClientEvent",
+                            remoteName = remote.Name,
+                            data = args,
+                            timestamp = tick()
+                        })
                     end)
-                    
-                    print("✅ Method 5: Tìm thấy skip button:", gui.Name)
-                end
+                    print(string.format("✅ Đã hook client event: %s", remote.Name))
+                end)
             end
         end
     end
-    
-    findSkipButton()
-    
-    -- Theo dõi khi UI thay đổi
-    player:FindFirstChildOfClass("PlayerGui").DescendantAdded:Connect(function(child)
-        if child:IsA("GuiButton") or child:IsA("TextButton") then
-            task.wait(0.1)
-            findSkipButton()
-        end
-    end)
 end)
 
 --==============================================================================
---=                    PHƯƠNG PHÁP 6: NETWORK MONITORING                       =
+--=                         MANUAL TEST FUNCTIONS                              =
 --==============================================================================
 
-print("🔧 Method 6: Network Monitoring")
-if getconnections then
-    pcall(function()
-        task.spawn(function()
-            while task.wait(1) do
-                local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-                if remotes then
-                    local skipRemote = remotes:FindFirstChild("SkipWaveVoteCast")
-                    if skipRemote then
-                        local connections = getconnections(skipRemote.OnClientEvent)
-                        if #connections > 0 then
-                            writeTest("Method6-NetworkMonitor", string.format("Connections: %d | Wave: %s", 
-                                #connections, getCurrentWave()))
-                        end
-                    end
-                end
-            end
-        end)
-        print("✅ Method 6: Network Monitoring - THÀNH CÔNG")
-    end)
-else
-    print("❌ Method 6: getconnections không khả dụng")
-end
-
---==============================================================================
---=                    PHƯƠNG PHÁP 7: MANUAL TRIGGER                           =
---==============================================================================
-
-print("🔧 Method 7: Manual Trigger Test")
-print("📋 Để test manual, hãy chạy lệnh sau trong console:")
-print('game:GetService("ReplicatedStorage").Remotes.SkipWaveVoteCast:FireServer(true)')
-
--- Tạo function để test manual
+-- Test function với detailed logging
 _G.testSkipWave = function()
+    print("")
+    print("🧪 MANUAL TEST: Gửi SkipWaveVoteCast...")
+    print("="..string.rep("-", 30))
+    
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     if remotes then
         local skipRemote = remotes:FindFirstChild("SkipWaveVoteCast")
         if skipRemote then
-            writeTest("Method7-ManualTrigger", string.format("Manual test | Wave: %s", getCurrentWave()))
+            local beforeWave = getCurrentWave()
+            local beforeTime = getCurrentTime()
+            
+            print(string.format("📊 Trước khi skip - Wave: %s, Time: %s", beforeWave, beforeTime))
+            
+            -- Test với vote = true
+            print("📤 Gửi vote = true...")
             skipRemote:FireServer(true)
-            print("🚀 Manual trigger sent!")
+            
+            -- Chờ một chút để xem response
+            task.wait(0.5)
+            
+            local afterWave = getCurrentWave()
+            local afterTime = getCurrentTime()
+            print(string.format("📊 Sau khi skip - Wave: %s, Time: %s", afterWave, afterTime))
+            
+            print("✅ Manual test hoàn thành!")
         else
             print("❌ SkipWaveVoteCast remote không tìm thấy")
         end
     else
         print("❌ Remotes folder không tìm thấy")
     end
+    print("")
 end
 
-print("💡 Chạy _G.testSkipWave() để test manual")
+-- Function để xem tất cả responses đã thu thập
+_G.showResponses = function()
+    print("")
+    print("📊 TẤT CẢ SERVER RESPONSES:")
+    print("="..string.rep("=", 40))
+    
+    if #serverResponses == 0 then
+        print("❌ Chưa có response nào được ghi nhận")
+        return
+    end
+    
+    for i, response in ipairs(serverResponses) do
+        print(string.format("📦 Response #%d:", i))
+        print(string.format("   Count: %s", response.count or "N/A"))
+        print(string.format("   Wave: %s", response.wave or "N/A"))
+        print(string.format("   Time: %s", response.time or "N/A"))
+        print(string.format("   Type: %s", response.type or "Skip"))
+        print(string.format("   Data: %s", HttpService:JSONEncode(response.response or response.data)))
+        print("")
+    end
+end
+
+-- Function để clear responses
+_G.clearResponses = function()
+    serverResponses = {}
+    skipCount = 0
+    print("🗑️ Đã xóa tất cả responses và reset counter")
+end
 
 --==============================================================================
---=                         STATUS & MONITORING                               =
+--=                         REMOTE ANALYSIS                                    =
 --==============================================================================
 
-print("="..string.rep("=", 50))
-print("🎯 TẤT CẢ HOOK ĐÃ ĐƯỢC THIẾT LẬP!")
-print("📁 Log file: " .. outTxt)
-print("🔍 Hãy thử skip wave và kiểm tra file log")
-print("⏰ Monitoring bắt đầu...")
-
--- Monitor task
-task.spawn(function()
-    local lastWave = getCurrentWave()
-    while task.wait(5) do
-        local currentWave = getCurrentWave()
-        if currentWave ~= lastWave then
-            writeTest("WaveChange", string.format("Wave changed: %s -> %s", lastWave, currentWave))
-            lastWave = currentWave
+print("🔍 Phân tích RemoteEvents và RemoteFunctions...")
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if remotes then
+    local skipRelated = {}
+    for _, remote in pairs(remotes:GetChildren()) do
+        local name = remote.Name:lower()
+        if string.find(name, "skip") or string.find(name, "wave") or string.find(name, "vote") then
+            table.insert(skipRelated, {
+                Name = remote.Name,
+                Type = remote.ClassName
+            })
         end
     end
-end)
+    
+    if #skipRelated > 0 then
+        print("🎯 Tìm thấy các remote liên quan đến skip/wave/vote:")
+        for _, remote in ipairs(skipRelated) do
+            print(string.format("   📡 %s (%s)", remote.Name, remote.Type))
+        end
+    else
+        print("❌ Không tìm thấy remote nào liên quan đến skip/wave/vote")
+    end
+else
+    print("❌ Không tìm thấy Remotes folder")
+end
 
-print("✅ SkipWave Hook Test đã sẵn sàng!")
-print("🎮 Hãy thử skip wave trong game và kiểm tra kết quả!")
+print("="..string.rep("=", 50))
+print("✅ Enhanced SkipWave Test đã sẵn sàng!")
+print("🎮 Commands:")
+print("   _G.testSkipWave() - Test manual")
+print("   _G.showResponses() - Xem tất cả responses")
+print("   _G.clearResponses() - Clear data")
+print("📊 Script sẽ hiển thị chi tiết server response khi bắt được skip wave")
+print("")
