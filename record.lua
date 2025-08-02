@@ -123,23 +123,28 @@ local function setupSkipWaveHook()
                 print("📋 Vote Value:", voteValue, "| Type:", typeof(voteValue))
                 
                 if typeof(voteValue) == "boolean" and voteValue == true then
-                    -- Bước 1: Tạo TXT command (server sẽ nhận cái này)
+                    -- Bước 1: Tạo TXT command và cache
                     local txtCommand = "TDX:skipWave()"
-                    print("📝 TXT Command:", txtCommand)
+                    print("📝 TXT Command cached:", txtCommand)
                     
-                    -- Bước 2: Parse TXT thành JSON format
-                    local jsonEntry = parseTxtToJson(txtCommand)
-                    if jsonEntry then
-                        print("🌊 Current Wave:", jsonEntry.SkipWhen, "| Time:", jsonEntry.SkipWave)
-                        print("📋 JSON Entry:", HttpService:JSONEncode(jsonEntry))
+                    -- Bước 2: Delay parse sau khi server xử lý xong
+                    task.spawn(function()
+                        task.wait(0.1) -- Chờ server xử lý xong
                         
-                        -- Bước 3: Ghi vào file JSON
-                        table.insert(recordedActions, jsonEntry)
-                        updateJsonFile()
-                        print("✅ Skip Wave đã được ghi vào JSON!")
-                    else
-                        print("❌ Không thể parse TXT command")
-                    end
+                        -- Parse TXT thành JSON format
+                        local jsonEntry = parseTxtToJson(txtCommand)
+                        if jsonEntry then
+                            print("🌊 Parsing - Wave:", jsonEntry.SkipWhen, "| Time:", jsonEntry.SkipWave)
+                            print("📋 JSON Entry:", HttpService:JSONEncode(jsonEntry))
+                            
+                            -- Ghi vào file JSON
+                            table.insert(recordedActions, jsonEntry)
+                            updateJsonFile()
+                            print("✅ Skip Wave đã được ghi vào JSON!")
+                        else
+                            print("❌ Không thể parse TXT command")
+                        end
+                    end)
                 else
                     print("❌ Vote value không hợp lệ")
                 end
