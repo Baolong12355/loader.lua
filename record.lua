@@ -504,17 +504,10 @@ pcall(function()
     end)
 end)
 
--- Xử lý các lệnh gọi remote (bao gồm SkipWaveVoteCast)
+-- Xử lý các lệnh gọi remote (trừ SkipWaveVoteCast được xử lý trực tiếp trong namecall)
 local function handleRemote(name, args)
-    -- THÊM: Xử lý SkipWaveVoteCast trực tiếp
+    -- Skip SkipWaveVoteCast vì đã xử lý trong namecall hook
     if name == "SkipWaveVoteCast" then
-        local voteValue = args[1]
-        if typeof(voteValue) == "boolean" and voteValue == true then
-            -- Xử lý trực tiếp (không cần pending vì skip wave không có server response)
-            local code = "TDX:skipWave()"
-            processAndWriteAction(code)
-            print("✅ Skip Wave đã được ghi nhận!")
-        end
         return
     end
 
@@ -594,6 +587,50 @@ local function setupHooks()
         if method == "FireServer" or method == "InvokeServer" then
             local args = {...}
             local remoteName = self.Name
+            
+            -- SỬA: Xử lý đặc biệt cho SkipWaveVoteCast 
+            if remoteName == "SkipWaveVoteCast" and method == "FireServer" then
+                local voteValue = args[1]
+                print("🔍 SKIP WAVE DEBUG:")
+                print("  - Original value:", voteValue, "| Type:", typeof(voteValue))
+                
+                if typeof(voteValue) == "boolean" and voteValue == true then
+                    -- Ghi nhận skip wave NGAY LẬP TỨC (không cần chờ server response)
+                    local code = "TDX:skipWave()"
+                    processAndWriteAction(code)
+                    print("✅ Skip Wave đã được ghi nhận!")
+                    
+                    -- Thử nhiều cách chuyển đổi
+                    args[1] = "true" -- Hardcode string
+                    print("  - Converted to:", args[1], "| Type:", typeof(args[1]))
+                    
+                    local success, result = pcall(oldNamecall, self, unpack(args))
+                    print("  - Server call success:", success)
+                    if not success then
+                        print("  - Server error:", result)
+                    else
+                        print("  - Server result:", result)
+                    end
+                    return result
+                elseif typeof(voteValue) == "boolean" and voteValue == false then
+                    -- Chuyển false thành string
+                    args[1] = "false"
+                    print("  - Converted to:", args[1], "| Type:", typeof(args[1]))
+                    
+                    local success, result = pcall(oldNamecall, self, unpack(args))
+                    print("  - Server call success:", success)
+                    if not success then
+                        print("  - Server error:", result)
+                    else
+                        print("  - Server result:", result)
+                    end
+                    return result
+                end
+                
+                -- Nếu đã là string thì để nguyên
+                print("  - Sending as-is:", voteValue, "| Type:", typeof(voteValue))
+                return oldNamecall(self, ...)
+            end
             
             -- Xử lý tất cả remote calls thông qua handleRemote
             handleRemote(remoteName, args)
