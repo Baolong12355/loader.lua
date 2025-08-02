@@ -511,7 +511,7 @@ end)
 
 -- THÊM: Auto pending cho skip wave mỗi 0.1 giây
 task.spawn(function()
-    while task.wait(0.1) do
+    while task.wait() do
         -- Auto confirm tất cả skip wave pending sau 0.1 giây
         for i = #pendingQueue, 1, -1 do
             local item = pendingQueue[i]
