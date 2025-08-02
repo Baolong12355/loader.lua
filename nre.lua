@@ -228,18 +228,6 @@ local function preserveSuperFunctions()
     end
 end
 
--- THÊM: Hàm ghi trực tiếp skip wave (không qua pending)
-local function writeSkipWaveDirectly()
-    local currentWave, currentTime = getCurrentWaveAndTime()
-    local entry = {
-        SkipWhen = currentWave,
-        SkipWave = convertTimeToNumber(currentTime)
-    }
-    table.insert(recordedActions, entry)
-    updateJsonFile()
-    print("✅ Skip Wave đã được ghi trực tiếp:", currentWave, "tại", currentTime)
-end
-
 -- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
 local function parseMacroLine(line)
     -- THÊM: Phân tích lệnh skip wave
@@ -498,10 +486,16 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- SỬA: Xử lý sự kiện skip wave vote - GHI TRỰC TIẾP
+-- SỬA: Xử lý sự kiện skip wave vote - BỎ PENDING, XỬ LÝ TRỰC TIẾP
 ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function()
-    -- Ghi trực tiếp thay vì dùng pending
-    writeSkipWaveDirectly()
+    -- Xử lý trực tiếp skip wave khi event được kích hoạt
+    local currentWave, currentTime = getCurrentWaveAndTime()
+    local entry = {
+        SkipWhen = currentWave,
+        SkipWave = convertTimeToNumber(currentTime)
+    }
+    table.insert(recordedActions, entry)
+    updateJsonFile()
 end)
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
@@ -526,13 +520,7 @@ end)
 local function handleRemote(name, args)
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
-    -- SỬA: Xử lý SkipWaveVoteCast - GHI TRỰC TIẾP
-    if name == "SkipWaveVoteCast" then
-        if args and args[1] == true then
-            -- Ghi trực tiếp thay vì dùng pending
-            writeSkipWaveDirectly()
-        end
-    end
+    -- BỎ: Xử lý SkipWaveVoteCast trong handleRemote vì đã xử lý trực tiếp ở OnClientEvent
 
     -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
     if name == "TowerUseAbilityRequest" then
@@ -652,4 +640,4 @@ setupHooks()
 print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⚡ Skip Wave được ghi trực tiếp (không pending)!")
+print("⏭️ Skip Wave được xử lý trực tiếp (không pending)!")
