@@ -511,7 +511,7 @@ end)
 
 -- THÊM: Auto pending cho skip wave mỗi 0.1 giây
 task.spawn(function()
-    while task.wait(0.1) do
+    while task.wait() do
         -- Auto confirm tất cả skip wave pending sau 0.1 giây
         for i = #pendingQueue, 1, -1 do
             local item = pendingQueue[i]
@@ -653,4 +653,4 @@ print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
 print("⏭️ Đã thêm hook Skip Wave Vote!")
-print("🔄 Auto pending Skip Wave mỗi 0.1 giây!")
+print("🔄 Auto pending Skip Wave mỗi 0 giây!")
