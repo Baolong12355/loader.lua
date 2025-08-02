@@ -595,12 +595,10 @@ local function setupHooks()
                     -- Ghi nhận skip wave NGAY LẬP TỨC (không cần chờ server response)
                     local code = "TDX:skipWave()"
                     processAndWriteAction(code)
-                    print("✅ Skip Wave đã được ghi nhận và xử lý!")
-                    
-                    -- Chuyển đổi boolean thành string để tránh lỗi server
-                    args[1] = tostring(voteValue)
-                    return oldNamecall(self, unpack(args))
+                    print("✅ Skip Wave đã được ghi nhận!")
                 end
+                -- Để server call chạy bình thường, không can thiệp
+                return oldNamecall(self, ...)
             end
             
             -- Xử lý tất cả remote calls thông qua handleRemote
