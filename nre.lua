@@ -1,447 +1,286 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
-local player = Players.LocalPlayer
-local PlayerScripts = player:WaitForChild("PlayerScripts")
+-- COMPLETE MONITOR HOOK FOR SkipWaveVoteCast
+-- Phiên bản đầy đủ với error handling và advanced features
 
--- XÓA FILE CŨ NẾU ĐÃ TỒN TẠI TRƯỚC KHI GHI RECORD
-local outJson = "tdx/macros/recorder_output.json"
+-- =====================================================
+-- KHỞI TẠO VARIABLES VÀ STORAGE
+-- =====================================================
 
--- Xóa file nếu đã tồn tại
-if isfile and isfile(outJson) and delfile then
-    local ok, err = pcall(delfile, outJson)
-    if not ok then
-        warn("Không thể xóa file cũ: " .. tostring(err))
-    end
+-- Lưu vote history
+local voteHistory = {}
+
+-- Thống kê
+local stats = {
+    totalVotes = 0,
+    skipVotes = 0,
+    continueVotes = 0,
+    startTime = tick()
+}
+
+-- Config
+local config = {
+    enableLogging = true,
+    enableFileLog = false,
+    enableStats = true,
+    logFileName = "skip_vote_monitor.log",
+    maxHistorySize = 1000
+}
+
+-- =====================================================
+-- UTILITY FUNCTIONS
+-- =====================================================
+
+-- Format timestamp thành readable string
+local function formatTime(timestamp)
+    local elapsed = timestamp - stats.startTime
+    return string.format("[%.2fs]", elapsed)
 end
 
-local recordedActions = {} -- Bảng lưu trữ tất cả các hành động dưới dạng table
-local hash2pos = {} -- Ánh xạ hash của tower tới vị trí Vector3
-
--- Hàng đợi và cấu hình cho việc ghi nhận
-local pendingQueue = {}
-local timeout = 2
-local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
-local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upgrade sinh đôi
-
--- Lấy TowerClass một cách an toàn
-local TowerClass
-pcall(function()
-    local client = PlayerScripts:WaitForChild("Client")
-    local gameClass = client:WaitForChild("GameClass")
-    local towerModule = gameClass:WaitForChild("TowerClass")
-    TowerClass = require(towerModule)
-end)
-
--- Tạo thư mục nếu chưa tồn tại
-if makefolder then
-    pcall(makefolder, "tdx")
-    pcall(makefolder, "tdx/macros")
-end
-
---==============================================================================
---=                           HÀM TIỆN ÍCH (HELPERS)                           =
---==============================================================================
-
--- Hàm ghi file an toàn
-local function safeWriteFile(path, content)
-    if writefile then
-        local success, err = pcall(writefile, path, content)
-        if not success then
-            warn("Lỗi khi ghi file: " .. tostring(err))
-        end
-    end
-end
-
--- Hàm đọc file an toàn
-local function safeReadFile(path)
-    if isfile and isfile(path) and readfile then
-        local success, content = pcall(readfile, path)
-        if success then
-            return content
-        end
-    end
-    return ""
-end
-
--- Hàm lấy vị trí tower chỉ sử dụng SpawnCFrame (method mới nhất)
-local function GetTowerPosition(tower)
-    if not tower then return nil end
-    if typeof(tower.SpawnCFrame) == "CFrame" then
-        return tower.SpawnCFrame.Position
-    end
-    return nil
-end
-
--- Hàm tìm tower theo vị trí X chính xác (không sai số)
-local function FindTowerByExactX(targetX)
-    if not TowerClass or not TowerClass.GetTowers then return nil, nil, nil end
-    
-    for hash, tower in pairs(TowerClass.GetTowers()) do
-        local pos = GetTowerPosition(tower)
-        if pos and pos.X == targetX then
-            return hash, tower, pos
-        end
+-- Lưu vote vào history
+local function saveVoteToHistory(vote, timestamp)
+    if #voteHistory >= config.maxHistorySize then
+        table.remove(voteHistory, 1) -- Remove oldest entry
     end
     
-    return nil, nil, nil
-end
-
-
-
--- [SỬA LỖI] Lấy chi phí đặt tower dựa trên tên, sử dụng FindFirstChild
-local function GetTowerPlaceCostByName(name)
-    local playerGui = player:FindFirstChildOfClass("PlayerGui")
-    if not playerGui then return 0 end
-
-    -- Sử dụng chuỗi FindFirstChild thay vì FindFirstDescendant để đảm bảo tương thích
-    local interface = playerGui:FindFirstChild("Interface")
-    if not interface then return 0 end
-    local bottomBar = interface:FindFirstChild("BottomBar")
-    if not bottomBar then return 0 end
-    local towersBar = bottomBar:FindFirstChild("TowersBar")
-    if not towersBar then return 0 end
-
-    for _, towerButton in ipairs(towersBar:GetChildren()) do
-        if towerButton.Name == name then
-            -- Tương tự, sử dụng FindFirstChild ở đây
-            local costFrame = towerButton:FindFirstChild("CostFrame")
-            if costFrame then
-                local costText = costFrame:FindFirstChild("CostText")
-                if costText and costText:IsA("TextLabel") then
-                    local raw = tostring(costText.Text):gsub("%D", "")
-                    return tonumber(raw) or 0
-                end
-            end
-        end
-    end
-    return 0
-end
-
--- [SỬA LỖI] Lấy thông tin wave và thời gian hiện tại, sử dụng FindFirstChild
-local function getCurrentWaveAndTime()
-    local playerGui = player:FindFirstChildOfClass("PlayerGui")
-    if not playerGui then return nil, nil end
-
-    -- Sử dụng chuỗi FindFirstChild thay vì FindFirstDescendant
-    local interface = playerGui:FindFirstChild("Interface")
-    if not interface then return nil, nil end
-    local gameInfoBar = interface:FindFirstChild("GameInfoBar")
-    if not gameInfoBar then return nil, nil end
-
-    local wave = gameInfoBar.Wave.WaveText.Text
-    local time = gameInfoBar.TimeLeft.TimeLeftText.Text
-    return wave, time
-end
-
-
--- Chuyển đổi chuỗi thời gian (vd: "1:23") thành số (vd: 123)
-local function convertTimeToNumber(timeStr)
-    if not timeStr then return nil end
-    local mins, secs = timeStr:match("(%d+):(%d+)")
-    if mins and secs then
-        return tonumber(mins) * 100 + tonumber(secs)
-    end
-    return nil
-end
-
--- Cập nhật file JSON với dữ liệu mới
-local function updateJsonFile()
-    if not HttpService then return end
-    local jsonLines = {}
-    for i, entry in ipairs(recordedActions) do
-        local ok, jsonStr = pcall(HttpService.JSONEncode, HttpService, entry)
-        if ok then
-            if i < #recordedActions then
-                jsonStr = jsonStr .. ","
-            end
-            table.insert(jsonLines, jsonStr)
-        end
-    end
-    local finalJson = "[\n" .. table.concat(jsonLines, "\n") .. "\n]"
-    safeWriteFile(outJson, finalJson)
-end
-
--- Đọc file JSON hiện có để bảo toàn các "SuperFunction"
-local function preserveSuperFunctions()
-    local content = safeReadFile(outJson)
-    if content == "" then return end
-
-    content = content:gsub("^%[%s*", ""):gsub("%s*%]$", "")
-    for line in content:gmatch("[^\r\n]+") do
-        line = line:gsub(",$", "")
-        if line:match("%S") then
-            local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
-            if ok and decoded and decoded.SuperFunction then
-                table.insert(recordedActions, decoded)
-            end
-        end
-    end
-    if #recordedActions > 0 then
-        updateJsonFile() -- Cập nhật lại file để đảm bảo định dạng đúng
-    end
-end
-
--- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
-local function parseMacroLine(line)
-    -- Phân tích lệnh đặt tower
-    local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
-    if a1 and name and x and y and z and rot then
-        name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
-        return {{
-            TowerPlaceCost = GetTowerPlaceCostByName(name),
-            TowerPlaced = name,
-            TowerVector = string.format("%s, %s, %s", x, y, z),
-            Rotation = rot,
-            TowerA1 = a1
-        }}
-    end
-
-    -- Phân tích lệnh nâng cấp tower
-    local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-    if hash and path and upgradeCount then
-        local pos = hash2pos[tostring(hash)]
-        local pathNum, count = tonumber(path), tonumber(upgradeCount)
-        if pos and pathNum and count and count > 0 then
-            local entries = {}
-            for _ = 1, count do
-                table.insert(entries, {
-                    UpgradeCost = 0, -- Chi phí nâng cấp sẽ được tính toán bởi trình phát lại
-                    UpgradePath = pathNum,
-                    TowerUpgraded = pos.x
-                })
-            end
-            return entries
-        end
-    end
-
-    -- Phân tích lệnh thay đổi mục tiêu
-    local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
-    if hash and targetType then
-        local pos = hash2pos[tostring(hash)]
-        if pos then
-            local currentWave, currentTime = getCurrentWaveAndTime()
-            local entry = {
-                TowerTargetChange = pos.x,
-                TargetWanted = tonumber(targetType),
-                TargetWave = currentWave,
-                TargetChangedAt = convertTimeToNumber(currentTime)
-            }
-            return {entry}
-        end
-    end
-
-    -- Phân tích lệnh bán tower
-    local hash = line:match('TDX:sellTower%(([^%)]+)%)')
-    if hash then
-        local pos = hash2pos[tostring(hash)]
-        if pos then
-            return {{ SellTower = pos.x }}
-        end
-    end
-
-    return nil
-end
-
--- Xử lý một dòng lệnh, phân tích và ghi vào file JSON
-local function processAndWriteAction(commandString)
-    -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
-    if _G and _G.TDX_REBUILD_RUNNING then
-        return
-    end
-    -- ==================================================
-    local entries = parseMacroLine(commandString)
-    if entries then
-        for _, entry in ipairs(entries) do
-            table.insert(recordedActions, entry)
-        end
-        updateJsonFile()
-    end
-end
-
-
---==============================================================================
---=                      XỬ LÝ SỰ KIỆN & HOOKS                                 =
---==============================================================================
-
--- Thêm một yêu cầu vào hàng đợi chờ xác nhận
-local function setPending(typeStr, code, hash)
-    table.insert(pendingQueue, {
-        type = typeStr,
-        code = code,
-        created = tick(),
-        hash = hash
+    table.insert(voteHistory, {
+        time = timestamp,
+        vote = vote,
+        formattedTime = formatTime(timestamp)
     })
 end
 
--- Xác nhận một yêu cầu từ hàng đợi và xử lý nó
-local function tryConfirm(typeStr, specificHash)
-    for i = #pendingQueue, 1, -1 do
-        local item = pendingQueue[i]
-        if item.type == typeStr then
-            if not specificHash or string.find(item.code, tostring(specificHash)) then
-                processAndWriteAction(item.code) -- Thay thế việc ghi file txt
-                table.remove(pendingQueue, i)
-                return
-            end
-        end
-    end
-end
-
--- Xử lý sự kiện đặt/bán tower
-ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
-    local d = data and data[1]
-    if not d then return end
-    if d.Creation then
-        tryConfirm("Place")
+-- Update statistics
+local function updateStats(vote)
+    stats.totalVotes = stats.totalVotes + 1
+    if vote then
+        stats.skipVotes = stats.skipVotes + 1
     else
-        tryConfirm("Sell")
+        stats.continueVotes = stats.continueVotes + 1
     end
+end
+
+-- Print statistics
+local function printStats()
+    print("📊 VOTE STATISTICS:")
+    print(string.format("   Total Votes: %d", stats.totalVotes))
+    print(string.format("   Skip Votes: %d (%.1f%%)", 
+        stats.skipVotes, 
+        stats.totalVotes > 0 and (stats.skipVotes / stats.totalVotes * 100) or 0))
+    print(string.format("   Continue Votes: %d (%.1f%%)", 
+        stats.continueVotes,
+        stats.totalVotes > 0 and (stats.continueVotes / stats.totalVotes * 100) or 0))
+    print(string.format("   Session Time: %.1fs", tick() - stats.startTime))
+end
+
+-- Write to file log
+local function writeToFile(logEntry)
+    if config.enableFileLog then
+        local success, error = pcall(function()
+            local existingContent = ""
+            if isfile(config.logFileName) then
+                existingContent = readfile(config.logFileName)
+            end
+            writefile(config.logFileName, existingContent .. logEntry .. "\n")
+        end)
+        
+        if not success then
+            warn("❌ Failed to write to log file:", error)
+        end
+    end
+end
+
+-- =====================================================
+-- MAIN HOOK FUNCTION
+-- =====================================================
+
+local monitor_hook
+monitor_hook = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    
+    -- Kiểm tra nếu là FireServer call cho SkipWaveVoteCast
+    if method == "FireServer" and self.Name == "SkipWaveVoteCast" then
+        local args = {...}
+        local timestamp = tick()
+        local vote = args[1]
+        
+        -- Basic logging
+        if config.enableLogging then
+            local voteText = vote and "SKIP" or "CONTINUE"
+            local logMessage = string.format(
+                "%s SkipWave Vote: %s",
+                formatTime(timestamp),
+                voteText
+            )
+            print("🗳️ " .. logMessage)
+        end
+        
+        -- Advanced logging with player info
+        local player = game:GetService("Players").LocalPlayer
+        if player then
+            local detailedLog = string.format(
+                "[%s] Player: %s | Vote: %s | Args: %s",
+                os.date("%H:%M:%S", timestamp),
+                player.Name,
+                vote and "SKIP" or "CONTINUE",
+                table.concat(args, ", ")
+            )
+            
+            if config.enableLogging then
+                print("📝 " .. detailedLog)
+            end
+            
+            -- Write to file
+            writeToFile(detailedLog)
+        end
+        
+        -- Save to history
+        saveVoteToHistory(vote, timestamp)
+        
+        -- Update statistics
+        if config.enableStats then
+            updateStats(vote)
+        end
+        
+        -- Print recent votes (last 3)
+        if #voteHistory >= 2 then
+            print("📋 Recent votes:")
+            local startIdx = math.max(1, #voteHistory - 2)
+            for i = startIdx, #voteHistory do
+                local entry = voteHistory[i]
+                print(string.format("   %s %s", 
+                    entry.formattedTime, 
+                    entry.vote and "SKIP" or "CONTINUE"))
+            end
+        end
+    end
+    
+    -- CRITICAL: Call original metamethod
+    return monitor_hook(self, ...)
 end)
 
--- Xử lý sự kiện nâng cấp tower
-ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
-    if not data or not data[1] then return end
+-- =====================================================
+-- CONTROL FUNCTIONS
+-- =====================================================
 
-    local towerData = data[1]
-    local hash = towerData.Hash
-    local newLevels = towerData.LevelReplicationData
-    local currentTime = tick()
+-- Toggle logging
+function toggleLogging()
+    config.enableLogging = not config.enableLogging
+    print("📝 Logging:", config.enableLogging and "ENABLED" or "DISABLED")
+end
 
-    -- Chống upgrade sinh đôi
-    if lastUpgradeTime[hash] and (currentTime - lastUpgradeTime[hash]) < 0.0001 then
-        return
-    end
-    lastUpgradeTime[hash] = currentTime
+-- Toggle file logging
+function toggleFileLog()
+    config.enableFileLog = not config.enableFileLog
+    print("💾 File logging:", config.enableFileLog and "ENABLED" or "DISABLED")
+end
 
-    local upgradedPath, upgradeCount = nil, 0
-    if lastKnownLevels[hash] then
-        for path = 1, 2 do
-            local oldLevel = lastKnownLevels[hash][path] or 0
-            local newLevel = newLevels[path] or 0
-            if newLevel > oldLevel then
-                upgradedPath = path
-                upgradeCount = newLevel - oldLevel
-                break
-            end
-        end
-    end
+-- Toggle statistics
+function toggleStats()
+    config.enableStats = not config.enableStats
+    print("📊 Statistics:", config.enableStats and "ENABLED" or "DISABLED")
+end
 
-    if upgradedPath and upgradeCount > 0 then
-        local code = string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), upgradedPath, upgradeCount)
-        processAndWriteAction(code) -- Thay thế việc ghi file txt
+-- Get vote history
+function getVoteHistory()
+    return voteHistory
+end
 
-        -- Xóa các yêu cầu nâng cấp đang chờ cho tower này
-        for i = #pendingQueue, 1, -1 do
-            if pendingQueue[i].type == "Upgrade" and pendingQueue[i].hash == hash then
-                table.remove(pendingQueue, i)
-            end
-        end
+-- Get statistics
+function getStats()
+    printStats()
+    return stats
+end
+
+-- Clear history
+function clearHistory()
+    voteHistory = {}
+    stats = {
+        totalVotes = 0,
+        skipVotes = 0,
+        continueVotes = 0,
+        startTime = tick()
+    }
+    print("🗑️ History and stats cleared!")
+end
+
+-- Export data
+function exportData()
+    local exportData = {
+        history = voteHistory,
+        stats = stats,
+        config = config,
+        exportTime = tick()
+    }
+    
+    local success, result = pcall(function()
+        local jsonString = game:GetService("HttpService"):JSONEncode(exportData)
+        writefile("vote_export_" .. os.time() .. ".json", jsonString)
+        return true
+    end)
+    
+    if success then
+        print("✅ Data exported successfully!")
     else
-        tryConfirm("Upgrade", hash)
-    end
-
-    lastKnownLevels[hash] = newLevels or {}
-end)
-
--- Xử lý sự kiện thay đổi mục tiêu
-ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
-    if data and data[1] then
-        tryConfirm("Target")
-    end
-end)
-
--- Xử lý các lệnh gọi remote
-local function handleRemote(name, args)
-    -- ==== ĐIỀU KIỆN NGĂN LOG HÀNH ĐỘNG KHI REBUILD ====
-    if _G and _G.TDX_REBUILD_RUNNING then
-        return
-    end
-    -- ==================================================
-
-    if name == "TowerUpgradeRequest" then
-        local hash, path, count = unpack(args)
-        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
-            setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
-        end
-    elseif name == "PlaceTower" then
-        local a1, towerName, vec, rot = unpack(args)
-        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
-            local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
-            setPending("Place", code)
-        end
-    elseif name == "SellTower" then
-        setPending("Sell", "TDX:sellTower("..tostring(args[1])..")")
-    elseif name == "ChangeQueryType" then
-        setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
+        warn("❌ Export failed:", result)
     end
 end
 
--- Hook các hàm remote
-local function setupHooks()
-    if not hookfunction or not hookmetamethod or not checkcaller then
-        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
-        return
+-- =====================================================
+-- INITIALIZATION
+-- =====================================================
+
+print("🚀 Complete Monitor Hook installed!")
+print("📋 Available commands:")
+print("   toggleLogging() - Toggle console logging")
+print("   toggleFileLog() - Toggle file logging")
+print("   toggleStats() - Toggle statistics")
+print("   getStats() - Show current statistics")
+print("   getVoteHistory() - Get vote history")
+print("   clearHistory() - Clear all data")
+print("   exportData() - Export data to JSON file")
+
+-- Initial status
+print("📊 Current settings:")
+print("   Logging:", config.enableLogging and "ON" or "OFF")
+print("   File Log:", config.enableFileLog and "ON" or "OFF")
+print("   Statistics:", config.enableStats and "ON" or "OFF")
+
+-- =====================================================
+-- ERROR HANDLING WRAPPER
+-- =====================================================
+
+-- Wrap the main execution in error handling
+local function safeExecute()
+    local success, error = pcall(function()
+        print("✅ Hook ready! Monitoring SkipWaveVoteCast...")
+    end)
+    
+    if not success then
+        warn("❌ Hook initialization error:", error)
     end
-
-    -- Hook FireServer
-    local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-        handleRemote(self.Name, {...})
-        return oldFireServer(self, ...)
-    end)
-
-    -- Hook InvokeServer
-    local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-        handleRemote(self.Name, {...})
-        return oldInvokeServer(self, ...)
-    end)
-
-    -- Hook namecall
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if checkcaller() then return oldNamecall(self, ...) end
-        local method = getnamecallmethod()
-        if method == "FireServer" or method == "InvokeServer" then
-            handleRemote(self.Name, {...})
-        end
-        return oldNamecall(self, ...)
-    end)
 end
 
---==============================================================================
---=                         VÒNG LẶP & KHỞI TẠO                               =
---==============================================================================
+safeExecute()
 
--- Vòng lặp dọn dẹp hàng đợi chờ
-task.spawn(function()
-    while task.wait(0.5) do
-        local now = tick()
-        for i = #pendingQueue, 1, -1 do
-            if now - pendingQueue[i].created > timeout then
-                warn("❌ Không xác thực được: " .. pendingQueue[i].type .. " | Code: " .. pendingQueue[i].code)
-                table.remove(pendingQueue, i)
-            end
-        end
-    end
-end)
+--[[
+USAGE EXAMPLES:
 
--- Vòng lặp cập nhật vị trí tower
-task.spawn(function()
-    while task.wait() do
-        if TowerClass and TowerClass.GetTowers then
-            for hash, tower in pairs(TowerClass.GetTowers()) do
-                local pos = GetTowerPosition(tower)
-                if pos then
-                    hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
-                end
-            end
-        end
-    end
-end)
+1. Basic monitoring:
+   - Hook sẽ tự động log mọi vote
+   - Xem console để theo dõi
 
--- Khởi tạo
-preserveSuperFunctions()
-setupHooks()
+2. Advanced usage:
+   - getStats() -> Xem thống kê
+   - toggleFileLog() -> Bật lưu file
+   - exportData() -> Xuất dữ liệu
 
-print("✅ TDX Recorder Hợp nhất (Đã sửa lỗi, có điều kiện skip log _G.TDX_REBUILD_RUNNING) đã hoạt động!")
-print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
+3. Testing:
+   local args = {true}
+   game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("SkipWaveVoteCast"):FireServer(unpack(args))
+
+OUTPUT EXAMPLE:
+🗳️ [15.23s] SkipWave Vote: SKIP
+📝 [12:34:56] Player: YourName | Vote: SKIP | Args: true
+📋 Recent votes:
+   [10.45s] CONTINUE
+   [15.23s] SKIP
+]]
