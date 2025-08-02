@@ -680,7 +680,7 @@ setupHooks()
 
 print("✅ TDX Recorder với Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
-print("🔄 Đã tích hợp với hệ thống rebuild mới!")
+
 print("⏭️ Đã thêm hook cho Skip Wave Vote Cast!")
 print("📝 Skip Wave sẽ được ghi theo format: SkipWhen:wave:SkipWave:time")
 print("🎯 Server sẽ nhận TXT format, local tracking dùng JSON")
