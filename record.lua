@@ -233,10 +233,9 @@ local function parseMacroLine(line)
     -- THÊM: Phân tích lệnh skip wave (theo format TDX library)
     if line:match('TDX:skipWave%(%)') then
         local currentWave, currentTime = getCurrentWaveAndTime()
-        local timeNum = convertTimeToNumber(currentTime)
         return {{
-            SkipWhen = tostring(currentWave),
-            SkipWave = tostring(timeNum or 0)
+            SkipWhen = currentWave,
+            SkipWave = tostring(convertTimeToNumber(currentTime))
         }}
     end
 
@@ -335,9 +334,9 @@ end
 local function createSkipWaveCommand(currentWave, currentTime)
     local timeNum = convertTimeToNumber(currentTime)
     if currentWave and timeNum then
-        return string.format("SkipWhen:%s:SkipWave:%d", tostring(currentWave), timeNum)
+        return string.format("SkipWhen:%s:SkipWave:%s", currentWave, timeNum)
     end
-    return "SkipWhen:?:SkipWave:0"
+    return "SkipWhen:?:SkipWave:?"
 end
 
 -- Xử lý một dòng lệnh, phân tích và ghi vào file JSON
@@ -518,22 +517,13 @@ end)
 local function handleSkipWave()
     local currentWave, currentTime = getCurrentWaveAndTime()
     
-    -- Đảm bảo dữ liệu hợp lệ
-    if not currentWave or not currentTime then
-        warn("❌ Không thể lấy thông tin wave/time hiện tại")
-        return "SkipWhen:?:SkipWave:0"
-    end
-    
-    -- Tạo TXT command cho server (không phải JSON)
+    -- Tạo TXT command cho server (không phải JSON) - đơn giản như script ví dụ
     local txtCommand = createSkipWaveCommand(currentWave, currentTime)
     print("📝 Skip Wave TXT Command:", txtCommand)
     
     -- Ghi vào JSON local để tracking
     local code = "TDX:skipWave()"
     processAndWriteAction(code)
-    
-    -- Ở đây có thể gửi txtCommand lên server nếu cần
-    -- VD: sendToServer(txtCommand)
     
     return txtCommand
 end
@@ -680,7 +670,7 @@ setupHooks()
 
 print("✅ TDX Recorder với Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
-
+print("🔄 Đã tích hợp với hệ thống rebuild mới!")
 print("⏭️ Đã thêm hook cho Skip Wave Vote Cast!")
 print("📝 Skip Wave sẽ được ghi theo format: SkipWhen:wave:SkipWave:time")
 print("🎯 Server sẽ nhận TXT format, local tracking dùng JSON")
