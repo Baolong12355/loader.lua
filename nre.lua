@@ -395,6 +395,24 @@ local function processAndWriteAction(commandString)
     end
 end
 
+-- SỬA: Hàm xử lý Skip Wave ngay lập tức
+local function processSkipWaveInstant()
+    local currentWave, currentTime = getCurrentWaveAndTime()
+    local skipEntry = {
+        SkipWhen = currentWave,
+        SkipWave = convertTimeToNumber(currentTime)
+    }
+    
+    -- In ra console
+    print("⏭️ Skip Wave đã được ghi nhận:")
+    print("   Wave: " .. tostring(currentWave))
+    print("   Time: " .. tostring(currentTime))
+    
+    -- Ghi vào JSON
+    table.insert(recordedActions, skipEntry)
+    updateJsonFile()
+end
+
 --==============================================================================
 --=                      XỬ LÝ SỰ KIỆN & HOOKS                                 =
 --==============================================================================
@@ -486,16 +504,10 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- SỬA: Xử lý sự kiện skip wave vote - BỎ PENDING, XỬ LÝ TRỰC TIẾP
+-- SỬA: Xử lý sự kiện skip wave NGAY LẬP TỨC (không dùng pending)
 ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function()
-    -- Xử lý trực tiếp skip wave khi event được kích hoạt
-    local currentWave, currentTime = getCurrentWaveAndTime()
-    local entry = {
-        SkipWhen = currentWave,
-        SkipWave = convertTimeToNumber(currentTime)
-    }
-    table.insert(recordedActions, entry)
-    updateJsonFile()
+    print("🎯 Bắt được SkipWaveVoteCast event!")
+    processSkipWaveInstant()
 end)
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
@@ -520,7 +532,13 @@ end)
 local function handleRemote(name, args)
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
-    -- BỎ: Xử lý SkipWaveVoteCast trong handleRemote vì đã xử lý trực tiếp ở OnClientEvent
+    -- SỬA: Xử lý SkipWaveVoteCast - LOG NGAY LẬP TỨC
+    if name == "SkipWaveVoteCast" then
+        if args and args[1] == true then
+            print("🎯 Bắt được SkipWaveVoteCast remote call!")
+            processSkipWaveInstant()
+        end
+    end
 
     -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
     if name == "TowerUseAbilityRequest" then
@@ -640,4 +658,4 @@ setupHooks()
 print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⏭️ Skip Wave được xử lý trực tiếp (không pending)!")
+print("⏭️ Skip Wave được log NGAY LẬP TỨC (không dùng pending)!")
