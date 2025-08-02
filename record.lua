@@ -2,657 +2,282 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
-local PlayerScripts = player:WaitForChild("PlayerScripts")
 
--- XÓA FILE CŨ NẾU ĐÃ TỒN TẠI TRƯỚC KHI GHI RECORD
-local outJson = "tdx/macros/recorder_output.json"
+print("🔬 SkipWave Hook Test - Thử Tất Cả Phương Pháp")
+print("="..string.rep("=", 50))
 
--- Xóa file nếu đã tồn tại
-if isfile and isfile(outJson) and delfile then
-    local ok, err = pcall(delfile, outJson)
-    if not ok then
-        warn("Không thể xóa file cũ: " .. tostring(err))
-    end
-end
+-- File output cho test
+local outTxt = "tdx/macros/skipwave_test.txt"
 
-local recordedActions = {} -- Bảng lưu trữ tất cả các hành động dưới dạng table
-local hash2pos = {} -- Ánh xạ hash của tower tới vị trí SpawnCFrame
-
--- Hàng đợi và cấu hình cho việc ghi nhận
-local pendingQueue = {}
-local timeout = 2
-local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
-local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upgrade sinh đôi
-
--- THÊM: Universal compatibility functions
-local function getGlobalEnv()
-    if getgenv then return getgenv() end
-    if getfenv then return getfenv() end
-    return _G
-end
-
-local globalEnv = getGlobalEnv()
-
--- Lấy TowerClass một cách an toàn
-local TowerClass
-pcall(function()
-    local client = PlayerScripts:WaitForChild("Client")
-    local gameClass = client:WaitForChild("GameClass")
-    local towerModule = gameClass:WaitForChild("TowerClass")
-    TowerClass = require(towerModule)
-end)
-
--- Tạo thư mục nếu chưa tồn tại
+-- Tạo thư mục
 if makefolder then
     pcall(makefolder, "tdx")
     pcall(makefolder, "tdx/macros")
 end
 
---==============================================================================
---=                           HÀM TIỆN ÍCH (HELPERS)                           =
---==============================================================================
+-- Xóa file cũ
+if isfile and isfile(outTxt) and delfile then
+    pcall(delfile, outTxt)
+end
 
--- Hàm ghi file an toàn
-local function safeWriteFile(path, content)
-    if writefile then
-        local success, err = pcall(writefile, path, content)
-        if not success then
-            warn("Lỗi khi ghi file: " .. tostring(err))
+-- Hàm ghi file test
+local function writeTest(method, data)
+    local content = string.format("[%s] Method: %s | Data: %s\n", 
+        os.date("%H:%M:%S"), method, tostring(data))
+    
+    if appendfile then
+        pcall(appendfile, outTxt, content)
+    elseif writefile then
+        local existing = ""
+        if isfile and isfile(outTxt) and readfile then
+            existing = pcall(readfile, outTxt) and readfile(outTxt) or ""
         end
+        pcall(writefile, outTxt, existing .. content)
     end
+    
+    print("📝 " .. content:gsub("\n", ""))
 end
 
--- Hàm đọc file an toàn
-local function safeReadFile(path)
-    if isfile and isfile(path) and readfile then
-        local success, content = pcall(readfile, path)
-        if success then
-            return content
-        end
-    end
-    return ""
-end
-
--- SỬA: Lấy vị trí SpawnCFrame của tower (thay vì position hiện tại)
-local function GetTowerSpawnPosition(tower)
-    if not tower then return nil end
-
-    -- Sử dụng SpawnCFrame để khớp với Runner
-    local spawnCFrame = tower.SpawnCFrame
-    if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-        return spawnCFrame.Position
-    end
-
-    return nil
-end
-
--- [SỬA LỖI] Lấy chi phí đặt tower dựa trên tên, sử dụng FindFirstChild
-local function GetTowerPlaceCostByName(name)
+-- Lấy thông tin wave hiện tại
+local function getCurrentWave()
     local playerGui = player:FindFirstChildOfClass("PlayerGui")
-    if not playerGui then return 0 end
-
-    -- Sử dụng chuỗi FindFirstChild thay vì FindFirstDescendant để đảm bảo tương thích
+    if not playerGui then return "Unknown" end
+    
     local interface = playerGui:FindFirstChild("Interface")
-    if not interface then return 0 end
-    local bottomBar = interface:FindFirstChild("BottomBar")
-    if not bottomBar then return 0 end
-    local towersBar = bottomBar:FindFirstChild("TowersBar")
-    if not towersBar then return 0 end
-
-    for _, towerButton in ipairs(towersBar:GetChildren()) do
-        if towerButton.Name == name then
-            -- Tương tự, sử dụng FindFirstChild ở đây
-            local costFrame = towerButton:FindFirstChild("CostFrame")
-            if costFrame then
-                local costText = costFrame:FindFirstChild("CostText")
-                if costText and costText:IsA("TextLabel") then
-                    local raw = tostring(costText.Text):gsub("%D", "")
-                    return tonumber(raw) or 0
-                end
-            end
-        end
-    end
-    return 0
-end
-
--- [SỬA LỖI] Lấy thông tin wave và thời gian hiện tại, sử dụng FindFirstChild
-local function getCurrentWaveAndTime()
-    local playerGui = player:FindFirstChildOfClass("PlayerGui")
-    if not playerGui then return nil, nil end
-
-    -- Sử dụng chuỗi FindFirstChild thay vì FindFirstDescendant
-    local interface = playerGui:FindFirstChild("Interface")
-    if not interface then return nil, nil end
+    if not interface then return "Unknown" end
+    
     local gameInfoBar = interface:FindFirstChild("GameInfoBar")
-    if not gameInfoBar then return nil, nil end
-
-    local wave = gameInfoBar.Wave.WaveText.Text
-    local time = gameInfoBar.TimeLeft.TimeLeftText.Text
-    return wave, time
+    if not gameInfoBar then return "Unknown" end
+    
+    return gameInfoBar.Wave.WaveText.Text
 end
 
--- Chuyển đổi chuỗi thời gian (vd: "1:23") thành số (vd: 123)
-local function convertTimeToNumber(timeStr)
-    if not timeStr then return nil end
-    local mins, secs = timeStr:match("(%d+):(%d+)")
-    if mins and secs then
-        return tonumber(mins) * 100 + tonumber(secs)
-    end
-    return nil
-end
-
--- THÊM: Lấy tên tower từ hash
-local function GetTowerNameByHash(towerHash)
-    if not TowerClass or not TowerClass.GetTowers then return nil end
-    local towers = TowerClass.GetTowers()
-    local tower = towers[towerHash]
-    if tower and tower.Type then
-        return tower.Type
-    end
-    return nil
-end
-
--- THÊM: Kiểm tra xem tower có phải moving skill tower không
-local function IsMovingSkillTower(towerName, skillIndex)
-    if not towerName or not skillIndex then return false end
-
-    -- Helicopter: skill 1, 3
-    if towerName == "Helicopter" and (skillIndex == 1 or skillIndex == 3) then
-        return true
-    end
-
-    -- Cryo Helicopter: skill 1, 3  
-    if towerName == "Cryo Helicopter" and (skillIndex == 1 or skillIndex == 3) then
-        return true
-    end
-
-    -- Jet Trooper: skill 1
-    if towerName == "Jet Trooper" and skillIndex == 1 then
-        return true
-    end
-
-    return false
-end
-
--- THÊM: Kiểm tra skill có cần position không
-local function IsPositionRequiredSkill(towerName, skillIndex)
-    if not towerName or not skillIndex then return false end
-
-    -- Skill 1: cần position (moving skill)
-    if skillIndex == 1 then
-        return true
-    end
-
-    -- Skill 3: không cần position (buff/ability skill)
-    if skillIndex == 3 then
-        return false
-    end
-
-    return true -- mặc định cần position
-end
-
--- Cập nhật file JSON với dữ liệu mới
-local function updateJsonFile()
-    if not HttpService then return end
-    local jsonLines = {}
-    for i, entry in ipairs(recordedActions) do
-        local ok, jsonStr = pcall(HttpService.JSONEncode, HttpService, entry)
-        if ok then
-            if i < #recordedActions then
-                jsonStr = jsonStr .. ","
-            end
-            table.insert(jsonLines, jsonStr)
-        end
-    end
-    local finalJson = "[\n" .. table.concat(jsonLines, "\n") .. "\n]"
-    safeWriteFile(outJson, finalJson)
-end
-
--- Đọc file JSON hiện có để bảo toàn các "SuperFunction"
-local function preserveSuperFunctions()
-    local content = safeReadFile(outJson)
-    if content == "" then return end
-
-    content = content:gsub("^%[%s*", ""):gsub("%s*%]$", "")
-    for line in content:gmatch("[^\r\n]+") do
-        line = line:gsub(",$", "")
-        if line:match("%S") then
-            local ok, decoded = pcall(HttpService.JSONDecode, HttpService, line)
-            if ok and decoded and decoded.SuperFunction then
-                table.insert(recordedActions, decoded)
-            end
-        end
-    end
-    if #recordedActions > 0 then
-        updateJsonFile() -- Cập nhật lại file để đảm bảo định dạng đúng
-    end
-end
-
--- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
-local function parseMacroLine(line)
-    -- THÊM: Phân tích lệnh skip wave (theo format TDX library)
-    if line:match('TDX:skipWave%(%)') then
-        local currentWave, currentTime = getCurrentWaveAndTime()
-        return {{
-            SkipWhen = currentWave,
-            SkipWave = tostring(convertTimeToNumber(currentTime))
-        }}
-    end
-
-    -- THÊM: Phân tích lệnh moving skill WITH position
-    local hash, skillIndex, x, y, z = line:match('TDX:useMovingSkill%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%)')
-    if hash and skillIndex and x and y and z then
-        local pos = hash2pos[tostring(hash)]
-        if pos then
-            local currentWave, currentTime = getCurrentWaveAndTime()
-            return {{
-                towermoving = pos.x,
-                skillindex = tonumber(skillIndex),
-                location = string.format("%s, %s, %s", x, y, z),
-                wave = currentWave,
-                time = convertTimeToNumber(currentTime)
-            }}
-        end
-    end
-
-    -- THÊM: Phân tích lệnh skill WITHOUT position (skill 3)
-    local hash, skillIndex = line:match('TDX:useSkill%(([^,]+),%s*([^%)]+)%)')
-    if hash and skillIndex then
-        local pos = hash2pos[tostring(hash)]
-        if pos then
-            local currentWave, currentTime = getCurrentWaveAndTime()
-            return {{
-                towermoving = pos.x,
-                skillindex = tonumber(skillIndex),
-                location = "no_pos", -- skill 3 không có position
-                wave = currentWave,
-                time = convertTimeToNumber(currentTime)
-            }}
-        end
-    end
-
-    -- Phân tích lệnh đặt tower
-    local a1, name, x, y, z, rot = line:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
-    if a1 and name and x and y and z and rot then
-        name = tostring(name):gsub('^%s*"(.-)"%s*$', '%1')
-        return {{
-            TowerPlaceCost = GetTowerPlaceCostByName(name),
-            TowerPlaced = name,
-            TowerVector = string.format("%s, %s, %s", x, y, z),
-            Rotation = rot,
-            TowerA1 = a1
-        }}
-    end
-
-    -- Phân tích lệnh nâng cấp tower
-    local hash, path, upgradeCount = line:match('TDX:upgradeTower%(([^,]+),%s*([^,]+),%s*([^%)]+)%)')
-    if hash and path and upgradeCount then
-        local pos = hash2pos[tostring(hash)]
-        local pathNum, count = tonumber(path), tonumber(upgradeCount)
-        if pos and pathNum and count and count > 0 then
-            local entries = {}
-            for _ = 1, count do
-                table.insert(entries, {
-                    UpgradeCost = 0, -- Chi phí nâng cấp sẽ được tính toán bởi trình phát lại
-                    UpgradePath = pathNum,
-                    TowerUpgraded = pos.x
-                })
-            end
-            return entries
-        end
-    end
-
-    -- Phân tích lệnh thay đổi mục tiêu
-    local hash, targetType = line:match('TDX:changeQueryType%(([^,]+),%s*([^%)]+)%)')
-    if hash and targetType then
-        local pos = hash2pos[tostring(hash)]
-        if pos then
-            local currentWave, currentTime = getCurrentWaveAndTime()
-            local entry = {
-                TowerTargetChange = pos.x,
-                TargetWanted = tonumber(targetType),
-                TargetWave = currentWave,
-                TargetChangedAt = convertTimeToNumber(currentTime)
-            }
-            return {entry}
-        end
-    end
-
-    -- Phân tích lệnh bán tower
-    local hash = line:match('TDX:sellTower%(([^%)]+)%)')
-    if hash then
-        local pos = hash2pos[tostring(hash)]
-        if pos then
-            return {{ SellTower = pos.x }}
-        end
-    end
-
-    return nil
-end
-
--- Xử lý một dòng lệnh, phân tích và ghi vào file JSON
-local function processAndWriteAction(commandString)
-    -- SỬA: Cải thiện điều kiện ngăn log hành động khi rebuild
-    if globalEnv.TDX_REBUILDING_TOWERS then
-        -- Phân tích command để lấy axis X
-        local axisX = nil
-
-        -- Kiểm tra nếu là PlaceTower
-        local a1, towerName, vec, rot = commandString:match('TDX:placeTower%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%s*,%s*([^%)]+)%)')
-        if vec then
-            axisX = tonumber(vec)
-        end
-
-        -- Kiểm tra nếu là UpgradeTower
-        if not axisX then
-            local hash = commandString:match('TDX:upgradeTower%(([^,]+),')
-            if hash then
-                local pos = hash2pos[tostring(hash)]
-                if pos then
-                    axisX = pos.x
-                end
-            end
-        end
-
-        -- Kiểm tra nếu là ChangeQueryType
-        if not axisX then
-            local hash = commandString:match('TDX:changeQueryType%(([^,]+),')
-            if hash then
-                local pos = hash2pos[tostring(hash)]
-                if pos then
-                    axisX = pos.x
-                end
-            end
-        end
-
-        -- Kiểm tra nếu là UseMovingSkill
-        if not axisX then
-            local hash = commandString:match('TDX:useMovingSkill%(([^,]+),')
-            if not hash then
-                hash = commandString:match('TDX:useSkill%(([^,]+),')
-            end
-            if hash then
-                local pos = hash2pos[tostring(hash)]
-                if pos then
-                    axisX = pos.x
-                end
-            end
-        end
-
-        -- Nếu tower đang được rebuild thì bỏ qua log
-        if axisX and globalEnv.TDX_REBUILDING_TOWERS[axisX] then
-            return
-        end
-    end
-
-    -- Tiếp tục xử lý bình thường nếu không phải rebuild
-    local entries = parseMacroLine(commandString)
-    if entries then
-        for _, entry in ipairs(entries) do
-            table.insert(recordedActions, entry)
-        end
-        updateJsonFile()
-    end
-end
+print("🎯 Bắt đầu thiết lập các hook...")
 
 --==============================================================================
---=                      XỬ LÝ SỰ KIỆN & HOOKS                                 =
+--=                    PHƯƠNG PHÁP 1: HOOK TRỰC TIẾP REMOTE                    =
 --==============================================================================
 
--- Thêm một yêu cầu vào hàng đợi chờ xác nhận
-local function setPending(typeStr, code, hash)
-    table.insert(pendingQueue, {
-        type = typeStr,
-        code = code,
-        created = tick(),
-        hash = hash
-    })
-end
-
--- Xác nhận một yêu cầu từ hàng đợi và xử lý nó
-local function tryConfirm(typeStr, specificHash)
-    for i = #pendingQueue, 1, -1 do
-        local item = pendingQueue[i]
-        if item.type == typeStr then
-            if not specificHash or string.find(item.code, tostring(specificHash)) then
-                processAndWriteAction(item.code) -- Thay thế việc ghi file txt
-                table.remove(pendingQueue, i)
-                return
-            end
-        end
-    end
-end
-
--- Xử lý sự kiện đặt/bán tower
-ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
-    local d = data and data[1]
-    if not d then return end
-    if d.Creation then
-        tryConfirm("Place")
-    else
-        tryConfirm("Sell")
-    end
-end)
-
--- Xử lý sự kiện nâng cấp tower
-ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
-    if not data or not data[1] then return end
-
-    local towerData = data[1]
-    local hash = towerData.Hash
-    local newLevels = towerData.LevelReplicationData
-    local currentTime = tick()
-
-    -- Chống upgrade sinh đôi
-    if lastUpgradeTime[hash] and (currentTime - lastUpgradeTime[hash]) < 0.0001 then
-        return
-    end
-    lastUpgradeTime[hash] = currentTime
-
-    local upgradedPath, upgradeCount = nil, 0
-    if lastKnownLevels[hash] then
-        for path = 1, 2 do
-            local oldLevel = lastKnownLevels[hash][path] or 0
-            local newLevel = newLevels[path] or 0
-            if newLevel > oldLevel then
-                upgradedPath = path
-                upgradeCount = newLevel - oldLevel
-                break
-            end
-        end
-    end
-
-    if upgradedPath and upgradeCount > 0 then
-        local code = string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), upgradedPath, upgradeCount)
-        processAndWriteAction(code) -- Thay thế việc ghi file txt
-
-        -- Xóa các yêu cầu nâng cấp đang chờ cho tower này
-        for i = #pendingQueue, 1, -1 do
-            if pendingQueue[i].type == "Upgrade" and pendingQueue[i].hash == hash then
-                table.remove(pendingQueue, i)
-            end
-        end
-    else
-        tryConfirm("Upgrade", hash)
-    end
-
-    lastKnownLevels[hash] = newLevels or {}
-end)
-
--- Xử lý sự kiện thay đổi mục tiêu
-ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
-    if data and data[1] then
-        tryConfirm("Target")
-    end
-end)
-
--- THÊM: Hook trực tiếp lên SkipWaveVoteCast remote
+print("🔧 Method 1: Hook trực tiếp lên Remote")
 pcall(function()
-    local skipWaveRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("SkipWaveVoteCast")
-    if skipWaveRemote then
-        local originalFireServer = skipWaveRemote.FireServer
-        skipWaveRemote.FireServer = function(self, voteValue)
-            -- Ghi nhận skip wave trước khi gửi
-            if typeof(voteValue) == "boolean" and voteValue == true then
-                local code = "TDX:skipWave()"
-                processAndWriteAction(code)
-                print("✅ Skip Wave đã được ghi nhận!")
+    local skipRemote = ReplicatedStorage:WaitForChild("Remotes", 5)
+    if skipRemote then
+        skipRemote = skipRemote:WaitForChild("SkipWaveVoteCast", 2)
+        if skipRemote then
+            local originalFireServer = skipRemote.FireServer
+            
+            skipRemote.FireServer = function(self, voteValue)
+                writeTest("Method1-DirectRemote", string.format("Vote: %s (%s) | Wave: %s", 
+                    tostring(voteValue), typeof(voteValue), getCurrentWave()))
+                
+                -- Gọi original
+                return originalFireServer(self, voteValue)
             end
             
-            -- Gửi request gốc
-            return originalFireServer(self, voteValue)
+            print("✅ Method 1: Hook trực tiếp Remote - THÀNH CÔNG")
+        else
+            print("❌ Method 1: Không tìm thấy SkipWaveVoteCast remote")
         end
-        print("🎣 Đã hook trực tiếp SkipWaveVoteCast remote!")
+    else
+        print("❌ Method 1: Không tìm thấy Remotes folder")
     end
 end)
 
--- THÊM: Xử lý sự kiện moving skill được sử dụng
-pcall(function()
-    -- Tạo một event listener giả cho moving skills
-    -- Vì không có event riêng, chúng ta sẽ confirm sau 0.2 giây
-    task.spawn(function()
-        while task.wait(0.2) do
-            -- Auto confirm tất cả moving skills pending
-            for i = #pendingQueue, 1, -1 do
-                local item = pendingQueue[i]
-                if item.type == "MovingSkill" and tick() - item.created > 0.1 then
-                    processAndWriteAction(item.code)
-                    table.remove(pendingQueue, i)
-                end
+--==============================================================================
+--=                    PHƯƠNG PHÁP 2: HOOKFUNCTION                             =
+--==============================================================================
+
+print("🔧 Method 2: HookFunction")
+if hookfunction then
+    pcall(function()
+        local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+            if self.Name == "SkipWaveVoteCast" then
+                local args = {...}
+                writeTest("Method2-HookFunction", string.format("Args: %s | Wave: %s", 
+                    HttpService:JSONEncode(args), getCurrentWave()))
             end
-        end
+            return oldFireServer(self, ...)
+        end)
+        print("✅ Method 2: HookFunction - THÀNH CÔNG")
     end)
-end)
-
--- Xử lý các lệnh gọi remote (trừ SkipWaveVoteCast được xử lý trực tiếp trong namecall)
-local function handleRemote(name, args)
-    -- Skip SkipWaveVoteCast vì đã xử lý trong namecall hook
-    if name == "SkipWaveVoteCast" then
-        return
-    end
-
-    -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
-    if name == "TowerUseAbilityRequest" then
-        local towerHash, skillIndex, targetPos = unpack(args)
-        if typeof(towerHash) == "number" and typeof(skillIndex) == "number" then
-            local towerName = GetTowerNameByHash(towerHash)
-            if IsMovingSkillTower(towerName, skillIndex) then
-                local code
-
-                -- Skill cần position (skill 1)
-                if IsPositionRequiredSkill(towerName, skillIndex) and typeof(targetPos) == "Vector3" then
-                    code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
-                        tostring(towerHash), 
-                        skillIndex, 
-                        tostring(targetPos.X), 
-                        tostring(targetPos.Y), 
-                        tostring(targetPos.Z))
-
-                -- Skill không cần position (skill 3)
-                elseif not IsPositionRequiredSkill(towerName, skillIndex) then
-                    code = string.format("TDX:useSkill(%s, %d)", 
-                        tostring(towerHash), 
-                        skillIndex)
-                end
-
-                if code then
-                    setPending("MovingSkill", code, towerHash)
-                end
-            end
-        end
-    end
-
-    if name == "TowerUpgradeRequest" then
-        local hash, path, count = unpack(args)
-        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
-            setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
-        end
-    elseif name == "PlaceTower" then
-        local a1, towerName, vec, rot = unpack(args)
-        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
-            local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
-            setPending("Place", code)
-        end
-    elseif name == "SellTower" then
-        setPending("Sell", "TDX:sellTower("..tostring(args[1])..")")
-    elseif name == "ChangeQueryType" then
-        setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
-    end
+else
+    print("❌ Method 2: HookFunction không khả dụng")
 end
 
--- Hook các hàm remote
-local function setupHooks()
-    if not hookfunction or not hookmetamethod or not checkcaller then
-        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
-        return
-    end
+--==============================================================================
+--=                    PHƯƠNG PHÁP 3: HOOKMETAMETHOD                           =
+--==============================================================================
 
-    -- Hook FireServer
-    local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-        handleRemote(self.Name, {...})
-        return oldFireServer(self, ...)
-    end)
-
-    -- Hook InvokeServer - ĐẶC BIỆT QUAN TRỌNG CHO TowerUseAbilityRequest
-    local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-        handleRemote(self.Name, {...})
-        return oldInvokeServer(self, ...)
-    end)
-
-    -- Hook namecall - QUAN TRỌNG NHẤT CHO CÁC REMOTE CALLS KHÁC
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if checkcaller() then return oldNamecall(self, ...) end
-        local method = getnamecallmethod()
-        if method == "FireServer" or method == "InvokeServer" then
-            local args = {...}
-            local remoteName = self.Name
+print("🔧 Method 3: HookMetamethod")
+if hookmetamethod and checkcaller then
+    pcall(function()
+        local oldNamecall
+        oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+            if checkcaller() then return oldNamecall(self, ...) end
             
-            -- Bỏ qua SkipWaveVoteCast vì đã hook trực tiếp
-            if remoteName ~= "SkipWaveVoteCast" then
-                handleRemote(remoteName, args)
+            local method = getnamecallmethod()
+            if method == "FireServer" and self.Name == "SkipWaveVoteCast" then
+                local args = {...}
+                writeTest("Method3-HookMetamethod", string.format("Args: %s | Wave: %s", 
+                    HttpService:JSONEncode(args), getCurrentWave()))
             end
-        end
-        return oldNamecall(self, ...)
+            
+            return oldNamecall(self, ...)
+        end)
+        print("✅ Method 3: HookMetamethod - THÀNH CÔNG")
     end)
+else
+    print("❌ Method 3: HookMetamethod hoặc checkcaller không khả dụng")
 end
 
 --==============================================================================
---=                         VÒNG LẶP & KHỞI TẠO                               =
+--=              PHƯƠNG PHÁP 4: MONITOR REMOTES FOLDER                         =
 --==============================================================================
 
--- Vòng lặp dọn dẹp hàng đợi chờ
-task.spawn(function()
-    while task.wait(0.5) do
-        local now = tick()
-        for i = #pendingQueue, 1, -1 do
-            if now - pendingQueue[i].created > timeout then
-                warn("❌ Không xác thực được: " .. pendingQueue[i].type .. " | Code: " .. pendingQueue[i].code)
-                table.remove(pendingQueue, i)
+print("🔧 Method 4: Monitor Remotes Folder")
+pcall(function()
+    local function connectToRemote()
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+        if remotes then
+            local skipRemote = remotes:FindFirstChild("SkipWaveVoteCast")
+            if skipRemote and skipRemote:IsA("RemoteEvent") then
+                -- Thử hook OnClientEvent (nếu có response)
+                skipRemote.OnClientEvent:Connect(function(...)
+                    writeTest("Method4-OnClientEvent", string.format("Response: %s | Wave: %s", 
+                        HttpService:JSONEncode({...}), getCurrentWave()))
+                end)
+                
+                print("✅ Method 4: Monitor OnClientEvent - THÀNH CÔNG")
             end
         end
     end
+    
+    connectToRemote()
+    
+    -- Theo dõi khi remote được thêm
+    ReplicatedStorage.DescendantAdded:Connect(function(child)
+        if child.Name == "SkipWaveVoteCast" then
+            task.wait(0.1)
+            connectToRemote()
+        end
+    end)
 end)
 
--- SỬA: Vòng lặp cập nhật vị trí SpawnCFrame của tower
-task.spawn(function()
-    while task.wait() do
-        if TowerClass and TowerClass.GetTowers then
-            for hash, tower in pairs(TowerClass.GetTowers()) do
-                local pos = GetTowerSpawnPosition(tower)
-                if pos then
-                    hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+--==============================================================================
+--=                    PHƯƠNG PHÁP 5: SIMULATE CLICK                           =
+--==============================================================================
+
+print("🔧 Method 5: Monitor UI Click")
+pcall(function()
+    local function findSkipButton()
+        local playerGui = player:FindFirstChildOfClass("PlayerGui")
+        if not playerGui then return end
+        
+        -- Tìm skip button trong UI
+        for _, gui in ipairs(playerGui:GetDescendants()) do
+            if gui:IsA("GuiButton") or gui:IsA("TextButton") then
+                local text = gui.Text or ""
+                if text:lower():find("skip") or gui.Name:lower():find("skip") then
+                    
+                    -- Hook vào MouseButton1Click
+                    gui.MouseButton1Click:Connect(function()
+                        writeTest("Method5-UIClick", string.format("Button: %s | Text: %s | Wave: %s", 
+                            gui.Name, text, getCurrentWave()))
+                    end)
+                    
+                    print("✅ Method 5: Tìm thấy skip button:", gui.Name)
                 end
             end
         end
     end
+    
+    findSkipButton()
+    
+    -- Theo dõi khi UI thay đổi
+    player:FindFirstChildOfClass("PlayerGui").DescendantAdded:Connect(function(child)
+        if child:IsA("GuiButton") or child:IsA("TextButton") then
+            task.wait(0.1)
+            findSkipButton()
+        end
+    end)
 end)
 
--- Khởi tạo
-preserveSuperFunctions()
-setupHooks()
+--==============================================================================
+--=                    PHƯƠNG PHÁP 6: NETWORK MONITORING                       =
+--==============================================================================
 
-print("✅ TDX Recorder với Skip Wave Hook đã hoạt động!")
-print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
-print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⏭️ Đã thêm hook cho Skip Wave Vote Cast!")
+print("🔧 Method 6: Network Monitoring")
+if getconnections then
+    pcall(function()
+        task.spawn(function()
+            while task.wait(1) do
+                local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+                if remotes then
+                    local skipRemote = remotes:FindFirstChild("SkipWaveVoteCast")
+                    if skipRemote then
+                        local connections = getconnections(skipRemote.OnClientEvent)
+                        if #connections > 0 then
+                            writeTest("Method6-NetworkMonitor", string.format("Connections: %d | Wave: %s", 
+                                #connections, getCurrentWave()))
+                        end
+                    end
+                end
+            end
+        end)
+        print("✅ Method 6: Network Monitoring - THÀNH CÔNG")
+    end)
+else
+    print("❌ Method 6: getconnections không khả dụng")
+end
+
+--==============================================================================
+--=                    PHƯƠNG PHÁP 7: MANUAL TRIGGER                           =
+--==============================================================================
+
+print("🔧 Method 7: Manual Trigger Test")
+print("📋 Để test manual, hãy chạy lệnh sau trong console:")
+print('game:GetService("ReplicatedStorage").Remotes.SkipWaveVoteCast:FireServer(true)')
+
+-- Tạo function để test manual
+_G.testSkipWave = function()
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    if remotes then
+        local skipRemote = remotes:FindFirstChild("SkipWaveVoteCast")
+        if skipRemote then
+            writeTest("Method7-ManualTrigger", string.format("Manual test | Wave: %s", getCurrentWave()))
+            skipRemote:FireServer(true)
+            print("🚀 Manual trigger sent!")
+        else
+            print("❌ SkipWaveVoteCast remote không tìm thấy")
+        end
+    else
+        print("❌ Remotes folder không tìm thấy")
+    end
+end
+
+print("💡 Chạy _G.testSkipWave() để test manual")
+
+--==============================================================================
+--=                         STATUS & MONITORING                               =
+--==============================================================================
+
+print("="..string.rep("=", 50))
+print("🎯 TẤT CẢ HOOK ĐÃ ĐƯỢC THIẾT LẬP!")
+print("📁 Log file: " .. outTxt)
+print("🔍 Hãy thử skip wave và kiểm tra file log")
+print("⏰ Monitoring bắt đầu...")
+
+-- Monitor task
+task.spawn(function()
+    local lastWave = getCurrentWave()
+    while task.wait(5) do
+        local currentWave = getCurrentWave()
+        if currentWave ~= lastWave then
+            writeTest("WaveChange", string.format("Wave changed: %s -> %s", lastWave, currentWave))
+            lastWave = currentWave
+        end
+    end
+end)
+
+print("✅ SkipWave Hook Test đã sẵn sàng!")
+print("🎮 Hãy thử skip wave trong game và kiểm tra kết quả!")
