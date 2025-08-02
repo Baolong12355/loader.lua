@@ -570,4 +570,74 @@ end
 -- Hook các hàm remote
 local function setupHooks()
     if not hookfunction or not hookmetamethod or not checkcaller then
-        warn("Executor khô
+        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
+        return
+    end
+
+    -- Hook FireServer
+    local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
+        handleRemote(self.Name, {...})
+        return oldFireServer(self, ...)
+    end)
+
+    -- Hook InvokeServer - ĐẶC BIỆT QUAN TRỌNG CHO TowerUseAbilityRequest
+    local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
+        handleRemote(self.Name, {...})
+        return oldInvokeServer(self, ...)
+    end)
+
+    -- Hook namecall - QUAN TRỌNG NHẤT CHO TẤT CẢ REMOTE CALLS
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        if checkcaller() then return oldNamecall(self, ...) end
+        local method = getnamecallmethod()
+        if method == "FireServer" or method == "InvokeServer" then
+            local args = {...}
+            local remoteName = self.Name
+            
+            -- Xử lý tất cả remote calls thông qua handleRemote
+            handleRemote(remoteName, args)
+        end
+        return oldNamecall(self, ...)
+    end)
+end
+
+--==============================================================================
+--=                         VÒNG LẶP & KHỞI TẠO                               =
+--==============================================================================
+
+-- Vòng lặp dọn dẹp hàng đợi chờ
+task.spawn(function()
+    while task.wait(0.5) do
+        local now = tick()
+        for i = #pendingQueue, 1, -1 do
+            if now - pendingQueue[i].created > timeout then
+                warn("❌ Không xác thực được: " .. pendingQueue[i].type .. " | Code: " .. pendingQueue[i].code)
+                table.remove(pendingQueue, i)
+            end
+        end
+    end
+end)
+
+-- SỬA: Vòng lặp cập nhật vị trí SpawnCFrame của tower
+task.spawn(function()
+    while task.wait() do
+        if TowerClass and TowerClass.GetTowers then
+            for hash, tower in pairs(TowerClass.GetTowers()) do
+                local pos = GetTowerSpawnPosition(tower)
+                if pos then
+                    hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
+                end
+            end
+        end
+    end
+end)
+
+-- Khởi tạo
+preserveSuperFunctions()
+setupHooks()
+
+print("✅ TDX Recorder với Skip Wave Hook đã hoạt động!")
+print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
+print("🔄 Đã tích hợp với hệ thống rebuild mới!")
+print("⏭️ Đã thêm hook cho Skip Wave Vote Cast!")
