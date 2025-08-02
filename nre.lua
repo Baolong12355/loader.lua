@@ -237,7 +237,16 @@ end
 
 -- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
 local function parseMacroLine(line)
-    -- THÊM: Phân tích lệnh skip wave
+    -- SỬA: Phân tích lệnh skip wave - nhận thời gian từ parameter
+    local skipWave, skipTime = line:match('TDX:skipWave%(([^,]+),%s*([^%)]+)%)')
+    if skipWave and skipTime then
+        return {{
+            SkipWave = skipWave,
+            SkipWhen = tonumber(skipTime)
+        }}
+    end
+    
+    -- Fallback cho format cũ
     if line:match('TDX:skipWave%(%)') then
         local currentWave, currentTime = getCurrentWaveAndTime()
         return {{
@@ -493,7 +502,7 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- SỬA: Xử lý sự kiện skip wave vote với logic mới
+-- SỬA: Xử lý sự kiện skip wave vote với logic mới - lấy thời gian chính xác
 ReplicatedStorage.Remotes.SkipWaveVoteStateUpdate.OnClientEvent:Connect(function(data)
     if not data then return end
     
@@ -509,8 +518,13 @@ ReplicatedStorage.Remotes.SkipWaveVoteStateUpdate.OnClientEvent:Connect(function
     
     -- Khi voting bị tắt và chúng ta có pending skip
     if not votingEnabled and skipWaveState.votingEnabled and skipWaveState.pendingSkip then
-        -- Confirm skip wave action
-        processAndWriteAction("TDX:skipWave()")
+        -- SỬA: Lấy thời gian hiện tại ngay khi skip được xác nhận
+        local currentWave, currentTime = getCurrentWaveAndTime()
+        local skipCommand = string.format("TDX:skipWave(%s, %s)", currentWave, convertTimeToNumber(currentTime))
+        
+        -- Confirm skip wave action với thời gian chính xác
+        processAndWriteAction(skipCommand)
+        
         
         -- Reset trạng thái
         skipWaveState.pendingSkip = false
@@ -670,4 +684,5 @@ print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
 print("⏭️ Đã cải tiến logic Skip Wave Vote!")
-print("🗳️ Skip wave sẽ được ghi khi vote thành công!")
+print("🗳️ Skip wave sẽ được ghi với thời gian chính xác!")
+print("⏰ Thời gian skip được lấy ngay khi vote thành công!")
