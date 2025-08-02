@@ -234,8 +234,8 @@ local function parseMacroLine(line)
     if line:match('TDX:skipWave%(%)') then
         local currentWave, currentTime = getCurrentWaveAndTime()
         return {{
-            SkipWhen = currentWave,
-            SkipWave = convertTimeToNumber(currentTime)
+            SkipWave = currentWave,
+            SkipWhen = convertTimeToNumber(currentTime)
         }}
     end
 
@@ -392,9 +392,6 @@ local function processAndWriteAction(commandString)
             table.insert(recordedActions, entry)
         end
         updateJsonFile()
-        
-        -- THÊM: Log ra console khi có action được ghi
-        print("📝 Recorded action: " .. commandString)
     end
 end
 
@@ -410,9 +407,6 @@ local function setPending(typeStr, code, hash)
         created = tick(),
         hash = hash
     })
-    
-    -- THÊM: Log ra console khi có pending
-    print("⏳ Pending " .. typeStr .. ": " .. code)
 end
 
 -- Xác nhận một yêu cầu từ hàng đợi và xử lý nó
@@ -423,9 +417,6 @@ local function tryConfirm(typeStr, specificHash)
             if not specificHash or string.find(item.code, tostring(specificHash)) then
                 processAndWriteAction(item.code) -- Thay thế việc ghi file txt
                 table.remove(pendingQueue, i)
-                
-                -- THÊM: Log ra console khi confirm
-                print("✅ Confirmed " .. typeStr .. ": " .. item.code)
                 return
             end
         end
@@ -527,7 +518,6 @@ task.spawn(function()
             if item.type == "SkipWave" and tick() - item.created > 0.1 then
                 processAndWriteAction(item.code)
                 table.remove(pendingQueue, i)
-                print("⏭️ Auto confirmed SkipWave: " .. item.code)
             end
         end
     end
@@ -541,7 +531,6 @@ local function handleRemote(name, args)
     if name == "SkipWaveVoteCast" then
         if args and args[1] == true then
             setPending("SkipWave", "TDX:skipWave()")
-            print("⏭️ Skip wave vote detected!")
         end
     end
 
@@ -571,7 +560,6 @@ local function handleRemote(name, args)
 
                 if code then
                     setPending("MovingSkill", code, towerHash)
-                    print("🚁 Moving skill detected: " .. towerName .. " skill " .. skillIndex)
                 end
             end
         end
@@ -666,4 +654,3 @@ print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
 print("⏭️ Đã thêm hook Skip Wave Vote!")
 print("🔄 Auto pending Skip Wave mỗi 0.1 giây!")
-print("📝 Console logging đã được kích hoạt!")
