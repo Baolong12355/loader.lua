@@ -486,6 +486,26 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
+-- THÊM: Hook trực tiếp lên SkipWaveVoteCast remote
+pcall(function()
+    local skipWaveRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("SkipWaveVoteCast")
+    if skipWaveRemote then
+        local originalFireServer = skipWaveRemote.FireServer
+        skipWaveRemote.FireServer = function(self, voteValue)
+            -- Ghi nhận skip wave trước khi gửi
+            if typeof(voteValue) == "boolean" and voteValue == true then
+                local code = "TDX:skipWave()"
+                processAndWriteAction(code)
+                print("✅ Skip Wave đã được ghi nhận!")
+            end
+            
+            -- Gửi request gốc
+            return originalFireServer(self, voteValue)
+        end
+        print("🎣 Đã hook trực tiếp SkipWaveVoteCast remote!")
+    end
+end)
+
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
 pcall(function()
     -- Tạo một event listener giả cho moving skills
@@ -579,7 +599,7 @@ local function setupHooks()
         return oldInvokeServer(self, ...)
     end)
 
-    -- Hook namecall - QUAN TRỌNG NHẤT CHO TẤT CẢ REMOTE CALLS
+    -- Hook namecall - QUAN TRỌNG NHẤT CHO CÁC REMOTE CALLS KHÁC
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         if checkcaller() then return oldNamecall(self, ...) end
@@ -588,52 +608,10 @@ local function setupHooks()
             local args = {...}
             local remoteName = self.Name
             
-            -- SỬA: Xử lý đặc biệt cho SkipWaveVoteCast 
-            if remoteName == "SkipWaveVoteCast" and method == "FireServer" then
-                local voteValue = args[1]
-                print("🔍 SKIP WAVE DEBUG:")
-                print("  - Original value:", voteValue, "| Type:", typeof(voteValue))
-                
-                if typeof(voteValue) == "boolean" and voteValue == true then
-                    -- Ghi nhận skip wave NGAY LẬP TỨC (không cần chờ server response)
-                    local code = "TDX:skipWave()"
-                    processAndWriteAction(code)
-                    print("✅ Skip Wave đã được ghi nhận!")
-                    
-                    -- Thử nhiều cách chuyển đổi
-                    args[1] = "true" -- Hardcode string
-                    print("  - Converted to:", args[1], "| Type:", typeof(args[1]))
-                    
-                    local success, result = pcall(oldNamecall, self, unpack(args))
-                    print("  - Server call success:", success)
-                    if not success then
-                        print("  - Server error:", result)
-                    else
-                        print("  - Server result:", result)
-                    end
-                    return result
-                elseif typeof(voteValue) == "boolean" and voteValue == false then
-                    -- Chuyển false thành string
-                    args[1] = "false"
-                    print("  - Converted to:", args[1], "| Type:", typeof(args[1]))
-                    
-                    local success, result = pcall(oldNamecall, self, unpack(args))
-                    print("  - Server call success:", success)
-                    if not success then
-                        print("  - Server error:", result)
-                    else
-                        print("  - Server result:", result)
-                    end
-                    return result
-                end
-                
-                -- Nếu đã là string thì để nguyên
-                print("  - Sending as-is:", voteValue, "| Type:", typeof(voteValue))
-                return oldNamecall(self, ...)
+            -- Bỏ qua SkipWaveVoteCast vì đã hook trực tiếp
+            if remoteName ~= "SkipWaveVoteCast" then
+                handleRemote(remoteName, args)
             end
-            
-            -- Xử lý tất cả remote calls thông qua handleRemote
-            handleRemote(remoteName, args)
         end
         return oldNamecall(self, ...)
     end)
