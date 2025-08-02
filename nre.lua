@@ -230,7 +230,14 @@ end
 
 -- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
 local function parseMacroLine(line)
-    -- NOTE: Bỏ parse skipWave vì không fake được, chỉ log thực tế
+    -- THÊM: Phân tích lệnh skip wave
+    if line:match('TDX:skipWave%(%)') then
+        local currentWave, currentTime = getCurrentWaveAndTime()
+        return {{
+            SkipWhen = currentWave,
+            SkipWave = convertTimeToNumber(currentTime)
+        }}
+    end
 
     -- THÊM: Phân tích lệnh moving skill WITH position
     local hash, skillIndex, x, y, z = line:match('TDX:useMovingSkill%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%)')
@@ -479,40 +486,9 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- THÊM: Xử lý sự kiện skip wave vote - DEBUG VERSION
-pcall(function()
-    print("🔍 [DEBUG] Đang setup SkipWaveVoteCast listener...")
-    
-    local skipRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("SkipWaveVoteCast", 5)
-    if not skipRemote then
-        warn("❌ [DEBUG] Không tìm thấy SkipWaveVoteCast remote!")
-        return
-    end
-    
-    print("✅ [DEBUG] Tìm thấy SkipWaveVoteCast remote:", skipRemote)
-    
-    skipRemote.OnClientEvent:Connect(function(...)
-        local args = {...}
-        print("🎯 [DEBUG] SkipWaveVoteCast triggered với args:", HttpService:JSONEncode(args))
-        
-        -- Ghi trực tiếp vào log thay vì dùng pending queue
-        local currentWave, currentTime = getCurrentWaveAndTime()
-        print("🔍 [DEBUG] Wave hiện tại:", currentWave, "Time:", currentTime)
-        
-        local entry = {
-            SkipWhen = currentWave,
-            SkipWave = convertTimeToNumber(currentTime)
-        }
-        
-        print("📋 [DEBUG] Entry được tạo:", HttpService:JSONEncode(entry))
-        
-        table.insert(recordedActions, entry)
-        updateJsonFile()
-        
-        print("📋 Đã ghi Skip Wave Vote: " .. tostring(currentWave) .. " tại " .. tostring(currentTime))
-    end)
-    
-    print("✅ [DEBUG] SkipWaveVoteCast listener đã được setup!")
+-- THÊM: Xử lý sự kiện skip wave vote
+ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function()
+    tryConfirm("SkipWave")
 end)
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
@@ -535,14 +511,14 @@ end)
 
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
-    -- Debug cho skip wave
-    if name == "SkipWaveVoteCast" then
-        print("🔍 [DEBUG] handleRemote caught SkipWaveVoteCast:", HttpService:JSONEncode(args))
-    end
-    
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
-    -- THÊM: Xử lý SkipWaveVoteCast (chỉ log, không fake được nên bỏ khỏi handleRemote)
+    -- THÊM: Xử lý SkipWaveVoteCast
+    if name == "SkipWaveVoteCast" then
+        if args and args[1] == true then
+            setPending("SkipWave", "TDX:skipWave()")
+        end
+    end
 
     -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
     if name == "TowerUseAbilityRequest" then
@@ -656,14 +632,10 @@ task.spawn(function()
 end)
 
 -- Khởi tạo
-print("🔍 [DEBUG] Bắt đầu khởi tạo...")
 preserveSuperFunctions()
-print("🔍 [DEBUG] preserveSuperFunctions() hoàn thành")
 setupHooks()
-print("🔍 [DEBUG] setupHooks() hoàn thành")
 
 print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⏭️ Skip Wave chỉ LOG thực tế (không fake được)!")
-print("🔍 [DEBUG] Tất cả đã sẵn sàng!")
+print("⏭️ Đã thêm hook Skip Wave Vote!")
