@@ -506,19 +506,9 @@ pcall(function()
     end)
 end)
 
--- Xử lý các lệnh gọi remote
+-- Xử lý các lệnh gọi remote (trừ SkipWaveVoteCast được xử lý trực tiếp trong namecall)
 local function handleRemote(name, args)
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
-
-    -- THÊM: Xử lý SkipWaveVoteCast - chỉ ghi khi vote true
-    if name == "SkipWaveVoteCast" then
-        local voteValue = args[1]
-        if typeof(voteValue) == "boolean" and voteValue == true then
-            local code = "TDX:skipWaveVote()"
-            -- Xử lý trực tiếp thay vì setPending vì không có confirmation event
-            processAndWriteAction(code)
-        end
-    end
 
     -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
     if name == "TowerUseAbilityRequest" then
@@ -588,13 +578,26 @@ local function setupHooks()
         return oldInvokeServer(self, ...)
     end)
 
-    -- Hook namecall - QUAN TRỌNG NHẤT CHO ABILITY REQUEST
+    -- Hook namecall - QUAN TRỌNG NHẤT CHO TẤT CẢ REMOTE CALLS
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         if checkcaller() then return oldNamecall(self, ...) end
         local method = getnamecallmethod()
         if method == "FireServer" or method == "InvokeServer" then
-            handleRemote(self.Name, {...})
+            local args = {...}
+            local remoteName = self.Name
+            
+            -- Xử lý SkipWaveVoteCast trực tiếp trong namecall
+            if remoteName == "SkipWaveVoteCast" and method == "FireServer" then
+                local voteValue = args[1]
+                if typeof(voteValue) == "boolean" and voteValue == true then
+                    local code = "TDX:skipWaveVote()"
+                    processAndWriteAction(code)
+                end
+            else
+                -- Xử lý các remote khác
+                handleRemote(remoteName, args)
+            end
         end
         return oldNamecall(self, ...)
     end)
