@@ -588,14 +588,14 @@ local function setupHooks()
             local args = {...}
             local remoteName = self.Name
             
-            -- SỬA: Xử lý đặc biệt cho SkipWaveVoteCast để tránh lỗi argument type
+            -- SỬA: Xử lý đặc biệt cho SkipWaveVoteCast 
             if remoteName == "SkipWaveVoteCast" and method == "FireServer" then
                 local voteValue = args[1]
                 if typeof(voteValue) == "boolean" and voteValue == true then
-                    -- Ghi nhận skip wave
+                    -- Ghi nhận skip wave NGAY LẬP TỨC (không cần chờ server response)
                     local code = "TDX:skipWave()"
                     processAndWriteAction(code)
-                    print("✅ Skip Wave đã được ghi nhận!")
+                    print("✅ Skip Wave đã được ghi nhận và xử lý!")
                     
                     -- Chuyển đổi boolean thành string để tránh lỗi server
                     args[1] = tostring(voteValue)
