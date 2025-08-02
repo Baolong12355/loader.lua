@@ -191,24 +191,8 @@ local function IsPositionRequiredSkill(towerName, skillIndex)
     return true -- mặc định cần position
 end
 
--- THÊM: Hàm xử lý skip wave vote
-local function handleSkipWaveVote(args)
-    if args and args[1] ~= nil then
-        local voteValue = args[1]
-        
-        -- Ghi vào file JSON
-        local currentWave, currentTime = getCurrentWaveAndTime()
-        local code = string.format("SkipWhen:%s:SkipWave:%s", currentTime or "unknown", currentWave or "unknown")
-        processAndWriteAction(code)
-        
-        -- Lưu trạng thái vote vào global environment
-        globalEnv.LAST_SKIP_WAVE_VOTE = {
-            value = voteValue,
-            timestamp = tick(),
-            player = player.Name
-        }
-    end
-end
+-- Khai báo trước hàm processAndWriteAction
+local processAndWriteAction
 
 -- Cập nhật file JSON với dữ liệu mới
 local function updateJsonFile()
@@ -351,8 +335,27 @@ local function parseMacroLine(line)
     return nil
 end
 
+-- THÊM: Hàm xử lý skip wave vote
+local function handleSkipWaveVote(args)
+    if args and args[1] ~= nil then
+        local voteValue = args[1]
+        
+        -- Ghi vào file JSON
+        local currentWave, currentTime = getCurrentWaveAndTime()
+        local code = string.format("SkipWhen:%s:SkipWave:%s", currentTime or "unknown", currentWave or "unknown")
+        processAndWriteAction(code)
+        
+        -- Lưu trạng thái vote vào global environment
+        globalEnv.LAST_SKIP_WAVE_VOTE = {
+            value = voteValue,
+            timestamp = tick(),
+            player = player.Name
+        }
+    end
+end
+
 -- Xử lý một dòng lệnh, phân tích và ghi vào file JSON
-local function processAndWriteAction(commandString)
+processAndWriteAction = function(commandString)
     -- SỬA: Cải thiện điều kiện ngăn log hành động khi rebuild
     if globalEnv.TDX_REBUILDING_TOWERS then
         -- Phân tích command để lấy axis X
