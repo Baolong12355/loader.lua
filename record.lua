@@ -1,13 +1,15 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 
-print("🎯 Enhanced SkipWave Test - Safe Text Format")
+print("🎯 TDX SkipWave Hook - Advanced Analysis")
 print("="..string.rep("=", 50))
 
 -- Biến để track
 local skipCount = 0
 local serverResponses = {}
+local bindevents = {}
 
 -- Lấy wave hiện tại
 local function getCurrentWave()
@@ -121,33 +123,95 @@ local function handleSkipWave(method, args, serverResponse)
     
     print(string.format("   🕐 Timestamp: %s", os.date("%H:%M:%S")))
     print("")
-    
-    -- Tạo command format TDX với thông tin chi tiết
-    local command = "TDX:skipWave()"
-    print(string.format("   💾 Command: %s", command))
-    
-    -- Thêm thông tin cho macro format
-    if timeNumber then
-        print(string.format("   📝 Macro Format: SkipWhen=%s, SkipWave=%s", wave, timeNumber))
-    end
-    print("")
 end
 
 --==============================================================================
---=                         HOOK FIRESERVER                                    =
+--=                       HOOK TDX BINDABLE EVENTS                            =
 --==============================================================================
 
-print("🔧 Thiết lập Hook cho FireServer (RemoteEvent)")
+print("🔧 Hooking TDX BindableEvents...")
+
+-- Tìm BindableHandler trong TDX_Shared
+local function hookBindableEvents()
+    local tdxShared = ReplicatedStorage:FindFirstChild("TDX_Shared")
+    if not tdxShared then
+        print("❌ TDX_Shared không tìm thấy")
+        return
+    end
+    
+    local common = tdxShared:FindFirstChild("Common")
+    if not common then
+        print("❌ Common folder không tìm thấy")
+        return
+    end
+    
+    local bindableHandlerModule = common:FindFirstChild("BindableHandler")
+    if not bindableHandlerModule then
+        print("❌ BindableHandler module không tìm thấy")
+        return
+    end
+    
+    print("✅ Tìm thấy BindableHandler module")
+    
+    -- Hook các bindable events liên quan đến skip wave
+    local skipRelatedEvents = {
+        "SkipWaveVote",
+        "SkipWaveVoteCast", 
+        "SkipWave",
+        "VoteSkip",
+        "WaveSkip",
+        "CastSkipVote",
+        "VoteCast"
+    }
+    
+    for _, eventName in ipairs(skipRelatedEvents) do
+        local success = pcall(function()
+            local bindableHandler = require(bindableHandlerModule)
+            if bindableHandler and bindableHandler.GetEvent then
+                local event = bindableHandler.GetEvent(eventName)
+                if event then
+                    event:Connect(function(...)
+                        local args = {...}
+                        print(string.format("📡 BindableEvent [%s]: %s", eventName, safeArgsToText(args)))
+                        
+                        table.insert(serverResponses, {
+                            type = "BindableEvent",
+                            eventName = eventName,
+                            data = args,
+                            dataText = safeArgsToText(args),
+                            timestamp = tick()
+                        })
+                    end)
+                    print(string.format("✅ Hooked BindableEvent: %s", eventName))
+                    bindevents[eventName] = event
+                end
+            end
+        end)
+        
+        if not success then
+            print(string.format("❌ Không thể hook BindableEvent: %s", eventName))
+        end
+    end
+end
+
+hookBindableEvents()
+
+--==============================================================================
+--=                         HOOK REMOTES                                      =
+--==============================================================================
+
+print("🔧 Thiết lập Hook cho RemoteEvents...")
+
+-- Hook FireServer
 if hookfunction then
     local success = pcall(function()
         local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-            -- Chỉ xử lý SkipWaveVoteCast
-            if self.Name == "SkipWaveVoteCast" then
+            local name = self.Name:lower()
+            if string.find(name, "skip") or string.find(name, "wave") or string.find(name, "vote") then
                 local args = {...}
-                handleSkipWave("FireServer-Hook", args, nil) -- FireServer không có return value
+                handleSkipWave("FireServer-" .. self.Name, args, nil)
             end
             
-            -- Gọi original function
             return oldFireServer(self, ...)
         end)
         print("✅ FireServer Hook - THÀNH CÔNG")
@@ -160,23 +224,18 @@ else
     print("❌ hookfunction không khả dụng cho FireServer")
 end
 
---==============================================================================
---=                        HOOK INVOKESERVER                                   =
---==============================================================================
-
-print("🔧 Thiết lập Hook cho InvokeServer (RemoteFunction)")
+-- Hook InvokeServer  
 if hookfunction then
     local success = pcall(function()
         local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-            -- Chỉ xử lý nếu có RemoteFunction tên SkipWaveVoteCast
-            if self.Name == "SkipWaveVoteCast" then
+            local name = self.Name:lower()
+            if string.find(name, "skip") or string.find(name, "wave") or string.find(name, "vote") then
                 local args = {...}
                 local result = oldInvokeServer(self, ...)
-                handleSkipWave("InvokeServer-Hook", args, result)
+                handleSkipWave("InvokeServer-" .. self.Name, args, result)
                 return result
             end
             
-            -- Gọi original function cho các remote khác
             return oldInvokeServer(self, ...)
         end)
         print("✅ InvokeServer Hook - THÀNH CÔNG")
@@ -189,34 +248,30 @@ else
     print("❌ hookfunction không khả dụng cho InvokeServer")
 end
 
---==============================================================================
---=                       HOOK METAMETHOD                                      =
---==============================================================================
-
-print("🔧 Thiết lập Hook cho __namecall")
+-- Hook __namecall
 if hookmetamethod and checkcaller then
     local success = pcall(function()
         local oldNamecall
         oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-            -- Bỏ qua nếu là internal call
             if checkcaller() then return oldNamecall(self, ...) end
             
             local method = getnamecallmethod()
             
-            -- Xử lý FireServer
-            if method == "FireServer" and self.Name == "SkipWaveVoteCast" then
-                local args = {...}
-                handleSkipWave("Namecall-FireServer", args, nil)
-            
-            -- Xử lý InvokeServer (nếu có)
-            elseif method == "InvokeServer" and self.Name == "SkipWaveVoteCast" then
-                local args = {...}
-                local result = oldNamecall(self, ...)
-                handleSkipWave("Namecall-InvokeServer", args, result)
-                return result
+            if (method == "FireServer" or method == "InvokeServer") and self.Name then
+                local name = self.Name:lower()
+                if string.find(name, "skip") or string.find(name, "wave") or string.find(name, "vote") then
+                    local args = {...}
+                    
+                    if method == "InvokeServer" then
+                        local result = oldNamecall(self, ...)
+                        handleSkipWave("Namecall-" .. method .. "-" .. self.Name, args, result)
+                        return result
+                    else
+                        handleSkipWave("Namecall-" .. method .. "-" .. self.Name, args, nil)
+                    end
+                end
             end
             
-            -- Gọi original function
             return oldNamecall(self, ...)
         end)
         print("✅ Namecall Hook - THÀNH CÔNG")
@@ -230,10 +285,10 @@ else
 end
 
 --==============================================================================
---=                      HOOK CLIENT EVENTS                                    =
+--=                      HOOK CLIENT EVENTS                                   =
 --==============================================================================
 
-print("🔧 Thiết lập Hook cho Client Events")
+print("🔧 Thiết lập Hook cho Client Events...")
 local function setupClientEventHooks()
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     if not remotes then
@@ -243,7 +298,6 @@ local function setupClientEventHooks()
     
     local hookedEvents = 0
     
-    -- Tìm các event có thể liên quan đến skip wave response
     for _, remote in pairs(remotes:GetChildren()) do
         if remote:IsA("RemoteEvent") then
             local name = remote.Name:lower()
@@ -260,7 +314,6 @@ local function setupClientEventHooks()
                         
                         print(string.format("📡 Client Event [%s]: %s", remote.Name, argsText))
                         
-                        -- Lưu event data
                         table.insert(serverResponses, {
                             type = "ClientEvent",
                             remoteName = remote.Name,
@@ -286,49 +339,118 @@ end
 setupClientEventHooks()
 
 --==============================================================================
---=                         MANUAL TEST FUNCTIONS                              =
+--=                         HOOK USERINPUTSERVICE                             =
 --==============================================================================
 
--- Test function với detailed logging
+print("🔧 Hooking UserInputService...")
+
+-- Hook input began
+local function hookUserInput()
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        
+        -- Kiểm tra phím skip wave (thường là Enter hoặc Space)
+        if input.KeyCode == Enum.KeyCode.Return or 
+           input.KeyCode == Enum.KeyCode.KeypadEnter or
+           input.KeyCode == Enum.KeyCode.Space then
+            
+            print(string.format("⌨️ Skip key pressed: %s", input.KeyCode.Name))
+            
+            -- Thử tìm skip wave interface
+            local playerGui = player:FindFirstChildOfClass("PlayerGui")
+            if playerGui then
+                local interface = playerGui:FindFirstChild("Interface")
+                if interface then
+                    -- Tìm nút skip wave
+                    local function findSkipButton(parent)
+                        for _, child in pairs(parent:GetDescendants()) do
+                            if child:IsA("TextButton") or child:IsA("ImageButton") then
+                                local text = child.Text or ""
+                                if string.find(text:lower(), "skip") or string.find(text:lower(), "vote") then
+                                    print(string.format("🎯 Found skip button: %s", child:GetFullName()))
+                                    return child
+                                end
+                            end
+                        end
+                    end
+                    
+                    local skipButton = findSkipButton(interface)
+                    if skipButton then
+                        print("🖱️ Simulating skip button click...")
+                        skipButton.MouseButton1Click:Fire()
+                    end
+                end
+            end
+        end
+    end)
+    
+    print("✅ UserInputService hooks đã thiết lập")
+end
+
+hookUserInput()
+
+--==============================================================================
+--=                         TEST FUNCTIONS                                    =
+--==============================================================================
+
+-- Test function với BindableEvent
 _G.testSkipWave = function()
     print("")
-    print("🧪 MANUAL TEST: Gửi SkipWaveVoteCast...")
+    print("🧪 MANUAL TEST: Test BindableEvents...")
     print("="..string.rep("-", 30))
     
+    -- Test với các BindableEvents đã hook
+    for eventName, event in pairs(bindevents) do
+        print(string.format("🔥 Testing BindableEvent: %s", eventName))
+        
+        local success = pcall(function()
+            event:Fire(true) -- Test với vote = true
+        end)
+        
+        if success then
+            print(string.format("   ✅ %s - Fire thành công", eventName))
+        else
+            print(string.format("   ❌ %s - Fire thất bại", eventName))
+        end
+        
+        task.wait(0.1)
+    end
+    
+    -- Test với remotes
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     if remotes then
-        local skipRemote = remotes:FindFirstChild("SkipWaveVoteCast")
-        if skipRemote then
-            local beforeWave = getCurrentWave()
-            local beforeTime = getCurrentTime()
-            
-            print(string.format("📊 Trước khi skip - Wave: %s, Time: %s", beforeWave, beforeTime))
-            
-            -- Test với vote = true
-            print("📤 Gửi vote = true...")
-            skipRemote:FireServer(true)
-            
-            -- Chờ một chút để xem response
-            task.wait(0.5)
-            
-            local afterWave = getCurrentWave()
-            local afterTime = getCurrentTime()
-            print(string.format("📊 Sau khi skip - Wave: %s, Time: %s", afterWave, afterTime))
-            
-            print("✅ Manual test hoàn thành!")
-        else
-            print("❌ SkipWaveVoteCast remote không tìm thấy")
+        for _, remote in pairs(remotes:GetChildren()) do
+            local name = remote.Name:lower()
+            if string.find(name, "skip") or string.find(name, "wave") or string.find(name, "vote") then
+                print(string.format("🔥 Testing Remote: %s", remote.Name))
+                
+                local success = pcall(function()
+                    if remote:IsA("RemoteEvent") then
+                        remote:FireServer(true)
+                    elseif remote:IsA("RemoteFunction") then
+                        remote:InvokeServer(true)
+                    end
+                end)
+                
+                if success then
+                    print(string.format("   ✅ %s - Gửi thành công", remote.Name))
+                else
+                    print(string.format("   ❌ %s - Gửi thất bại", remote.Name))
+                end
+                
+                task.wait(0.1)
+            end
         end
-    else
-        print("❌ Remotes folder không tìm thấy")
     end
+    
+    print("✅ Manual test hoàn thành!")
     print("")
 end
 
 -- Function để xem tất cả responses đã thu thập
 _G.showResponses = function()
     print("")
-    print("📊 TẤT CẢ SERVER RESPONSES:")
+    print("📊 TẤT CẢ RESPONSES:")
     print("="..string.rep("=", 40))
     
     if #serverResponses == 0 then
@@ -345,7 +467,11 @@ _G.showResponses = function()
             print(string.format("   Type: Skip"))
         else
             print(string.format("   Type: %s", response.type or "Unknown"))
-            print(string.format("   Remote: %s", response.remoteName or "N/A"))
+            if response.remoteName then
+                print(string.format("   Remote: %s", response.remoteName))
+            elseif response.eventName then
+                print(string.format("   Event: %s", response.eventName))
+            end
         end
         
         if response.responseText then
@@ -366,115 +492,108 @@ _G.clearResponses = function()
     print("🗑️ Đã xóa tất cả responses và reset counter")
 end
 
--- Function để test với các arguments khác nhau
-_G.testSkipVariations = function()
-    print("")
-    print("🧪 TESTING SKIP VARIATIONS...")
-    print("="..string.rep("-", 30))
+-- Function để force skip wave
+_G.forceSkipWave = function()
+    print("🔥 FORCE SKIP WAVE...")
     
-    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    if not remotes then
-        print("❌ Remotes folder không tìm thấy")
-        return
-    end
-    
-    local skipRemote = remotes:FindFirstChild("SkipWaveVoteCast")
-    if not skipRemote then
-        print("❌ SkipWaveVoteCast remote không tìm thấy")
-        return
-    end
-    
-    local tests = {
-        {name = "Vote True", args = {true}},
-        {name = "Vote False", args = {false}},
-        {name = "String True", args = {"true"}},
-        {name = "Number 1", args = {1}},
-        {name = "Number 0", args = {0}},
-        {name = "No Args", args = {}},
+    -- Thử tất cả các methods có thể
+    local methods = {
+        {name = "BindableEvent", func = function()
+            for eventName, event in pairs(bindevents) do
+                pcall(function() event:Fire(true) end)
+            end
+        end},
+        {name = "Remote", func = function()
+            local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+            if remotes then
+                for _, remote in pairs(remotes:GetChildren()) do
+                    local name = remote.Name:lower()
+                    if string.find(name, "skip") or string.find(name, "wave") or string.find(name, "vote") then
+                        pcall(function()
+                            if remote:IsA("RemoteEvent") then
+                                remote:FireServer(true)
+                            end
+                        end)
+                    end
+                end
+            end
+        end},
+        {name = "GUI Button", func = function()
+            local playerGui = player:FindFirstChildOfClass("PlayerGui")
+            if playerGui then
+                for _, child in pairs(playerGui:GetDescendants()) do
+                    if child:IsA("TextButton") and child.Text and 
+                       string.find(child.Text:lower(), "skip") then
+                        pcall(function() child.MouseButton1Click:Fire() end)
+                    end
+                end
+            end
+        end}
     }
     
-    for i, test in ipairs(tests) do
-        print(string.format("📤 Test %d: %s - Args: %s", i, test.name, safeArgsToText(test.args)))
+    for _, method in ipairs(methods) do
+        print(string.format("🎯 Trying method: %s", method.name))
+        pcall(method.func)
+        task.wait(0.1)
+    end
+    
+    print("✅ Force skip attempts completed!")
+end
+
+--==============================================================================
+--=                         ANALYSIS & INFO                                   =
+--==============================================================================
+
+print("🔍 Analyzing TDX Structure...")
+local function analyzeTDXStructure()
+    local results = {}
+    
+    -- Check TDX_Shared
+    local tdxShared = ReplicatedStorage:FindFirstChild("TDX_Shared")
+    if tdxShared then
+        results.tdxShared = true
+        print("✅ TDX_Shared found")
         
-        local success = pcall(function()
-            if #test.args == 0 then
-                skipRemote:FireServer()
-            else
-                skipRemote:FireServer(unpack(test.args))
+        local common = tdxShared:FindFirstChild("Common")
+        if common then
+            results.common = true
+            print("✅ Common folder found")
+            
+            for _, child in pairs(common:GetChildren()) do
+                if child.Name:find("Handler") then
+                    print(string.format("   📦 Handler: %s", child.Name))
+                end
             end
-        end)
-        
-        if success then
-            print("   ✅ Gửi thành công")
-        else
-            print("   ❌ Gửi thất bại")
         end
-        
-        task.wait(0.2) -- Ngắt giữa các test
     end
     
-    print("✅ Hoàn thành tất cả test variations!")
-    print("")
-end
-
---==============================================================================
---=                         REMOTE ANALYSIS                                    =
---==============================================================================
-
-print("🔍 Phân tích RemoteEvents và RemoteFunctions...")
-local function analyzeRemotes()
+    -- Check Remotes
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    if not remotes then
-        print("❌ Không tìm thấy Remotes folder")
-        return
-    end
-    
-    local skipRelated = {}
-    local allRemotes = {}
-    
-    for _, remote in pairs(remotes:GetChildren()) do
-        table.insert(allRemotes, {
-            Name = remote.Name,
-            Type = remote.ClassName
-        })
+    if remotes then
+        results.remotes = {}
+        print("📡 Remotes found:")
         
-        local name = remote.Name:lower()
-        if string.find(name, "skip") or 
-           string.find(name, "wave") or 
-           string.find(name, "vote") or
-           string.find(name, "cast") or
-           string.find(name, "result") then
-            table.insert(skipRelated, {
-                Name = remote.Name,
-                Type = remote.ClassName
-            })
+        for _, remote in pairs(remotes:GetChildren()) do
+            local name = remote.Name:lower()
+            if string.find(name, "skip") or string.find(name, "wave") or string.find(name, "vote") then
+                table.insert(results.remotes, {name = remote.Name, type = remote.ClassName})
+                print(string.format("   🎯 %s (%s)", remote.Name, remote.ClassName))
+            end
         end
     end
     
-    print(string.format("📊 Tổng cộng: %d remotes", #allRemotes))
-    
-    if #skipRelated > 0 then
-        print("🎯 Tìm thấy các remote liên quan đến skip/wave/vote:")
-        for _, remote in ipairs(skipRelated) do
-            print(string.format("   📡 %s (%s)", remote.Name, remote.Type))
-        end
-    else
-        print("❌ Không tìm thấy remote nào liên quan đến skip/wave/vote")
-        print("📋 Tất cả remotes:")
-        for _, remote in ipairs(allRemotes) do
-            print(string.format("   📡 %s (%s)", remote.Name, remote.Type))
-        end
-    end
+    return results
 end
 
-analyzeRemotes()
+local analysis = analyzeTDXStructure()
 
 print("="..string.rep("=", 50))
-print("✅ Enhanced SkipWave Test (Safe Format) đã sẵn sàng!")
+print("✅ TDX SkipWave Hook đã sẵn sàng!")
 print("🎮 Commands:")
-print("   _G.testSkipWave() - Test manual cơ bản")
-print("   _G.testSkipVariations() - Test nhiều variations")
+print("   _G.testSkipWave() - Test tất cả methods")
+print("   _G.forceSkipWave() - Force skip với tất cả methods")
 print("   _G.showResponses() - Xem tất cả responses")
 print("   _G.clearResponses() - Clear data")
-print("📊 Script sẽ hiển thị chi tiết server response (safe text format)")
+print("📊 Script sẽ capture skip wave từ mọi nguồn có thể!")
+print("⌨️ Nhấn Enter/Space để thử skip wave")
 print("")
