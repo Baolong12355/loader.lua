@@ -84,6 +84,36 @@ end
 --=                      XỬ LÝ SKIP WAVE                                       =
 --==============================================================================
 
+-- Phân tích TXT command thành JSON (từ bản cũ)
+local function parseMacroLine(line)
+    -- Phân tích lệnh skip wave
+    if line:match('TDX:skipWave%(%)') then
+        local currentWave, currentTime = getCurrentWaveAndTime()
+        return {{
+            SkipWhen = currentWave,
+            SkipWave = tostring(convertTimeToNumber(currentTime))
+        }}
+    end
+    return nil
+end
+
+-- Xử lý TXT command và ghi JSON (từ bản cũ)
+local function processAndWriteAction(commandString)
+    print("🔄 Processing command:", commandString)
+    
+    local entries = parseMacroLine(commandString)
+    if entries then
+        for _, entry in ipairs(entries) do
+            print("📝 Adding entry:", HttpService:JSONEncode(entry))
+            table.insert(recordedActions, entry)
+        end
+        updateJsonFile()
+        print("✅ Command processed and saved!")
+    else
+        print("❌ Could not parse command")
+    end
+end
+
 -- Hook namecall để bắt Skip Wave
 local function setupSkipWaveHook()
     if not hookmetamethod or not checkcaller then
@@ -110,19 +140,14 @@ local function setupSkipWaveHook()
                 print("📋 Vote Value:", voteValue, "| Type:", typeof(voteValue))
                 
                 if typeof(voteValue) == "boolean" and voteValue == true then
-                    local currentWave, currentTime = getCurrentWaveAndTime()
-                    print("🌊 Current Wave:", currentWave, "| Time:", currentTime)
+                    -- TẠO TXT COMMAND như bản cũ
+                    local txtCommand = "TDX:skipWave()"
+                    print("📝 TXT Command:", txtCommand)
                     
-                    -- Tạo Skip Wave entry theo định dạng JSON
-                    local skipEntry = {
-                        SkipWhen = currentWave,
-                        SkipWave = tostring(convertTimeToNumber(currentTime))
-                    }
+                    -- XỬ LÝ QUA processAndWriteAction như bản cũ
+                    processAndWriteAction(txtCommand)
                     
-                    print("📝 Skip Entry:", HttpService:JSONEncode(skipEntry))
-                    table.insert(recordedActions, skipEntry)
-                    updateJsonFile()
-                    print("✅ Skip Wave đã được ghi vào JSON!")
+                    print("✅ Skip Wave processed!")
                 else
                     print("❌ Vote value không hợp lệ")
                 end
