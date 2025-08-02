@@ -141,22 +141,6 @@ local function convertTimeToNumber(timeStr)
     return nil
 end
 
--- THÊM: Lấy thông tin wave và time để ghi skip wave
-local function getSkipWaveInfo()
-    local currentWave, currentTime = getCurrentWaveAndTime()
-    if currentWave and currentTime then
-        return currentWave, convertTimeToNumber(currentTime)
-    end
-    return nil, nil
-end
-    if not timeStr then return nil end
-    local mins, secs = timeStr:match("(%d+):(%d+)")
-    if mins and secs then
-        return tonumber(mins) * 100 + tonumber(secs)
-    end
-    return nil
-end
-
 -- THÊM: Lấy tên tower từ hash
 local function GetTowerNameByHash(towerHash)
     if not TowerClass or not TowerClass.GetTowers then return nil end
@@ -207,6 +191,13 @@ local function IsPositionRequiredSkill(towerName, skillIndex)
     return true -- mặc định cần position
 end
 
+-- THÊM: Hàm log thông tin skip wave vote
+local function logSkipWaveVote(voteValue)
+    local timestamp = os.date("[%H:%M:%S]")
+    local status = voteValue and "YES" or "NO"
+    print(string.format("%s 🗳️ Skip Wave Vote Cast: %s", timestamp, status))
+end
+
 -- Cập nhật file JSON với dữ liệu mới
 local function updateJsonFile()
     if not HttpService then return end
@@ -246,6 +237,20 @@ end
 
 -- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
 local function parseMacroLine(line)
+    -- THÊM: Phân tích lệnh skip wave vote
+    local voteValue = line:match('TDX:skipWaveVote%(([^%)]+)%)')
+    if voteValue ~= nil then
+        local currentWave, currentTime = getCurrentWaveAndTime()
+        local vote = voteValue == "true"
+        return {{
+            SkipWhen = convertTimeToNumber(currentTime),
+            time = currentTime,
+            SkipWave = currentWave,
+            wave = currentWave,
+            vote = vote
+        }}
+    end
+
     -- THÊM: Phân tích lệnh moving skill WITH position
     local hash, skillIndex, x, y, z = line:match('TDX:useMovingSkill%(([^,]+),%s*([^,]+),%s*Vector3%.new%(([^,]+),%s*([^,]+),%s*([^%)]+)%)%)')
     if hash and skillIndex and x and y and z then
@@ -332,15 +337,6 @@ local function parseMacroLine(line)
         if pos then
             return {{ SellTower = pos.x }}
         end
-    end
-
-    -- THÊM: Phân tích lệnh skip wave
-    local skipWhen, skipWave = line:match('SkipWhen:([^:]+):SkipWave:([^:]+)')
-    if skipWhen and skipWave then
-        return {{
-            SkipWhen = skipWhen,
-            SkipWave = skipWave
-        }}
     end
 
     return nil
@@ -439,6 +435,25 @@ local function tryConfirm(typeStr, specificHash)
     end
 end
 
+-- THÊM: Hàm xử lý skip wave vote
+local function handleSkipWaveVote(args)
+    if args and args[1] ~= nil then
+        local voteValue = args[1]
+        logSkipWaveVote(voteValue)
+        
+        -- Ghi vào file JSON nếu log được bật
+        local code = string.format("TDX:skipWaveVote(%s)", tostring(voteValue))
+        processAndWriteAction(code)
+        
+        -- Lưu trạng thái vote vào global environment nếu cần
+        globalEnv.LAST_SKIP_WAVE_VOTE = {
+            value = voteValue,
+            timestamp = tick(),
+            player = player.Name
+        }
+    end
+end
+
 -- Xử lý sự kiện đặt/bán tower
 ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
     local d = data and data[1]
@@ -502,15 +517,6 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- THÊM: Xử lý sự kiện skip wave vote (nếu có response từ server)
-pcall(function()
-    if ReplicatedStorage.Remotes:FindFirstChild("SkipWaveVoteResponse") then
-        ReplicatedStorage.Remotes.SkipWaveVoteResponse.OnClientEvent:Connect(function(data)
-            tryConfirm("SkipWave")
-        end)
-    end
-end)
-
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
 pcall(function()
     -- Tạo một event listener giả cho moving skills
@@ -527,24 +533,24 @@ pcall(function()
             end
         end
     end)
+end)
 
-    -- THÊM: Auto confirm skip wave votes sau 0.1 giây
-    task.spawn(function()
-        while task.wait(0.1) do
-            for i = #pendingQueue, 1, -1 do
-                local item = pendingQueue[i]
-                if item.type == "SkipWave" and tick() - item.created > 0.05 then
-                    processAndWriteAction(item.code)
-                    table.remove(pendingQueue, i)
-                end
-            end
-        end
-    end)
+-- THÊM: Lắng nghe response từ server cho skip wave (nếu có)
+pcall(function()
+    if ReplicatedStorage.Remotes:FindFirstChild("SkipWaveVoteResponse") then
+        ReplicatedStorage.Remotes.SkipWaveVoteResponse.OnClientEvent:Connect(function(data)
+            local timestamp = os.date("[%H:%M:%S]")
+            print(string.format("%s 📊 Skip Wave Vote Result: %s", timestamp, tostring(data)))
+        end)
+    end
 end)
 
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
-    -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
+    -- THÊM: Xử lý SkipWaveVoteCast
+    if name == "SkipWaveVoteCast" then
+        handleSkipWaveVote(args)
+    end
 
     -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
     if name == "TowerUseAbilityRequest" then
@@ -592,15 +598,6 @@ local function handleRemote(name, args)
         setPending("Sell", "TDX:sellTower("..tostring(args[1])..")")
     elseif name == "ChangeQueryType" then
         setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
-    elseif name == "SkipWaveVoteCast" then
-        local voteValue = args[1]
-        if typeof(voteValue) == "boolean" and voteValue == true then
-            local skipWhen, skipWave = getSkipWaveInfo()
-            if skipWhen and skipWave then
-                local code = string.format("SkipWhen:%s:SkipWave:%s", tostring(skipWhen), tostring(skipWave))
-                setPending("SkipWave", code)
-            end
-        end
     end
 end
 
@@ -613,23 +610,28 @@ local function setupHooks()
 
     -- Hook FireServer
     local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-        handleRemote(self.Name, {...})
+        if not checkcaller() then
+            handleRemote(self.Name, {...})
+        end
         return oldFireServer(self, ...)
     end)
 
     -- Hook InvokeServer - ĐẶC BIỆT QUAN TRỌNG CHO TowerUseAbilityRequest
     local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-        handleRemote(self.Name, {...})
+        if not checkcaller() then
+            handleRemote(self.Name, {...})
+        end
         return oldInvokeServer(self, ...)
     end)
 
-    -- Hook namecall - QUAN TRỌNG NHẤT CHO ABILITY REQUEST
+    -- Hook namecall - QUAN TRỌNG NHẤT CHO ABILITY REQUEST VÀ SKIP WAVE
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if checkcaller() then return oldNamecall(self, ...) end
-        local method = getnamecallmethod()
-        if method == "FireServer" or method == "InvokeServer" then
-            handleRemote(self.Name, {...})
+        if not checkcaller() then
+            local method = getnamecallmethod()
+            if method == "FireServer" or method == "InvokeServer" then
+                handleRemote(self.Name, {...})
+            end
         end
         return oldNamecall(self, ...)
     end)
@@ -670,7 +672,15 @@ end)
 preserveSuperFunctions()
 setupHooks()
 
-print("✅ TDX Recorder Moving Skills + SkipWave Hook đã hoạt động!")
+-- THÊM: Hàm tiện ích để test skip wave vote
+globalEnv.TDX_SKIP_WAVE = function(vote)
+    vote = vote ~= false -- default true nếu không truyền gì
+    local args = { vote }
+    game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("SkipWaveVoteCast"):FireServer(unpack(args))
+end
+
+print("✅ TDX Recorder với SkipWave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("🗳️ Format SkipWave: SkipWhen:[wave]:SkipWave:[time] - CHỈ GHI KHI VOTE = TRUE")
+print("🗳️ Hỗ trợ ghi nhận skip wave votes!")
+print("💡 Sử dụng: TDX_SKIP_WAVE(true) hoặc TDX_SKIP_WAVE(false) để test")
