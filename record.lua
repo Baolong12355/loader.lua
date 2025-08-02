@@ -330,15 +330,6 @@ local function parseMacroLine(line)
     return nil
 end
 
--- THÊM: Hàm tạo command TXT cho Skip Wave theo format yêu cầu
-local function createSkipWaveCommand(currentWave, currentTime)
-    local timeNum = convertTimeToNumber(currentTime)
-    if currentWave and timeNum then
-        return string.format("SkipWhen:%s:SkipWave:%s", currentWave, timeNum)
-    end
-    return "SkipWhen:?:SkipWave:?"
-end
-
 -- Xử lý một dòng lệnh, phân tích và ghi vào file JSON
 local function processAndWriteAction(commandString)
     -- SỬA: Cải thiện điều kiện ngăn log hành động khi rebuild
@@ -513,35 +504,16 @@ pcall(function()
     end)
 end)
 
--- THÊM: Xử lý Skip Wave với TXT format cho server
-local function handleSkipWave()
-    local currentWave, currentTime = getCurrentWaveAndTime()
-    
-    -- Tạo TXT command cho server (không phải JSON) - đơn giản như script ví dụ
-    local txtCommand = createSkipWaveCommand(currentWave, currentTime)
-    print("📝 Skip Wave TXT Command:", txtCommand)
-    
-    -- Ghi vào JSON local để tracking
-    local code = "TDX:skipWave()"
-    processAndWriteAction(code)
-    
-    return txtCommand
-end
-
 -- Xử lý các lệnh gọi remote (bao gồm SkipWaveVoteCast)
 local function handleRemote(name, args)
-    -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
-
-    -- THÊM: Xử lý SkipWaveVoteCast
+    -- THÊM: Xử lý SkipWaveVoteCast trực tiếp
     if name == "SkipWaveVoteCast" then
         local voteValue = args[1]
-        print("🎯 SKIP WAVE DETECTED! Vote:", voteValue, "Type:", typeof(voteValue))
-        
         if typeof(voteValue) == "boolean" and voteValue == true then
-            local txtCommand = handleSkipWave()
-            print("✅ Skip Wave processed! TXT:", txtCommand)
-        else
-            print("❌ Invalid vote value for skip wave")
+            -- Xử lý trực tiếp (không cần pending vì skip wave không có server response)
+            local code = "TDX:skipWave()"
+            processAndWriteAction(code)
+            print("✅ Skip Wave đã được ghi nhận!")
         end
         return
     end
@@ -598,79 +570,4 @@ end
 -- Hook các hàm remote
 local function setupHooks()
     if not hookfunction or not hookmetamethod or not checkcaller then
-        warn("Executor không hỗ trợ đầy đủ các hàm hook cần thiết.")
-        return
-    end
-
-    -- Hook FireServer
-    local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-        handleRemote(self.Name, {...})
-        return oldFireServer(self, ...)
-    end)
-
-    -- Hook InvokeServer - ĐẶC BIỆT QUAN TRỌNG CHO TowerUseAbilityRequest
-    local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-        handleRemote(self.Name, {...})
-        return oldInvokeServer(self, ...)
-    end)
-
-    -- Hook namecall - QUAN TRỌNG NHẤT CHO TẤT CẢ REMOTE CALLS
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        if checkcaller() then return oldNamecall(self, ...) end
-        local method = getnamecallmethod()
-        if method == "FireServer" or method == "InvokeServer" then
-            local args = {...}
-            local remoteName = self.Name
-
-            -- Debug log cho tất cả remote calls
-            print("🔥 REMOTE:", remoteName, "| METHOD:", method, "| ARGS:", unpack(args))
-            
-            -- Xử lý các remote
-            handleRemote(remoteName, args)
-        end
-        return oldNamecall(self, ...)
-    end)
-end
-
---==============================================================================
---=                         VÒNG LẶP & KHỞI TẠO                               =
---==============================================================================
-
--- Vòng lặp dọn dẹp hàng đợi chờ
-task.spawn(function()
-    while task.wait(0.5) do
-        local now = tick()
-        for i = #pendingQueue, 1, -1 do
-            if now - pendingQueue[i].created > timeout then
-                warn("❌ Không xác thực được: " .. pendingQueue[i].type .. " | Code: " .. pendingQueue[i].code)
-                table.remove(pendingQueue, i)
-            end
-        end
-    end
-end)
-
--- SỬA: Vòng lặp cập nhật vị trí SpawnCFrame của tower
-task.spawn(function()
-    while task.wait() do
-        if TowerClass and TowerClass.GetTowers then
-            for hash, tower in pairs(TowerClass.GetTowers()) do
-                local pos = GetTowerSpawnPosition(tower)
-                if pos then
-                    hash2pos[tostring(hash)] = {x = pos.X, y = pos.Y, z = pos.Z}
-                end
-            end
-        end
-    end
-end)
-
--- Khởi tạo
-preserveSuperFunctions()
-setupHooks()
-
-print("✅ TDX Recorder với Skip Wave Hook đã hoạt động!")
-print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
-print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⏭️ Đã thêm hook cho Skip Wave Vote Cast!")
-print("📝 Skip Wave sẽ được ghi theo format: SkipWhen:wave:SkipWave:time")
-print("🎯 Server sẽ nhận TXT format, local tracking dùng JSON")
+        warn("Executor khô
