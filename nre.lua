@@ -228,6 +228,18 @@ local function preserveSuperFunctions()
     end
 end
 
+-- THÊM: Hàm ghi trực tiếp skip wave (không qua pending)
+local function writeSkipWaveDirectly()
+    local currentWave, currentTime = getCurrentWaveAndTime()
+    local entry = {
+        SkipWhen = currentWave,
+        SkipWave = convertTimeToNumber(currentTime)
+    }
+    table.insert(recordedActions, entry)
+    updateJsonFile()
+    print("✅ Skip Wave đã được ghi trực tiếp:", currentWave, "tại", currentTime)
+end
+
 -- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
 local function parseMacroLine(line)
     -- THÊM: Phân tích lệnh skip wave
@@ -486,9 +498,10 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- THÊM: Xử lý sự kiện skip wave vote
+-- SỬA: Xử lý sự kiện skip wave vote - GHI TRỰC TIẾP
 ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function()
-    tryConfirm("SkipWave")
+    -- Ghi trực tiếp thay vì dùng pending
+    writeSkipWaveDirectly()
 end)
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
@@ -513,10 +526,11 @@ end)
 local function handleRemote(name, args)
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
-    -- THÊM: Xử lý SkipWaveVoteCast
+    -- SỬA: Xử lý SkipWaveVoteCast - GHI TRỰC TIẾP
     if name == "SkipWaveVoteCast" then
         if args and args[1] == true then
-            setPending("SkipWave", "TDX:skipWave()")
+            -- Ghi trực tiếp thay vì dùng pending
+            writeSkipWaveDirectly()
         end
     end
 
@@ -638,4 +652,4 @@ setupHooks()
 print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⏭️ Đã thêm hook Skip Wave Vote!")
+print("⚡ Skip Wave được ghi trực tiếp (không pending)!")
