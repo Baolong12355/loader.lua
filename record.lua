@@ -80,6 +80,19 @@ local function updateJsonFile()
     safeWriteFile(outJson, finalJson)
 end
 
+-- Parse TXT command thành JSON format
+local function parseTxtToJson(txtCommand)
+    -- Parse lệnh skip wave: "TDX:skipWave()"
+    if txtCommand:match('TDX:skipWave%(%)') then
+        local currentWave, currentTime = getCurrentWaveAndTime()
+        return {
+            SkipWhen = currentWave,
+            SkipWave = tostring(convertTimeToNumber(currentTime))
+        }
+    end
+    return nil
+end
+
 --==============================================================================
 --=                      XỬ LÝ SKIP WAVE                                       =
 --==============================================================================
@@ -110,31 +123,30 @@ local function setupSkipWaveHook()
                 print("📋 Vote Value:", voteValue, "| Type:", typeof(voteValue))
                 
                 if typeof(voteValue) == "boolean" and voteValue == true then
-                    -- Tạo TXT command
+                    -- Bước 1: Tạo TXT command (server sẽ nhận cái này)
                     local txtCommand = "TDX:skipWave()"
                     print("📝 TXT Command:", txtCommand)
                     
-                    -- Parse TXT thành JSON format (giống như trong processAndWriteAction)
-                    local currentWave, currentTime = getCurrentWaveAndTime()
-                    local skipEntry = {
-                        SkipWhen = currentWave,
-                        SkipWave = tostring(convertTimeToNumber(currentTime))
-                    }
-                    
-                    print("🌊 Current Wave:", currentWave, "| Time:", currentTime)
-                    print("📋 JSON Entry:", HttpService:JSONEncode(skipEntry))
-                    
-                    -- Ghi vào file JSON
-                    table.insert(recordedActions, skipEntry)
-                    updateJsonFile()
-                    print("✅ Skip Wave đã được ghi vào JSON!")
+                    -- Bước 2: Parse TXT thành JSON format
+                    local jsonEntry = parseTxtToJson(txtCommand)
+                    if jsonEntry then
+                        print("🌊 Current Wave:", jsonEntry.SkipWhen, "| Time:", jsonEntry.SkipWave)
+                        print("📋 JSON Entry:", HttpService:JSONEncode(jsonEntry))
+                        
+                        -- Bước 3: Ghi vào file JSON
+                        table.insert(recordedActions, jsonEntry)
+                        updateJsonFile()
+                        print("✅ Skip Wave đã được ghi vào JSON!")
+                    else
+                        print("❌ Không thể parse TXT command")
+                    end
                 else
                     print("❌ Vote value không hợp lệ")
                 end
             end
         end
         
-        -- Gửi server nguyên bản
+        -- Gửi server nguyên bản (server nhận TXT)
         return oldNamecall(self, ...)
     end)
     
@@ -149,5 +161,5 @@ setupSkipWaveHook()
 
 print("✅ TDX Skip Wave Recorder đã hoạt động!")
 print("📁 File output: " .. outJson)
-print("🎯 Chỉ ghi Skip Wave, bỏ qua các action khác")
+print("🎯 Server nhận TXT, script ghi JSON")
 print("🔍 Sẽ log tất cả remote calls để debug")
