@@ -24,11 +24,12 @@ local timeout = 2
 local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
 local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upgrade sinh đôi
 
--- THÊM: Biến theo dõi trạng thái skip wave
-local skipWaveState = {
-    votingEnabled = false,
-    pendingSkip = false, -- Sẽ lưu command string thay vì boolean
-    lastVoteTime = 0
+-- THÊM: Cache thời gian để xử lý skip wave
+local timeCache = {
+    lastWave = nil,
+    lastTime = nil,
+    cachedTime = nil,
+    lastUpdateTick = 0
 }
 
 -- THÊM: Universal compatibility functions
@@ -122,8 +123,8 @@ local function GetTowerPlaceCostByName(name)
     return 0
 end
 
--- [SỬA LỖI] Lấy thông tin wave và thời gian hiện tại, sử dụng FindFirstChild
-local function getCurrentWaveAndTime()
+-- [SỬA LỖI] Lấy thông tin wave và thời gian hiện tại với caching, sử dụng FindFirstChild
+local function getCurrentWaveAndTime(useCache)
     local playerGui = player:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return nil, nil end
 
@@ -133,8 +134,35 @@ local function getCurrentWaveAndTime()
     local gameInfoBar = interface:FindFirstChild("GameInfoBar")
     if not gameInfoBar then return nil, nil end
 
+    local currentTick = tick()
     local wave = gameInfoBar.Wave.WaveText.Text
     local time = gameInfoBar.TimeLeft.TimeLeftText.Text
+
+    -- Cập nhật cache
+    if not useCache or currentTick - timeCache.lastUpdateTick > 0.1 then
+        -- Kiểm tra nếu thời gian nhảy xuống đột ngột (skip wave được kích hoạt)
+        local timeNum = convertTimeToNumber(time)
+        local lastTimeNum = convertTimeToNumber(timeCache.lastTime)
+        
+        if timeCache.lastTime and timeNum and lastTimeNum then
+            -- Nếu thời gian nhảy xuống dưới 10 giây và trước đó lớn hơn 10 giây
+            -- thì đây là lúc skip wave được kích hoạt
+            if timeNum <= 10 and lastTimeNum > 10 then
+                timeCache.cachedTime = timeCache.lastTime
+                print("🕒 Đã cache thời gian skip wave: " .. timeCache.cachedTime)
+            end
+        end
+        
+        timeCache.lastWave = wave
+        timeCache.lastTime = time
+        timeCache.lastUpdateTick = currentTick
+    end
+
+    -- Trả về thời gian đã cache nếu được yêu cầu và tồn tại
+    if useCache and timeCache.cachedTime then
+        return timeCache.lastWave, timeCache.cachedTime
+    end
+
     return wave, time
 end
 
@@ -237,21 +265,12 @@ end
 
 -- Phân tích một dòng lệnh macro và trả về một bảng dữ liệu
 local function parseMacroLine(line)
-    -- SỬA: Phân tích lệnh skip wave - nhận thời gian từ parameter
-    local skipWave, skipTime = line:match('TDX:skipWave%(([^,]+),%s*([^%)]+)%)')
-    if skipWave and skipTime then
-        return {{
-            SkipWave = skipWave,
-            SkipWhen = tonumber(skipTime)
-        }}
-    end
-    
-    -- Fallback cho format cũ
+    -- SỬA: Phân tích lệnh skip wave với cached time
     if line:match('TDX:skipWave%(%)') then
-        local currentWave, currentTime = getCurrentWaveAndTime()
+        local currentWave, cachedTime = getCurrentWaveAndTime(true) -- Sử dụng cached time
         return {{
             SkipWave = currentWave,
-            SkipWhen = convertTimeToNumber(currentTime)
+            SkipWhen = convertTimeToNumber(cachedTime)
         }}
     end
 
@@ -502,30 +521,11 @@ ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(funct
     end
 end)
 
--- SỬA: Xử lý sự kiện skip wave vote với logic mới - confirm bằng command đã lưu
-ReplicatedStorage.Remotes.SkipWaveVoteStateUpdate.OnClientEvent:Connect(function(data)
-    if not data then return end
-    
-    local votingEnabled = data.VotingEnabled
-    
-    -- Khi voting được bật, reset trạng thái
-    if votingEnabled and not skipWaveState.votingEnabled then
-        skipWaveState.votingEnabled = true
-        skipWaveState.pendingSkip = false
-        
-    end
-    
-    -- Khi voting bị tắt và chúng ta có pending skip
-    if not votingEnabled and skipWaveState.votingEnabled and skipWaveState.pendingSkip then
-        -- SỬA: Sử dụng command đã lưu với thời gian chính xác
-        processAndWriteAction(skipWaveState.pendingSkip)
-        
-        
-        -- Reset trạng thái
-        skipWaveState.pendingSkip = false
-    end
-    
-    skipWaveState.votingEnabled = votingEnabled
+-- SỬA: Xử lý sự kiện skip wave vote với time caching
+ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function()
+    -- Reset cached time sau khi skip wave được confirm
+    timeCache.cachedTime = nil
+    tryConfirm("SkipWave")
 end)
 
 -- THÊM: Xử lý sự kiện moving skill được sử dụng
@@ -546,21 +546,30 @@ pcall(function()
     end)
 end)
 
+-- SỬA: Auto pending cho skip wave với time caching
+task.spawn(function()
+    while task.wait() do
+        -- Auto confirm tất cả skip wave pending sau 0.1 giây
+        for i = #pendingQueue, 1, -1 do
+            local item = pendingQueue[i]
+            if item.type == "SkipWave" and tick() - item.created > 0.1 then
+                processAndWriteAction(item.code)
+                table.remove(pendingQueue, i)
+            end
+        end
+    end
+end)
+
 -- Xử lý các lệnh gọi remote
 local function handleRemote(name, args)
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
-    -- SỬA: Xử lý SkipWaveVoteCast với logic mới - lấy thời gian ngay khi vote
+    -- SỬA: Xử lý SkipWaveVoteCast với time caching
     if name == "SkipWaveVoteCast" then
-        if args and args[1] == true and skipWaveState.votingEnabled then
-            -- Lấy thời gian ngay khi bắt được remote vote
-            local currentWave, currentTime = getCurrentWaveAndTime()
-            local skipCommand = string.format("TDX:skipWave(%s, %s)", currentWave, convertTimeToNumber(currentTime))
-            
-            -- Lưu command với thời gian chính xác
-            skipWaveState.pendingSkip = skipCommand
-            skipWaveState.lastVoteTime = tick()
-            
+        if args and args[1] == true then
+            -- Cập nhật thời gian vào cache trước khi ghi lệnh
+            getCurrentWaveAndTime(false) -- Force update cache
+            setPending("SkipWave", "TDX:skipWave()")
         end
     end
 
@@ -675,13 +684,19 @@ task.spawn(function()
     end
 end)
 
+-- THÊM: Vòng lặp cập nhật cache thời gian liên tục
+task.spawn(function()
+    while task.wait(0.1) do
+        getCurrentWaveAndTime(false) -- Cập nhật cache mỗi 0.1 giây
+    end
+end)
+
 -- Khởi tạo
 preserveSuperFunctions()
 setupHooks()
 
-print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
+print("✅ TDX Recorder Moving Skills + Skip Wave Hook với Time Caching đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⏭️ Đã cải tiến logic Skip Wave Vote!")
-print("🗳️ Skip wave sẽ được ghi với thời gian chính xác!")
-print("⏰ Thời gian skip được lấy ngay khi vote thành công!")
+print("⏭️ Đã thêm hook Skip Wave Vote với Time Caching!")
+print("🕒 Auto cache thời gian mỗi 0.1 giây để xử lý skip wave!")
