@@ -439,7 +439,7 @@ local function SellTowerRetry(axisValue)
             pcall(function()
                 Remotes.SellTower:FireServer(hash)
             end)
-            task.wait(0.1)
+            task.wait()
             if not GetTowerByAxis(axisValue) then return true end
         end
         attempts = attempts + 1
