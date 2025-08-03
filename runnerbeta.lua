@@ -329,7 +329,7 @@ local function ChangeTargetRetry(axisValue, targetType)
             return true
         end
         attempts = attempts + 1
-        task.wait(0.1)
+        task.wait()
     end
     return false
 end
