@@ -128,15 +128,25 @@ local function getCurrentWaveAndTime(useCache)
     local playerGui = player:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return nil, nil end
 
-    -- Sử dụng chuỗi FindFirstChild thay vì FindFirstDescendant
+    -- Sử dụng chuỗi FindFirstChild thay vì FindFirstDescendant với kiểm tra nil đầy đủ
     local interface = playerGui:FindFirstChild("Interface")
     if not interface then return nil, nil end
     local gameInfoBar = interface:FindFirstChild("GameInfoBar")
     if not gameInfoBar then return nil, nil end
+    
+    local waveFrame = gameInfoBar:FindFirstChild("Wave")
+    if not waveFrame then return nil, nil end
+    local waveText = waveFrame:FindFirstChild("WaveText")
+    if not waveText then return nil, nil end
+    
+    local timeFrame = gameInfoBar:FindFirstChild("TimeLeft")
+    if not timeFrame then return nil, nil end
+    local timeText = timeFrame:FindFirstChild("TimeLeftText")
+    if not timeText then return nil, nil end
 
     local currentTick = tick()
-    local wave = gameInfoBar.Wave.WaveText.Text
-    local time = gameInfoBar.TimeLeft.TimeLeftText.Text
+    local wave = waveText.Text
+    local time = timeText.Text
 
     -- Cập nhật cache
     if not useCache or currentTick - timeCache.lastUpdateTick > 0.1 then
@@ -147,9 +157,9 @@ local function getCurrentWaveAndTime(useCache)
         if timeCache.lastTime and timeNum and lastTimeNum then
             -- Nếu thời gian nhảy xuống dưới 10 giây và trước đó lớn hơn 10 giây
             -- thì đây là lúc skip wave được kích hoạt
-            if timeNum <= 10 and lastTimeNum > 10 then
+            if timeNum <= 5 and lastTimeNum > 10 then
                 timeCache.cachedTime = timeCache.lastTime
-                
+                print("🕒 Đã cache thời gian skip wave: " .. timeCache.cachedTime)
             end
         end
         
