@@ -149,7 +149,7 @@ local function getCurrentWaveAndTime(useCache)
             -- thì đây là lúc skip wave được kích hoạt
             if timeNum <= 10 and lastTimeNum > 10 then
                 timeCache.cachedTime = timeCache.lastTime
-                print("🕒 Đã cache thời gian skip wave: " .. timeCache.cachedTime)
+                
             end
         end
         
