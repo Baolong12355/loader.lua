@@ -60,7 +60,8 @@ local defaultConfig = {
     ["MacroStepDelay"] = 0.1,
     ["MaxConcurrentRebuilds"] = 5,
     ["MonitorCheckDelay"] = 0.05,
-    ["AllowParallelTargets"] = false
+    ["AllowParallelTargets"] = false,
+    ["AllowParallelSkips"] = true  -- New option for parallel skip waves
 }
 
 local globalEnv = getGlobalEnv()
@@ -337,26 +338,26 @@ end
 local function SkipWaveRetry()
     local maxAttempts = getMaxAttempts()
     local attempts = 0
-    
+
     local SkipWaveVoteCast = Remotes:FindFirstChild("SkipWaveVoteCast")
     if not SkipWaveVoteCast then
         warn("Không tìm thấy SkipWaveVoteCast remote")
         return false
     end
-    
+
     while attempts < maxAttempts do
         local success = pcall(function()
             SkipWaveVoteCast:FireServer(true)
         end)
-        
+
         if success then
             return true
         end
-        
+
         attempts = attempts + 1
         task.wait(0.1)
     end
-    
+
     return false
 end
 
@@ -462,7 +463,7 @@ local function shouldExecuteEntry(entry, currentWave, currentTime)
         end
         return true
     end
-    
+
     -- Target Change conditions
     if entry.TowerTargetChange then
         if entry.TargetWave and entry.TargetWave ~= currentWave then return false end
@@ -472,7 +473,7 @@ local function shouldExecuteEntry(entry, currentWave, currentTime)
         end
         return true
     end
-    
+
     -- Moving Skill conditions
     if entry.towermoving then
         if entry.wave and entry.wave ~= currentWave then return false end
@@ -482,19 +483,23 @@ local function shouldExecuteEntry(entry, currentWave, currentTime)
         end
         return true
     end
-    
+
     return false
 end
 
 local function executeEntry(entry)
-    -- Skip Wave
+    -- Skip Wave - PARALLEL EXECUTION
     if entry.SkipWave then
-        if SkipWaveRetry() then
-            return true
+        if globalEnv.TDX_Config.AllowParallelSkips then
+            task.spawn(function()
+                SkipWaveRetry()
+            end)
+            return true -- Return immediately for parallel execution
+        else
+            return SkipWaveRetry()
         end
-        return false
     end
-    
+
     -- Target Change - PARALLEL EXECUTION
     if entry.TowerTargetChange then
         if globalEnv.TDX_Config.AllowParallelTargets then
@@ -506,24 +511,24 @@ local function executeEntry(entry)
             return ChangeTargetRetry(entry.TowerTargetChange, entry.TargetWanted)
         end
     end
-    
+
     -- Moving Skill
     if entry.towermoving then
         return UseMovingSkillRetry(entry.towermoving, entry.skillindex, entry.location)
     end
-    
+
     return false
 end
 
 local function StartUnifiedMonitor(monitorEntries, gameUI)
     local processedEntries = {}
-    
+
     task.spawn(function()
         while true do
             local success, currentWave, currentTime = pcall(function()
                 return gameUI.waveText.Text, gameUI.timeText.Text
             end)
-            
+
             if success then
                 for i, entry in ipairs(monitorEntries) do
                     if not processedEntries[i] and shouldExecuteEntry(entry, currentWave, currentTime) then
@@ -533,7 +538,7 @@ local function StartUnifiedMonitor(monitorEntries, gameUI)
                     end
                 end
             end
-            
+
             task.wait(globalEnv.TDX_Config.MonitorCheckDelay or 0.1)
         end
     end)
