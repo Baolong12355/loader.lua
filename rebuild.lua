@@ -21,7 +21,7 @@ local defaultConfig = {
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
-    ["AutoSellConvertDelay"] = 0.1,
+    ["AutoSellConvertDelay"] = 0.2,
     ["PlaceMode"] = "Rewrite", -- Thêm PlaceMode để sử dụng retry logic
     -- SKIP CONFIGURATIONS
     ["SkipTowersAtAxis"] = {},
@@ -611,57 +611,67 @@ task.spawn(function()
 
         -- Producer - Fast detection system with ForceRebuildEvenIfSold support
         for x, records in pairs(towersByAxis) do
-            if globalEnv.TDX_Config.ForceRebuildEvenIfSold or not soldAxis[x] then
+            local shouldProcessTower = true
+
+            -- Check ForceRebuildEvenIfSold logic
+            if not globalEnv.TDX_Config.ForceRebuildEvenIfSold and soldAxis[x] then
+                shouldProcessTower = false
+            end
+
+            if shouldProcessTower then
                 local hash, tower = GetTowerByAxis(x)
 
                 if not hash or not tower then
                     -- Tower không tồn tại (chết HOẶC bị bán)
                     if not activeJobs[x] then -- Chưa có job rebuild
                         -- Check ForceRebuildEvenIfSold setting
+                        local canRebuild = true
                         if soldAxis[x] and not globalEnv.TDX_Config.ForceRebuildEvenIfSold then
                             -- Tower đã bị bán và không force rebuild
-                            goto continue
+                            canRebuild = false
                         end
 
-                        recordTowerDeath(x)
+                        if canRebuild then
+                            recordTowerDeath(x)
 
-                        local towerType = nil
-                        local firstPlaceRecord = nil
-                        local firstPlaceLine = nil
+                            local towerType = nil
+                            local firstPlaceRecord = nil
+                            local firstPlaceLine = nil
 
-                        for _, record in ipairs(records) do
-                            if record.entry.TowerPlaced then 
-                                towerType = record.entry.TowerPlaced
-                                firstPlaceRecord = record
-                                firstPlaceLine = record.line
-                                break
+                            for _, record in ipairs(records) do
+                                if record.entry.TowerPlaced then 
+                                    towerType = record.entry.TowerPlaced
+                                    firstPlaceRecord = record
+                                    firstPlaceLine = record.line
+                                    break
+                                end
                             end
-                        end
 
-                        if towerType then
-                            rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
-                            local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
+                            if towerType then
+                                rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                                local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
 
-                            if not maxRetry or rebuildAttempts[x] <= maxRetry then
-                                -- Add to queue với priority
-                                activeJobs[x] = true
-                                local priority = GetTowerPriority(towerType)
-                                table.insert(jobQueue, { 
-                                    x = x, 
-                                    records = records, 
-                                    priority = priority,
-                                    deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick(),
-                                    towerName = towerType,
-                                    firstPlaceLine = firstPlaceLine
-                                })
+                                if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                                    -- Add to queue với priority
+                                    activeJobs[x] = true
+                                    local priority = GetTowerPriority(towerType)
+                                    table.insert(jobQueue, { 
+                                        x = x, 
+                                        records = records, 
+                                        priority = priority,
+                                        deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick(),
+                                        towerName = towerType,
+                                        firstPlaceLine = firstPlaceLine
+                                    })
 
-                                -- Sort by priority, then by death time (older first)
-                                table.sort(jobQueue, function(a, b) 
-                                    if a.priority == b.priority then
-                                        return a.deathTime < b.deathTime
-                                    end
-                                    return a.priority < b.priority 
-                                end)
+                                    -- Sort by priority, then by death time (older first)
+                                    table.sort(jobQueue, function(a, b) 
+                                        if a.priority == b.priority then
+                                            return a.deathTime < b.deathTime
+                                        end
+                                        return a.priority < b.priority 
+                                    end)
+                                end
                             end
                         end
                     end
@@ -679,7 +689,6 @@ task.spawn(function()
                         end
                     end
                 end
-                ::continue::
             end
         end
 
