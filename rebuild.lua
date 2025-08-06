@@ -17,7 +17,7 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["RebuildPlaceDelay"] = 0.3,
+    ["RebuildPlaceDelay"] = 0.2,
     ["MaxConcurrentRebuilds"] = 5,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
     ["ForceRebuildEvenIfSold"] = false,
@@ -217,7 +217,7 @@ local function PlaceTowerEntry(entry)
     if success then
         local startTime = tick()
         repeat 
-            task.wait(0.1)
+            task.wait()
         until tick() - startTime > 3 or GetTowerByAxis(pos.X)
 
         if GetTowerByAxis(pos.X) then 
@@ -260,7 +260,7 @@ local function UpgradeTowerEntry(entry)
     while attempts < maxAttempts do
         local hash, tower = GetTowerByAxis(axis)
         if not hash or not tower then 
-            task.wait(0.1)
+            task.wait()
             attempts = attempts + 1
             continue 
         end
@@ -282,7 +282,7 @@ local function UpgradeTowerEntry(entry)
         if success then
             local startTime = tick()
             repeat
-                task.wait(0.1)
+                task.wait()
                 local _, t = GetTowerByAxis(axis)
                 if t and t.LevelHandler:GetLevelOnPath(path) > before then 
                     -- THÊM: Xóa khỏi cache khi upgrade thành công
@@ -293,7 +293,7 @@ local function UpgradeTowerEntry(entry)
         end
 
         attempts = attempts + 1
-        task.wait(0.1)
+        task.wait()
     end
     
     -- THÊM: Xóa khỏi cache khi thất bại
