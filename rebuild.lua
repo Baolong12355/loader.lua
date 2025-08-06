@@ -18,14 +18,14 @@ end
 -- Cấu hình mặc định
 local defaultConfig = {
     ["RebuildPlaceDelay"] = 0.2,
-    ["MaxConcurrentRebuilds"] = 5,
-    ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
+    ["MaxConcurrentRebuilds"] = 10,
+    ["PriorityRebuildOrder"] = {},
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
     ["AutoSellConvertDelay"] = 0.2,
     -- SKIP CONFIGURATIONS
     ["SkipTowersAtAxis"] = {},
-    ["SkipTowersByName"] = {"Slammer", "Toxicnator"},
+    ["SkipTowersByName"] = {},
     ["SkipTowersByLine"] = {},
 }
 
@@ -100,13 +100,13 @@ task.spawn(function()
                 if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
                     local pos = spawnCFrame.Position
                     local x = pos.X
-                    
+
                     if soldConvertedX[x] then
                         -- Tower mới bị convert tại vị trí đã từng có convert
                         -- Reset và sell tower mới
                         soldConvertedX[x] = nil
                     end
-                    
+
                     if not soldConvertedX[x] then
                         pcall(function()
                             Remotes.SellTower:FireServer(hash)
@@ -197,10 +197,10 @@ local function PlaceTowerEntry(entry)
 
     local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
     local axisX = pos.X
-    
+
     -- THÊM: Thêm vào cache rebuild
     AddToRebuildCache(axisX)
-    
+
     WaitForCash(entry.TowerPlaceCost or 0)
 
     local args = {
@@ -227,7 +227,7 @@ local function PlaceTowerEntry(entry)
             return true
         end
     end
-    
+
     -- THÊM: Xóa khỏi cache khi thất bại
     RemoveFromRebuildCache(axisX)
     return false
@@ -295,7 +295,7 @@ local function UpgradeTowerEntry(entry)
         attempts = attempts + 1
         task.wait()
     end
-    
+
     -- THÊM: Xóa khỏi cache khi thất bại
     RemoveFromRebuildCache(axis)
     return false
@@ -314,7 +314,7 @@ local function ChangeTargetEntry(entry)
     pcall(function()
         Remotes.ChangeQueryType:FireServer(hash, entry.TargetWanted)
     end)
-    
+
     -- THÊM: Xóa khỏi cache sau khi thay đổi target
     RemoveFromRebuildCache(axis)
     return true
@@ -450,7 +450,7 @@ local function RebuildTowerSequence(records)
                 rebuildSuccess = false
                 break
             end
-            task.wait(0.1)
+            task.wait()
         end
     end
 
