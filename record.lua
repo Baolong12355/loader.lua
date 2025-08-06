@@ -1,6 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 local PlayerScripts = player:WaitForChild("PlayerScripts")
 
@@ -509,16 +510,14 @@ pcall(function()
     end)
 end)
 
--- THÊM: Auto pending cho skip wave mỗi 0.1 giây
-task.spawn(function()
-    while task.wait() do
-        -- Auto confirm tất cả skip wave pending sau 0.1 giây
-        for i = #pendingQueue, 1, -1 do
-            local item = pendingQueue[i]
-            if item.type == "SkipWave" and tick() - item.created > 0.1 then
-                processAndWriteAction(item.code)
-                table.remove(pendingQueue, i)
-            end
+-- THÊM: Auto pending cho skip wave với heartbeat connection
+local skipWaveConnection = RunService.Heartbeat:Connect(function()
+    -- Auto confirm tất cả skip wave pending sau 0.1 giây
+    for i = #pendingQueue, 1, -1 do
+        local item = pendingQueue[i]
+        if item.type == "SkipWave" and tick() - item.created > 0.1 then
+            processAndWriteAction(item.code)
+            table.remove(pendingQueue, i)
         end
     end
 end)
@@ -645,6 +644,17 @@ task.spawn(function()
     end
 end)
 
+-- Cleanup function để disconnect khi cần thiết
+local function cleanupSkipWaveConnection()
+    if skipWaveConnection then
+        skipWaveConnection:Disconnect()
+        skipWaveConnection = nil
+    end
+end
+
+-- Lưu cleanup function vào global environment
+getGlobalEnv().TDX_CLEANUP_SKIP_WAVE = cleanupSkipWaveConnection
+
 -- Khởi tạo
 preserveSuperFunctions()
 setupHooks()
@@ -653,4 +663,4 @@ print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
 print("⏭️ Đã thêm hook Skip Wave Vote!")
-print("🔄 Auto pending Skip Wave mỗi 0 giây!")
+print("🚀 Skip Wave sử dụng RunService.Heartbeat để tối ưu hiệu suất!")
