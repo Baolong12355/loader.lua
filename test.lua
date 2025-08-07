@@ -17,7 +17,7 @@ end
 
 -- Cấu hình mặc định với logic sửa lỗi
 local defaultConfig = {
-    ["RebuildPlaceDelay"] = 0.1,
+    ["RebuildPlaceDelay"] = 0.3,
     ["MaxConcurrentRebuilds"] = 10,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
     ["ForceRebuildEvenIfSold"] = false, -- SỬA: Mặc định false để tránh lỗi
