@@ -76,9 +76,6 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể load TowerClass!") end
 
--- Cache tower đang rebuild - REMOVED old functions
--- Now using direct globalEnv.TDX_REBUILDING_TOWERS access for recorder compatibility
-
 -- AUTO SELL CONVERTED TOWERS
 local soldConvertedX = {}
 
@@ -176,7 +173,7 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
 end
 
 -- Đặt lại tower (ABSOLUTELY NO TIMEOUT)
-local function PlaceTowerEntry(entry)
+local function PlaceTowerEntry(entry, axisX)
     local vecTab = {}
     for c in tostring(entry.TowerVector):gmatch("[^,%s]+") do 
         table.insert(vecTab, tonumber(c)) 
@@ -184,9 +181,8 @@ local function PlaceTowerEntry(entry)
     if #vecTab ~= 3 then return false end
 
     local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-    local axisX = pos.X
 
-    -- Mark tower as being rebuilt for recorder integration
+    -- Set rebuilding flag ONLY during the actual operation
     globalEnv.TDX_REBUILDING_TOWERS[axisX] = true
 
     WaitForCash(entry.TowerPlaceCost or 0)
@@ -210,13 +206,12 @@ local function PlaceTowerEntry(entry)
 
         if GetTowerByAxis(pos.X) then 
             task.wait(globalEnv.TDX_Config.RebuildPlaceDelay or 0.2)
-            -- Clear rebuild flag
-            globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
+            -- Don't clear flag here - let the sequence handle it
             return true
         end
     end
 
-    -- Clear rebuild flag on failure
+    -- Clear flag on failure
     globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
     return false
 end
@@ -236,14 +231,11 @@ local function GetCurrentUpgradeCost(tower, path)
 end
 
 -- Nâng cấp tower (ABSOLUTELY NO TIMEOUT) - Optimized for parallel execution
-local function UpgradeTowerEntry(entry)
+local function UpgradeTowerEntry(entry, axisX)
     local axis = tonumber(entry.TowerUpgraded)
     local path = entry.UpgradePath
     local maxAttempts = 3
     local attempts = 0
-
-    -- Mark tower as being rebuilt for recorder integration
-    globalEnv.TDX_REBUILDING_TOWERS[axis] = true
 
     while attempts < maxAttempts do
         local hash, tower = GetTowerByAxis(axis)
@@ -285,21 +277,16 @@ local function UpgradeTowerEntry(entry)
 end
 
 -- Đổi target
-local function ChangeTargetEntry(entry)
+local function ChangeTargetEntry(entry, axisX)
     local axis = tonumber(entry.TowerTargetChange)
     local hash = GetTowerByAxis(axis)
 
     if not hash then return false end
 
-    -- Mark tower as being rebuilt for recorder integration
-    globalEnv.TDX_REBUILDING_TOWERS[axis] = true
-
     pcall(function()
         Remotes.ChangeQueryType:FireServer(hash, entry.TargetWanted)
     end)
 
-    -- Clear rebuild flag immediately after target change
-    globalEnv.TDX_REBUILDING_TOWERS[axis] = nil
     return true
 end
 
@@ -314,7 +301,7 @@ local function HasSkill(axisValue, skillIndex)
     return ability ~= nil
 end
 
-local function UseMovingSkillEntry(entry)
+local function UseMovingSkillEntry(entry, axisX)
     local axisValue = entry.towermoving
     local skillIndex = entry.skillindex
     local location = entry.location
@@ -322,23 +309,17 @@ local function UseMovingSkillEntry(entry)
     local hash, tower = GetTowerByAxis(axisValue)
     if not hash or not tower then return false end
 
-    -- Mark tower as being rebuilt for recorder integration
-    globalEnv.TDX_REBUILDING_TOWERS[axisValue] = true
-
     local TowerUseAbilityRequest = Remotes:FindFirstChild("TowerUseAbilityRequest")
     if not TowerUseAbilityRequest then 
-        globalEnv.TDX_REBUILDING_TOWERS[axisValue] = nil
         return false 
     end
 
     if not tower.AbilityHandler then 
-        globalEnv.TDX_REBUILDING_TOWERS[axisValue] = nil
         return false 
     end
 
     local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
     if not ability then 
-        globalEnv.TDX_REBUILDING_TOWERS[axisValue] = nil
         return false 
     end
 
@@ -372,13 +353,11 @@ local function UseMovingSkillEntry(entry)
         end
     end
 
-    -- Clear rebuild flag after skill usage
-    globalEnv.TDX_REBUILDING_TOWERS[axisValue] = nil
     return success
 end
 
--- Rebuild sequence với parallel upgrades across workers
-local function RebuildTowerSequence(records)
+-- Rebuild sequence với proper flag management
+local function RebuildTowerSequence(records, axisX)
     local placeRecord = nil
     local upgradeRecords = {}
     local targetRecords = {}
@@ -398,17 +377,11 @@ local function RebuildTowerSequence(records)
     end
 
     local rebuildSuccess = true
-    local axisX = nil
-
-    -- Get axis X from place record
-    if placeRecord then
-        axisX = tonumber(placeRecord.entry.TowerVector:match("^([%d%-%.]+),"))
-    end
 
     -- Step 1: Place tower
     if placeRecord then
         local entry = placeRecord.entry
-        if not PlaceTowerEntry(entry) then
+        if not PlaceTowerEntry(entry, axisX) then
             rebuildSuccess = false
         end
     end
@@ -419,16 +392,16 @@ local function RebuildTowerSequence(records)
             local lastMovingRecord = movingRecords[#movingRecords]
             local entry = lastMovingRecord.entry
 
-            -- Wait vô hạn cho skill tồn tại
-            while not HasSkill(entry.towermoving, entry.skillindex) do
+            -- Wait VÔ HẠN cho skill tồn tại - NEVER TIMEOUT
+            repeat
                 RunService.Heartbeat:Wait()
-            end
+            until HasSkill(entry.towermoving, entry.skillindex)
 
-            UseMovingSkillEntry(entry)
+            UseMovingSkillEntry(entry, axisX)
         end)
     end
 
-    -- Step 3: PARALLEL UPGRADES - Spawn separate tasks for each upgrade
+    -- Step 3: PARALLEL UPGRADES - NEVER TIMEOUT
     if rebuildSuccess and #upgradeRecords > 0 then
         table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
         
@@ -438,7 +411,7 @@ local function RebuildTowerSequence(records)
         for i, record in ipairs(upgradeRecords) do
             local upgradeTask = task.spawn(function()
                 local entry = record.entry
-                upgradeResults[i] = UpgradeTowerEntry(entry)
+                upgradeResults[i] = UpgradeTowerEntry(entry, axisX)
             end)
             
             table.insert(upgradeTasks, upgradeTask)
@@ -447,8 +420,8 @@ local function RebuildTowerSequence(records)
             task.wait(0.05)
         end
         
-        -- Wait for all upgrades to complete
-        while true do
+        -- Wait VÔ HẠN for all upgrades to complete - NEVER TIMEOUT
+        repeat
             local allComplete = true
             for i = 1, #upgradeRecords do
                 if upgradeResults[i] == nil then
@@ -462,7 +435,7 @@ local function RebuildTowerSequence(records)
             end
             
             RunService.Heartbeat:Wait()
-        end
+        until false -- Will only break when ALL upgrades complete
         
         -- Check if any upgrade failed
         for i = 1, #upgradeRecords do
@@ -477,15 +450,13 @@ local function RebuildTowerSequence(records)
     if rebuildSuccess then
         for _, record in ipairs(targetRecords) do
             local entry = record.entry
-            ChangeTargetEntry(entry)
+            ChangeTargetEntry(entry, axisX)
             task.wait(0.05)
         end
     end
 
-    -- Clear rebuild flag for the entire tower sequence
-    if axisX then
-        globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
-    end
+    -- ALWAYS clear rebuild flag when sequence ends - SUCCESS OR FAILURE
+    globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
 
     return rebuildSuccess
 end
@@ -501,7 +472,7 @@ task.spawn(function()
     local jobQueue = {}
     local activeJobs = {}
 
-    -- Worker function với parallel upgrade support
+    -- Worker function với proper flag management
     local function RebuildWorker()
         task.spawn(function()
             while true do
@@ -521,11 +492,13 @@ task.spawn(function()
 
                     -- Kiểm tra skip trước khi rebuild
                     if not ShouldSkipTower(x, towerName, firstPlaceLine) then
-                        if RebuildTowerSequence(records) then
+                        if RebuildTowerSequence(records, x) then
                             rebuildAttempts[x] = 0
                         end
                     else
                         rebuildAttempts[x] = 0
+                        -- Clear flag for skipped towers
+                        globalEnv.TDX_REBUILDING_TOWERS[x] = nil
                     end
 
                     -- Mark job as completed
@@ -595,7 +568,8 @@ task.spawn(function()
             if globalEnv.TDX_Config.ForceRebuildEvenIfSold or not soldAxis[x] then
                 local hash, tower = GetTowerByAxis(x)
                 if not hash or not tower then
-                    if not activeJobs[x] then
+                    -- Tower is dead - check if we should rebuild
+                    if not activeJobs[x] and not globalEnv.TDX_REBUILDING_TOWERS[x] then
                         rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
                         local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
 
@@ -634,6 +608,8 @@ task.spawn(function()
                 else
                     -- Tower is alive, reset attempts and cancel jobs
                     rebuildAttempts[x] = 0
+                    -- Clear rebuild flag when tower is alive
+                    globalEnv.TDX_REBUILDING_TOWERS[x] = nil
                     if activeJobs[x] then
                         activeJobs[x] = nil
                         for i = #jobQueue, 1, -1 do
