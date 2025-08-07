@@ -15,20 +15,14 @@ local function getGlobalEnv()
     return _G
 end
 
--- Cấu hình mặc định với logic sửa lỗi
+-- Cấu hình mặc định
 local defaultConfig = {
-    ["RebuildPlaceDelay"] = 0.3,
-    ["MaxConcurrentRebuilds"] = 10,
+    ["RebuildPlaceDelay"] = 0.2,
+    ["MaxConcurrentRebuilds"] = 5,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
-    ["ForceRebuildEvenIfSold"] = false, -- SỬA: Mặc định false để tránh lỗi
+    ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
-    ["AutoSellConvertDelay"] = 0.1,
-    ["ParallelUpgrades"] = true,
-    ["UpgradeDelay"] = 0.05,
-    ["PlaceTimeout"] = 2,
-    ["UpgradeTimeout"] = 2,
-    ["RebuildDetectionInterval"] = 0,
-    ["SoldTowerTrackingEnabled"] = true, -- MỚI: Cho phép tắt tracking sold towers
+    ["AutoSellConvertDelay"] = 0.2,
     -- SKIP CONFIGURATIONS
     ["SkipTowersAtAxis"] = {},
     ["SkipTowersByName"] = {},
@@ -38,10 +32,8 @@ local defaultConfig = {
 local globalEnv = getGlobalEnv()
 globalEnv.TDX_Config = globalEnv.TDX_Config or {}
 
--- THÊM: Khởi tạo cache với sold tower tracking được tối ưu
+-- Cache tower đang rebuild
 globalEnv.TDX_REBUILDING_TOWERS = globalEnv.TDX_REBUILDING_TOWERS or {}
-globalEnv.TDX_REBUILD_LOCKS = globalEnv.TDX_REBUILD_LOCKS or {}
-globalEnv.TDX_SOLD_TOWERS = globalEnv.TDX_SOLD_TOWERS or {} -- MỚI: Track towers đã sell
 
 for key, value in pairs(defaultConfig) do
     if globalEnv.TDX_Config[key] == nil then
@@ -84,86 +76,14 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể load TowerClass!") end
 
--- MỚI: Thread-safe lock system với sold tower support
-local function AcquireRebuildLock(axisX)
-    if globalEnv.TDX_REBUILD_LOCKS[axisX] then
-        return false -- Already locked
-    end
-    globalEnv.TDX_REBUILD_LOCKS[axisX] = true
-    globalEnv.TDX_REBUILDING_TOWERS[axisX] = true
-    return true
-end
+-- Cache tower đang rebuild - REMOVED old functions
+-- Now using direct globalEnv.TDX_REBUILDING_TOWERS access for recorder compatibility
 
-local function ReleaseRebuildLock(axisX)
-    globalEnv.TDX_REBUILD_LOCKS[axisX] = nil
-    globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
-end
-
-local function IsRebuildLocked(axisX)
-    return globalEnv.TDX_REBUILD_LOCKS[axisX] == true
-end
-
--- MỚI: Sold tower tracking functions
-local function MarkTowerAsSold(axisX)
-    globalEnv.TDX_SOLD_TOWERS[axisX] = {
-        soldTime = tick(),
-        confirmed = true
-    }
-end
-
-local function IsTowerSold(axisX)
-    return globalEnv.TDX_SOLD_TOWERS[axisX] and globalEnv.TDX_SOLD_TOWERS[axisX].confirmed
-end
-
-local function ClearSoldTowerMark(axisX)
-    globalEnv.TDX_SOLD_TOWERS[axisX] = nil
-end
-
--- MỚI: Tower sell detection system
-local lastKnownTowers = {}
-
-local function UpdateTowerTracking()
-    local currentTowers = {}
-    
-    -- Get current towers
-    for hash, tower in pairs(TowerClass.GetTowers()) do
-        if tower.SpawnCFrame and typeof(tower.SpawnCFrame) == "CFrame" then
-            local x = tower.SpawnCFrame.Position.X
-            currentTowers[x] = {
-                hash = hash,
-                tower = tower,
-                exists = true
-            }
-        end
-    end
-    
-    -- Check for towers that disappeared (potentially sold)
-    for x, oldTowerData in pairs(lastKnownTowers) do
-        if not currentTowers[x] then
-            -- Tower disappeared - could be death or sell
-            -- We'll mark as potentially sold, but not confirmed until we detect actual sell command
-            if not IsTowerSold(x) then
-                -- Tower died naturally, not sold
-                -- Allow rebuild if not in sold list
-            end
-        end
-    end
-    
-    -- Update tracking
-    lastKnownTowers = currentTowers
-end
-
--- ==== IMPROVED AUTO SELL CONVERTED TOWERS ====
+-- AUTO SELL CONVERTED TOWERS
 local soldConvertedX = {}
 
 task.spawn(function()
     while true do
-        -- Update tower tracking for sell detection
-        if globalEnv.TDX_Config.SoldTowerTrackingEnabled then
-            UpdateTowerTracking()
-        end
-        
-        -- Handle converted towers
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower.Converted == true then
                 local spawnCFrame = tower.SpawnCFrame
@@ -180,8 +100,6 @@ task.spawn(function()
                             Remotes.SellTower:FireServer(hash)
                         end)
                         soldConvertedX[x] = true
-                        -- MỚI: Mark as sold to prevent rebuild
-                        MarkTowerAsSold(x)
                         task.wait(globalEnv.TDX_Config.AutoSellConvertDelay)
                     end
                 end
@@ -190,38 +108,6 @@ task.spawn(function()
         RunService.Heartbeat:Wait()
     end
 end)
-
--- MỚI: Hook into sell commands to track manual sells
-local originalFireServer = nil
-local originalInvokeServer = nil
-
-local function setupSellTracking()
-    if not hookfunction then return end
-    
-    -- Hook FireServer để detect sell commands
-    pcall(function()
-        if not originalFireServer then
-            originalFireServer = hookfunction(game.ReplicatedStorage.Remotes.SellTower.FireServer, function(self, hash, ...)
-                -- Track tower being sold
-                if hash then
-                    for towerHash, tower in pairs(TowerClass.GetTowers()) do
-                        if towerHash == hash and tower.SpawnCFrame then
-                            local x = tower.SpawnCFrame.Position.X
-                            MarkTowerAsSold(x)
-                            break
-                        end
-                    end
-                end
-                return originalFireServer(self, hash, ...)
-            end)
-        end
-    end)
-end
-
--- Setup sell tracking nếu có hookfunction
-if hookfunction then
-    setupSellTracking()
-end
 
 local function GetTowerHashBySpawnX(targetX)
     for hash, tower in pairs(TowerClass.GetTowers()) do
@@ -259,6 +145,7 @@ end
 local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
     local config = globalEnv.TDX_Config
 
+    -- Skip theo axis X
     if config.SkipTowersAtAxis then
         for _, skipAxis in ipairs(config.SkipTowersAtAxis) do
             if axisX == skipAxis then
@@ -267,6 +154,7 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
         end
     end
 
+    -- Skip theo tên tower
     if config.SkipTowersByName then
         for _, skipName in ipairs(config.SkipTowersByName) do
             if towerName == skipName then
@@ -275,6 +163,7 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
         end
     end
 
+    -- Skip theo line number
     if config.SkipTowersByLine and firstPlaceLine then
         for _, skipLine in ipairs(config.SkipTowersByLine) do
             if firstPlaceLine == skipLine then
@@ -286,27 +175,7 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
     return false
 end
 
--- MỚI: Improved should rebuild logic
-local function ShouldRebuildTower(axisX)
-    local config = globalEnv.TDX_Config
-    
-    -- Check if tower was sold
-    if IsTowerSold(axisX) then
-        if config.ForceRebuildEvenIfSold then
-            -- Force rebuild even if sold - clear the sold mark
-            ClearSoldTowerMark(axisX)
-            return true
-        else
-            -- Don't rebuild sold towers
-            return false
-        end
-    end
-    
-    -- Tower died naturally, allow rebuild
-    return true
-end
-
--- Optimized place tower với timeout
+-- Đặt lại tower (NO TIMEOUT)
 local function PlaceTowerEntry(entry)
     local vecTab = {}
     for c in tostring(entry.TowerVector):gmatch("[^,%s]+") do 
@@ -316,6 +185,9 @@ local function PlaceTowerEntry(entry)
 
     local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
     local axisX = pos.X
+
+    -- Mark tower as being rebuilt for recorder integration
+    globalEnv.TDX_REBUILDING_TOWERS[axisX] = true
 
     WaitForCash(entry.TowerPlaceCost or 0)
 
@@ -331,20 +203,21 @@ local function PlaceTowerEntry(entry)
     end)
 
     if success then
-        local startTime = tick()
-        local timeout = globalEnv.TDX_Config.PlaceTimeout or 2
+        -- Wait vô hạn cho tower xuất hiện
         repeat 
-            RunService.Heartbeat:Wait()
-        until tick() - startTime > timeout or GetTowerByAxis(pos.X)
+            task.wait()
+        until GetTowerByAxis(pos.X)
 
         if GetTowerByAxis(pos.X) then 
-            -- MỚI: Clear sold mark when tower is successfully placed
-            ClearSoldTowerMark(axisX)
-            task.wait(globalEnv.TDX_Config.RebuildPlaceDelay)
+            task.wait(globalEnv.TDX_Config.RebuildPlaceDelay or 0.2)
+            -- Clear rebuild flag
+            globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
             return true
         end
     end
 
+    -- Clear rebuild flag on failure
+    globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
     return false
 end
 
@@ -362,18 +235,20 @@ local function GetCurrentUpgradeCost(tower, path)
     return math.floor(baseCost * (1 - disc))
 end
 
--- Optimized upgrade tower với timeout
+-- Nâng cấp tower (NO TIMEOUT)
 local function UpgradeTowerEntry(entry)
     local axis = tonumber(entry.TowerUpgraded)
     local path = entry.UpgradePath
     local maxAttempts = 3
     local attempts = 0
-    local timeout = globalEnv.TDX_Config.UpgradeTimeout or 2
+
+    -- Mark tower as being rebuilt for recorder integration
+    globalEnv.TDX_REBUILDING_TOWERS[axis] = true
 
     while attempts < maxAttempts do
         local hash, tower = GetTowerByAxis(axis)
         if not hash or not tower then 
-            RunService.Heartbeat:Wait()
+            task.wait()
             attempts = attempts + 1
             continue 
         end
@@ -381,6 +256,8 @@ local function UpgradeTowerEntry(entry)
         local before = tower.LevelHandler:GetLevelOnPath(path)
         local cost = GetCurrentUpgradeCost(tower, path)
         if not cost then 
+            -- Clear rebuild flag when no upgrade needed
+            globalEnv.TDX_REBUILDING_TOWERS[axis] = nil
             return true 
         end
 
@@ -391,34 +268,42 @@ local function UpgradeTowerEntry(entry)
         end)
 
         if success then
-            local startTime = tick()
+            -- Wait vô hạn cho upgrade hoàn thành
             repeat
-                RunService.Heartbeat:Wait()
+                task.wait()
                 local _, t = GetTowerByAxis(axis)
                 if t and t.LevelHandler:GetLevelOnPath(path) > before then 
+                    -- Don't clear flag here - let sequence handle it
                     return true 
                 end
-            until tick() - startTime > timeout
+            until false -- Will break when upgrade completes
         end
 
         attempts = attempts + 1
-        RunService.Heartbeat:Wait()
+        task.wait()
     end
 
+    -- Clear rebuild flag on failure
+    globalEnv.TDX_REBUILDING_TOWERS[axis] = nil
     return false
 end
 
--- Đổi target với retry logic
+-- Đổi target
 local function ChangeTargetEntry(entry)
     local axis = tonumber(entry.TowerTargetChange)
     local hash = GetTowerByAxis(axis)
 
     if not hash then return false end
 
+    -- Mark tower as being rebuilt for recorder integration
+    globalEnv.TDX_REBUILDING_TOWERS[axis] = true
+
     pcall(function()
         Remotes.ChangeQueryType:FireServer(hash, entry.TargetWanted)
     end)
 
+    -- Clear rebuild flag immediately after target change
+    globalEnv.TDX_REBUILDING_TOWERS[axis] = nil
     return true
 end
 
@@ -441,17 +326,23 @@ local function UseMovingSkillEntry(entry)
     local hash, tower = GetTowerByAxis(axisValue)
     if not hash or not tower then return false end
 
+    -- Mark tower as being rebuilt for recorder integration
+    globalEnv.TDX_REBUILDING_TOWERS[axisValue] = true
+
     local TowerUseAbilityRequest = Remotes:FindFirstChild("TowerUseAbilityRequest")
     if not TowerUseAbilityRequest then 
+        globalEnv.TDX_REBUILDING_TOWERS[axisValue] = nil
         return false 
     end
 
     if not tower.AbilityHandler then 
+        globalEnv.TDX_REBUILDING_TOWERS[axisValue] = nil
         return false 
     end
 
     local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
     if not ability then 
+        globalEnv.TDX_REBUILDING_TOWERS[axisValue] = nil
         return false 
     end
 
@@ -485,78 +376,12 @@ local function UseMovingSkillEntry(entry)
         end
     end
 
+    -- Clear rebuild flag after skill usage
+    globalEnv.TDX_REBUILDING_TOWERS[axisValue] = nil
     return success
 end
 
--- Parallel upgrade system
-local function ParallelUpgradeSystem(upgradeRecords, axisX)
-    if not globalEnv.TDX_Config.ParallelUpgrades then
-        -- Fallback to sequential upgrades
-        table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
-        for _, record in ipairs(upgradeRecords) do
-            local entry = record.entry
-            if not UpgradeTowerEntry(entry) then
-                return false
-            end
-            task.wait(globalEnv.TDX_Config.UpgradeDelay)
-        end
-        return true
-    end
-
-    -- Parallel upgrades with path separation
-    local pathUpgrades = {[1] = {}, [2] = {}}
-    
-    for _, record in ipairs(upgradeRecords) do
-        local entry = record.entry
-        local path = entry.UpgradePath
-        if path == 1 or path == 2 then
-            table.insert(pathUpgrades[path], {record = record, entry = entry})
-        end
-    end
-
-    -- Sort each path by line number
-    for path = 1, 2 do
-        table.sort(pathUpgrades[path], function(a, b) 
-            return a.record.line < b.record.line 
-        end)
-    end
-
-    -- Spawn parallel upgrade tasks for each path
-    local upgradeResults = {}
-    local upgradeTasks = {}
-
-    for path = 1, 2 do
-        if #pathUpgrades[path] > 0 then
-            local task_handle = task.spawn(function()
-                local pathSuccess = true
-                for _, upgradeData in ipairs(pathUpgrades[path]) do
-                    if not UpgradeTowerEntry(upgradeData.entry) then
-                        pathSuccess = false
-                        break
-                    end
-                    task.wait(globalEnv.TDX_Config.UpgradeDelay)
-                end
-                upgradeResults[path] = pathSuccess
-            end)
-            table.insert(upgradeTasks, task_handle)
-        else
-            upgradeResults[path] = true -- No upgrades for this path = success
-        end
-    end
-
-    -- Wait for all upgrade tasks to complete
-    local maxWaitTime = 10 -- Maximum wait time for upgrades
-    local startTime = tick()
-    while (not upgradeResults[1] and not upgradeResults[2]) and (tick() - startTime < maxWaitTime) do
-        RunService.Heartbeat:Wait()
-    end
-
-    -- Check if both paths succeeded
-    local success = (upgradeResults[1] ~= false) and (upgradeResults[2] ~= false)
-    return success
-end
-
--- Optimized rebuild sequence với parallel processing
+-- Rebuild sequence với moving skills
 local function RebuildTowerSequence(records)
     local placeRecord = nil
     local upgradeRecords = {}
@@ -577,6 +402,12 @@ local function RebuildTowerSequence(records)
     end
 
     local rebuildSuccess = true
+    local axisX = nil
+
+    -- Get axis X from place record
+    if placeRecord then
+        axisX = tonumber(placeRecord.entry.TowerVector:match("^([%d%-%.]+),"))
+    end
 
     -- Step 1: Place tower
     if placeRecord then
@@ -592,6 +423,7 @@ local function RebuildTowerSequence(records)
             local lastMovingRecord = movingRecords[#movingRecords]
             local entry = lastMovingRecord.entry
 
+            -- Wait vô hạn cho skill tồn tại
             while not HasSkill(entry.towermoving, entry.skillindex) do
                 RunService.Heartbeat:Wait()
             end
@@ -600,83 +432,82 @@ local function RebuildTowerSequence(records)
         end)
     end
 
-    -- Step 3: Parallel upgrades
-    if rebuildSuccess and #upgradeRecords > 0 then
-        local axisX = placeRecord and tonumber(placeRecord.entry.TowerVector:match("^([%d%-%.]+),")) or 0
-        rebuildSuccess = ParallelUpgradeSystem(upgradeRecords, axisX)
+    -- Step 3: Upgrade towers (in order)
+    if rebuildSuccess then
+        table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
+        for _, record in ipairs(upgradeRecords) do
+            local entry = record.entry
+            if not UpgradeTowerEntry(entry) then
+                rebuildSuccess = false
+                break
+            end
+            task.wait(0.1)
+        end
     end
 
     -- Step 4: Change targets
-    if rebuildSuccess and #targetRecords > 0 then
+    if rebuildSuccess then
         for _, record in ipairs(targetRecords) do
             local entry = record.entry
             ChangeTargetEntry(entry)
-            task.wait(0.02) -- Minimal delay
+            task.wait(0.05)
         end
+    end
+
+    -- Clear rebuild flag for the entire tower sequence
+    if axisX then
+        globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
     end
 
     return rebuildSuccess
 end
 
--- Fast parallel worker system
-local function CreateRebuildWorker(workerId)
-    task.spawn(function()
-        while true do
-            -- Check for available jobs in the global queue
-            local job = nil
-            
-            -- Thread-safe job retrieval
-            pcall(function()
-                if globalEnv.TDX_REBUILD_QUEUE and #globalEnv.TDX_REBUILD_QUEUE > 0 then
-                    job = table.remove(globalEnv.TDX_REBUILD_QUEUE, 1)
-                end
-            end)
-            
-            if job then
-                local x = job.x
-                local records = job.records
-                local towerName = job.towerName
-                local firstPlaceLine = job.firstPlaceLine
-
-                -- Try to acquire lock
-                if AcquireRebuildLock(x) then
-                    -- Check if we should skip this tower
-                    if not ShouldSkipTower(x, towerName, firstPlaceLine) then
-                        local success = RebuildTowerSequence(records)
-                        if success then
-                            -- Reset retry counter on success
-                            globalEnv.TDX_REBUILD_ATTEMPTS = globalEnv.TDX_REBUILD_ATTEMPTS or {}
-                            globalEnv.TDX_REBUILD_ATTEMPTS[x] = 0
-                        end
-                    end
-                    
-                    -- Always release lock
-                    ReleaseRebuildLock(x)
-                end
-            else
-                -- No jobs available, wait briefly
-                RunService.Heartbeat:Wait()
-            end
-        end
-    end)
-end
-
--- SỬA: Hàm chính với logic sold tower được sửa lỗi
+-- Hàm chính với macro sell detection
 task.spawn(function()
     local lastMacroHash = ""
     local towersByAxis = {}
-    
-    -- Initialize global systems
-    globalEnv.TDX_REBUILD_QUEUE = globalEnv.TDX_REBUILD_QUEUE or {}
-    globalEnv.TDX_REBUILD_ATTEMPTS = globalEnv.TDX_REBUILD_ATTEMPTS or {}
+    local soldAxis = {}
+    local rebuildAttempts = {}
 
-    -- Create worker pool
-    for i = 1, globalEnv.TDX_Config.MaxConcurrentRebuilds do
-        CreateRebuildWorker(i)
+    -- Worker system
+    local jobQueue = {}
+    local activeJobs = {}
+
+    -- Worker function
+    local function RebuildWorker()
+        task.spawn(function()
+            while true do
+                if #jobQueue > 0 then
+                    local job = table.remove(jobQueue, 1)
+                    local x = job.x
+                    local records = job.records
+                    local towerName = job.towerName
+                    local firstPlaceLine = job.firstPlaceLine
+
+                    -- Kiểm tra skip trước khi rebuild
+                    if not ShouldSkipTower(x, towerName, firstPlaceLine) then
+                        if RebuildTowerSequence(records) then
+                            rebuildAttempts[x] = 0
+                        end
+                    else
+                        rebuildAttempts[x] = 0
+                    end
+
+                    activeJobs[x] = nil
+                else
+                    RunService.Heartbeat:Wait()
+                end
+            end
+        end)
     end
 
-    -- Fast macro reloading
-    local function ReloadMacro()
+    -- Khởi tạo workers
+    for i = 1, globalEnv.TDX_Config.MaxConcurrentRebuilds do
+        RebuildWorker()
+    end
+
+    while true do
+        -- Reload macro record nếu có thay đổi
         local macroContent = safeReadFile(macroPath)
         if macroContent and #macroContent > 10 then
             local macroHash = tostring(#macroContent) .. "|" .. tostring(macroContent:sub(1,50))
@@ -685,8 +516,15 @@ task.spawn(function()
                 local ok, macro = pcall(function() return HttpService:JSONDecode(macroContent) end)
                 if ok and type(macro) == "table" then
                     towersByAxis = {}
+                    soldAxis = {}
                     for i, entry in ipairs(macro) do
-                        if entry.TowerPlaced and entry.TowerVector then
+                        -- Detect sell commands from macro
+                        if entry.SellTower then
+                            local x = tonumber(entry.SellTower)
+                            if x then
+                                soldAxis[x] = true
+                            end
+                        elseif entry.TowerPlaced and entry.TowerVector then
                             local x = tonumber(entry.TowerVector:match("^([%d%-%.]+),"))
                             if x then
                                 towersByAxis[x] = towersByAxis[x] or {}
@@ -715,55 +553,41 @@ task.spawn(function()
                 end
             end
         end
-    end
 
-    -- Fast detection system với sold tower logic đã sửa
-    local lastDetectionTime = 0
-    
-    while true do
-        local currentTime = tick()
-        
-        -- Rate-limited macro reloading
-        if currentTime - lastDetectionTime > 0.1 then -- 10 FPS detection rate
-            ReloadMacro()
-            lastDetectionTime = currentTime
-        end
-
-        -- Fast tower death detection với sold tower check
+        -- Rebuild nếu phát hiện tower chết
         for x, records in pairs(towersByAxis) do
-            local hash, tower = GetTowerByAxis(x)
-            if not hash or not tower then
-                -- Tower is dead, check if we should rebuild
-                if ShouldRebuildTower(x) and not IsRebuildLocked(x) then
-                    globalEnv.TDX_REBUILD_ATTEMPTS[x] = (globalEnv.TDX_REBUILD_ATTEMPTS[x] or 0) + 1
-                    local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
+            if globalEnv.TDX_Config.ForceRebuildEvenIfSold or not soldAxis[x] then
+                local hash, tower = GetTowerByAxis(x)
+                if not hash or not tower then
+                    if not activeJobs[x] then
+                        rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                        local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
 
-                    if not maxRetry or globalEnv.TDX_REBUILD_ATTEMPTS[x] <= maxRetry then
-                        local towerType = nil
-                        local firstPlaceLine = nil
+                        if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                            local towerType = nil
+                            local firstPlaceLine = nil
 
-                        for _, record in ipairs(records) do
-                            if record.entry.TowerPlaced then 
-                                towerType = record.entry.TowerPlaced
-                                firstPlaceLine = record.line
-                                break
+                            for _, record in ipairs(records) do
+                                if record.entry.TowerPlaced then 
+                                    towerType = record.entry.TowerPlaced
+                                    firstPlaceLine = record.line
+                                    break
+                                end
                             end
-                        end
 
-                        if towerType then
-                            local priority = GetTowerPriority(towerType)
-                            local job = { 
+                            activeJobs[x] = true
+                            local priority = GetTowerPriority(towerType or "Unknown")
+                            table.insert(jobQueue, { 
                                 x = x, 
                                 records = records, 
                                 priority = priority,
-                                deathTime = currentTime,
+                                deathTime = tick(),
                                 towerName = towerType,
                                 firstPlaceLine = firstPlaceLine
-                            }
+                            })
 
-                            -- Add to queue with priority sorting
-                            table.insert(globalEnv.TDX_REBUILD_QUEUE, job)
-                            table.sort(globalEnv.TDX_REBUILD_QUEUE, function(a, b) 
+                            -- Sort by priority then by death time
+                            table.sort(jobQueue, function(a, b) 
                                 if a.priority == b.priority then
                                     return a.deathTime < b.deathTime
                                 end
@@ -771,27 +595,22 @@ task.spawn(function()
                             end)
                         end
                     end
-                end
-            else
-                -- Tower is alive, reset attempts and clear sold mark if any
-                globalEnv.TDX_REBUILD_ATTEMPTS[x] = 0
-                ClearSoldTowerMark(x) -- Clear any lingering sold marks
-                -- Remove from queue if exists
-                for i = #globalEnv.TDX_REBUILD_QUEUE, 1, -1 do
-                    if globalEnv.TDX_REBUILD_QUEUE[i].x == x then
-                        table.remove(globalEnv.TDX_REBUILD_QUEUE, i)
-                        break
+                else
+                    -- Tower is alive, reset attempts and cancel jobs
+                    rebuildAttempts[x] = 0
+                    if activeJobs[x] then
+                        activeJobs[x] = nil
+                        for i = #jobQueue, 1, -1 do
+                            if jobQueue[i].x == x then
+                                table.remove(jobQueue, i)
+                                break
+                            end
+                        end
                     end
                 end
             end
         end
 
-        -- High frequency heartbeat for fast detection
-        RunService.Heartbeat:Wait()
+        task.wait()  
     end
 end)
-
-print("✅ Fixed Rebuild System đã khởi động!")
-print("🔧 Đã sửa lỗi ForceRebuildEvenIfSold")
-print("📊 Sold tower tracking: " .. tostring(globalEnv.TDX_Config.SoldTowerTrackingEnabled))
-print("⚡ Parallel processing: " .. tostring(globalEnv.TDX_Config.ParallelUpgrades))
