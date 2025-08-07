@@ -15,31 +15,33 @@ local function getGlobalEnv()
     return _G
 end
 
--- Cấu hình mặc định với tối ưu mới
+-- Cấu hình mặc định với logic sửa lỗi
 local defaultConfig = {
-    ["RebuildPlaceDelay"] = 0.1, -- Giảm delay
-    ["MaxConcurrentRebuilds"] = 10, -- Tăng số worker
+    ["RebuildPlaceDelay"] = 0.1,
+    ["MaxConcurrentRebuilds"] = 10,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
-    ["ForceRebuildEvenIfSold"] = false,
+    ["ForceRebuildEvenIfSold"] = false, -- SỬA: Mặc định false để tránh lỗi
     ["MaxRebuildRetry"] = nil,
-    ["AutoSellConvertDelay"] = 0.1, -- Giảm delay
-    ["ParallelUpgrades"] = true, -- MỚI: cho phép upgrade song song
-    ["UpgradeDelay"] = 0.05, -- MỚI: delay nhỏ giữa upgrades
-    ["PlaceTimeout"] = 5, -- MỚI: timeout cho việc đặt tower
-    ["UpgradeTimeout"] = 5, -- MỚI: timeout cho việc upgrade
-    ["RebuildDetectionInterval"] = 0.1, -- MỚI: interval detect tower chết
+    ["AutoSellConvertDelay"] = 0.1,
+    ["ParallelUpgrades"] = true,
+    ["UpgradeDelay"] = 0.05,
+    ["PlaceTimeout"] = 2,
+    ["UpgradeTimeout"] = 2,
+    ["RebuildDetectionInterval"] = 0.1,
+    ["SoldTowerTrackingEnabled"] = true, -- MỚI: Cho phép tắt tracking sold towers
     -- SKIP CONFIGURATIONS
     ["SkipTowersAtAxis"] = {},
-    ["SkipTowersByName"] = {""},
+    ["SkipTowersByName"] = {},
     ["SkipTowersByLine"] = {},
 }
 
 local globalEnv = getGlobalEnv()
 globalEnv.TDX_Config = globalEnv.TDX_Config or {}
 
--- THÊM: Khởi tạo cache tower đang rebuild với thread-safe
+-- THÊM: Khởi tạo cache với sold tower tracking được tối ưu
 globalEnv.TDX_REBUILDING_TOWERS = globalEnv.TDX_REBUILDING_TOWERS or {}
 globalEnv.TDX_REBUILD_LOCKS = globalEnv.TDX_REBUILD_LOCKS or {}
+globalEnv.TDX_SOLD_TOWERS = globalEnv.TDX_SOLD_TOWERS or {} -- MỚI: Track towers đã sell
 
 for key, value in pairs(defaultConfig) do
     if globalEnv.TDX_Config[key] == nil then
@@ -82,7 +84,7 @@ end
 local TowerClass = LoadTowerClass()
 if not TowerClass then error("Không thể load TowerClass!") end
 
--- MỚI: Thread-safe lock system
+-- MỚI: Thread-safe lock system với sold tower support
 local function AcquireRebuildLock(axisX)
     if globalEnv.TDX_REBUILD_LOCKS[axisX] then
         return false -- Already locked
@@ -101,11 +103,67 @@ local function IsRebuildLocked(axisX)
     return globalEnv.TDX_REBUILD_LOCKS[axisX] == true
 end
 
--- ==== AUTO SELL CONVERTED TOWERS - REBUILD ====
+-- MỚI: Sold tower tracking functions
+local function MarkTowerAsSold(axisX)
+    globalEnv.TDX_SOLD_TOWERS[axisX] = {
+        soldTime = tick(),
+        confirmed = true
+    }
+end
+
+local function IsTowerSold(axisX)
+    return globalEnv.TDX_SOLD_TOWERS[axisX] and globalEnv.TDX_SOLD_TOWERS[axisX].confirmed
+end
+
+local function ClearSoldTowerMark(axisX)
+    globalEnv.TDX_SOLD_TOWERS[axisX] = nil
+end
+
+-- MỚI: Tower sell detection system
+local lastKnownTowers = {}
+
+local function UpdateTowerTracking()
+    local currentTowers = {}
+    
+    -- Get current towers
+    for hash, tower in pairs(TowerClass.GetTowers()) do
+        if tower.SpawnCFrame and typeof(tower.SpawnCFrame) == "CFrame" then
+            local x = tower.SpawnCFrame.Position.X
+            currentTowers[x] = {
+                hash = hash,
+                tower = tower,
+                exists = true
+            }
+        end
+    end
+    
+    -- Check for towers that disappeared (potentially sold)
+    for x, oldTowerData in pairs(lastKnownTowers) do
+        if not currentTowers[x] then
+            -- Tower disappeared - could be death or sell
+            -- We'll mark as potentially sold, but not confirmed until we detect actual sell command
+            if not IsTowerSold(x) then
+                -- Tower died naturally, not sold
+                -- Allow rebuild if not in sold list
+            end
+        end
+    end
+    
+    -- Update tracking
+    lastKnownTowers = currentTowers
+end
+
+-- ==== IMPROVED AUTO SELL CONVERTED TOWERS ====
 local soldConvertedX = {}
 
 task.spawn(function()
     while true do
+        -- Update tower tracking for sell detection
+        if globalEnv.TDX_Config.SoldTowerTrackingEnabled then
+            UpdateTowerTracking()
+        end
+        
+        -- Handle converted towers
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower.Converted == true then
                 local spawnCFrame = tower.SpawnCFrame
@@ -122,6 +180,8 @@ task.spawn(function()
                             Remotes.SellTower:FireServer(hash)
                         end)
                         soldConvertedX[x] = true
+                        -- MỚI: Mark as sold to prevent rebuild
+                        MarkTowerAsSold(x)
                         task.wait(globalEnv.TDX_Config.AutoSellConvertDelay)
                     end
                 end
@@ -130,6 +190,38 @@ task.spawn(function()
         RunService.Heartbeat:Wait()
     end
 end)
+
+-- MỚI: Hook into sell commands to track manual sells
+local originalFireServer = nil
+local originalInvokeServer = nil
+
+local function setupSellTracking()
+    if not hookfunction then return end
+    
+    -- Hook FireServer để detect sell commands
+    pcall(function()
+        if not originalFireServer then
+            originalFireServer = hookfunction(game.ReplicatedStorage.Remotes.SellTower.FireServer, function(self, hash, ...)
+                -- Track tower being sold
+                if hash then
+                    for towerHash, tower in pairs(TowerClass.GetTowers()) do
+                        if towerHash == hash and tower.SpawnCFrame then
+                            local x = tower.SpawnCFrame.Position.X
+                            MarkTowerAsSold(x)
+                            break
+                        end
+                    end
+                end
+                return originalFireServer(self, hash, ...)
+            end)
+        end
+    end)
+end
+
+-- Setup sell tracking nếu có hookfunction
+if hookfunction then
+    setupSellTracking()
+end
 
 local function GetTowerHashBySpawnX(targetX)
     for hash, tower in pairs(TowerClass.GetTowers()) do
@@ -194,7 +286,27 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
     return false
 end
 
--- MỚI: Optimized place tower với timeout
+-- MỚI: Improved should rebuild logic
+local function ShouldRebuildTower(axisX)
+    local config = globalEnv.TDX_Config
+    
+    -- Check if tower was sold
+    if IsTowerSold(axisX) then
+        if config.ForceRebuildEvenIfSold then
+            -- Force rebuild even if sold - clear the sold mark
+            ClearSoldTowerMark(axisX)
+            return true
+        else
+            -- Don't rebuild sold towers
+            return false
+        end
+    end
+    
+    -- Tower died naturally, allow rebuild
+    return true
+end
+
+-- Optimized place tower với timeout
 local function PlaceTowerEntry(entry)
     local vecTab = {}
     for c in tostring(entry.TowerVector):gmatch("[^,%s]+") do 
@@ -226,6 +338,8 @@ local function PlaceTowerEntry(entry)
         until tick() - startTime > timeout or GetTowerByAxis(pos.X)
 
         if GetTowerByAxis(pos.X) then 
+            -- MỚI: Clear sold mark when tower is successfully placed
+            ClearSoldTowerMark(axisX)
             task.wait(globalEnv.TDX_Config.RebuildPlaceDelay)
             return true
         end
@@ -248,7 +362,7 @@ local function GetCurrentUpgradeCost(tower, path)
     return math.floor(baseCost * (1 - disc))
 end
 
--- MỚI: Optimized upgrade tower với timeout
+-- Optimized upgrade tower với timeout
 local function UpgradeTowerEntry(entry)
     local axis = tonumber(entry.TowerUpgraded)
     local path = entry.UpgradePath
@@ -374,7 +488,7 @@ local function UseMovingSkillEntry(entry)
     return success
 end
 
--- MỚI: Parallel upgrade system
+-- Parallel upgrade system
 local function ParallelUpgradeSystem(upgradeRecords, axisX)
     if not globalEnv.TDX_Config.ParallelUpgrades then
         -- Fallback to sequential upgrades
@@ -442,7 +556,7 @@ local function ParallelUpgradeSystem(upgradeRecords, axisX)
     return success
 end
 
--- MỚI: Optimized rebuild sequence với parallel processing
+-- Optimized rebuild sequence với parallel processing
 local function RebuildTowerSequence(records)
     local placeRecord = nil
     local upgradeRecords = {}
@@ -486,7 +600,7 @@ local function RebuildTowerSequence(records)
         end)
     end
 
-    -- Step 3: MỚI: Parallel upgrades
+    -- Step 3: Parallel upgrades
     if rebuildSuccess and #upgradeRecords > 0 then
         local axisX = placeRecord and tonumber(placeRecord.entry.TowerVector:match("^([%d%-%.]+),")) or 0
         rebuildSuccess = ParallelUpgradeSystem(upgradeRecords, axisX)
@@ -504,7 +618,7 @@ local function RebuildTowerSequence(records)
     return rebuildSuccess
 end
 
--- MỚI: Fast parallel worker system
+-- Fast parallel worker system
 local function CreateRebuildWorker(workerId)
     task.spawn(function()
         while true do
@@ -547,11 +661,10 @@ local function CreateRebuildWorker(workerId)
     end)
 end
 
--- Hàm chính với optimized detection và parallel processing
+-- SỬA: Hàm chính với logic sold tower được sửa lỗi
 task.spawn(function()
     local lastMacroHash = ""
     local towersByAxis = {}
-    local soldAxis = {}
     
     -- Initialize global systems
     globalEnv.TDX_REBUILD_QUEUE = globalEnv.TDX_REBUILD_QUEUE or {}
@@ -572,14 +685,8 @@ task.spawn(function()
                 local ok, macro = pcall(function() return HttpService:JSONDecode(macroContent) end)
                 if ok and type(macro) == "table" then
                     towersByAxis = {}
-                    soldAxis = {}
                     for i, entry in ipairs(macro) do
-                        if entry.SellTower then
-                            local x = tonumber(entry.SellTower)
-                            if x then
-                                soldAxis[x] = true
-                            end
-                        elseif entry.TowerPlaced and entry.TowerVector then
+                        if entry.TowerPlaced and entry.TowerVector then
                             local x = tonumber(entry.TowerVector:match("^([%d%-%.]+),"))
                             if x then
                                 towersByAxis[x] = towersByAxis[x] or {}
@@ -610,7 +717,7 @@ task.spawn(function()
         end
     end
 
-    -- Fast detection system
+    -- Fast detection system với sold tower logic đã sửa
     local lastDetectionTime = 0
     
     while true do
@@ -622,59 +729,58 @@ task.spawn(function()
             lastDetectionTime = currentTime
         end
 
-        -- Fast tower death detection
+        -- Fast tower death detection với sold tower check
         for x, records in pairs(towersByAxis) do
-            if globalEnv.TDX_Config.ForceRebuildEvenIfSold or not soldAxis[x] then
-                local hash, tower = GetTowerByAxis(x)
-                if not hash or not tower then
-                    -- Tower is dead and not already being rebuilt
-                    if not IsRebuildLocked(x) then
-                        globalEnv.TDX_REBUILD_ATTEMPTS[x] = (globalEnv.TDX_REBUILD_ATTEMPTS[x] or 0) + 1
-                        local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
+            local hash, tower = GetTowerByAxis(x)
+            if not hash or not tower then
+                -- Tower is dead, check if we should rebuild
+                if ShouldRebuildTower(x) and not IsRebuildLocked(x) then
+                    globalEnv.TDX_REBUILD_ATTEMPTS[x] = (globalEnv.TDX_REBUILD_ATTEMPTS[x] or 0) + 1
+                    local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
 
-                        if not maxRetry or globalEnv.TDX_REBUILD_ATTEMPTS[x] <= maxRetry then
-                            local towerType = nil
-                            local firstPlaceLine = nil
+                    if not maxRetry or globalEnv.TDX_REBUILD_ATTEMPTS[x] <= maxRetry then
+                        local towerType = nil
+                        local firstPlaceLine = nil
 
-                            for _, record in ipairs(records) do
-                                if record.entry.TowerPlaced then 
-                                    towerType = record.entry.TowerPlaced
-                                    firstPlaceLine = record.line
-                                    break
+                        for _, record in ipairs(records) do
+                            if record.entry.TowerPlaced then 
+                                towerType = record.entry.TowerPlaced
+                                firstPlaceLine = record.line
+                                break
+                            end
+                        end
+
+                        if towerType then
+                            local priority = GetTowerPriority(towerType)
+                            local job = { 
+                                x = x, 
+                                records = records, 
+                                priority = priority,
+                                deathTime = currentTime,
+                                towerName = towerType,
+                                firstPlaceLine = firstPlaceLine
+                            }
+
+                            -- Add to queue with priority sorting
+                            table.insert(globalEnv.TDX_REBUILD_QUEUE, job)
+                            table.sort(globalEnv.TDX_REBUILD_QUEUE, function(a, b) 
+                                if a.priority == b.priority then
+                                    return a.deathTime < b.deathTime
                                 end
-                            end
-
-                            if towerType then
-                                local priority = GetTowerPriority(towerType)
-                                local job = { 
-                                    x = x, 
-                                    records = records, 
-                                    priority = priority,
-                                    deathTime = currentTime,
-                                    towerName = towerType,
-                                    firstPlaceLine = firstPlaceLine
-                                }
-
-                                -- Add to queue with priority sorting
-                                table.insert(globalEnv.TDX_REBUILD_QUEUE, job)
-                                table.sort(globalEnv.TDX_REBUILD_QUEUE, function(a, b) 
-                                    if a.priority == b.priority then
-                                        return a.deathTime < b.deathTime
-                                    end
-                                    return a.priority < b.priority 
-                                end)
-                            end
+                                return a.priority < b.priority 
+                            end)
                         end
                     end
-                else
-                    -- Tower is alive, reset attempts
-                    globalEnv.TDX_REBUILD_ATTEMPTS[x] = 0
-                    -- Remove from queue if exists
-                    for i = #globalEnv.TDX_REBUILD_QUEUE, 1, -1 do
-                        if globalEnv.TDX_REBUILD_QUEUE[i].x == x then
-                            table.remove(globalEnv.TDX_REBUILD_QUEUE, i)
-                            break
-                        end
+                end
+            else
+                -- Tower is alive, reset attempts and clear sold mark if any
+                globalEnv.TDX_REBUILD_ATTEMPTS[x] = 0
+                ClearSoldTowerMark(x) -- Clear any lingering sold marks
+                -- Remove from queue if exists
+                for i = #globalEnv.TDX_REBUILD_QUEUE, 1, -1 do
+                    if globalEnv.TDX_REBUILD_QUEUE[i].x == x then
+                        table.remove(globalEnv.TDX_REBUILD_QUEUE, i)
+                        break
                     end
                 end
             end
@@ -684,3 +790,8 @@ task.spawn(function()
         RunService.Heartbeat:Wait()
     end
 end)
+
+print("✅ Fixed Rebuild System đã khởi động!")
+print("🔧 Đã sửa lỗi ForceRebuildEvenIfSold")
+print("📊 Sold tower tracking: " .. tostring(globalEnv.TDX_Config.SoldTowerTrackingEnabled))
+print("⚡ Parallel processing: " .. tostring(globalEnv.TDX_Config.ParallelUpgrades))
