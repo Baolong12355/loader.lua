@@ -106,318 +106,7 @@ local function IsInRebuildCache(axisX)
     return globalEnv.TDX_REBUILDING_TOWERS[axisX] == true
 end
 
--- ==== BATCH PROCESSING SYSTEM ====
-local BatchProcessor = {
-    pendingBatches = {},
-    currentBatch = {
-        towers = {},
-        startTime = tick(),
-        isCollecting = false
-    },
-    batchCounter = 0,
-    prewarmCache = {} -- Cache cho pre-warming
-}
-
--- Thêm tower vào batch hiện tại hoặc xử lý ngay lập tức
-function BatchProcessor:AddTowerToBatch(x, records, towerName, firstPlaceLine, priority, deathTime)
-    if not globalEnv.TDX_Config.BatchProcessingEnabled then
-        return false -- Không sử dụng batch processing
-    end
-
-    local tower = {
-        x = x,
-        records = records,
-        towerName = towerName,
-        firstPlaceLine = firstPlaceLine,
-        priority = priority,
-        deathTime = deathTime
-    }
-
-    -- Instant Mode: Xử lý ngay lập tức nếu bật
-    if globalEnv.TDX_Config.InstantBatchMode then
-        -- Thêm vào batch hiện tại
-        if not self.currentBatch.isCollecting then
-            self.currentBatch.isCollecting = true
-            self.currentBatch.startTime = tick()
-            self.currentBatch.towers = {}
-        end
-
-        table.insert(self.currentBatch.towers, tower)
-        
-        -- Xử lý ngay lập tức nếu đạt batch size hoặc sau 0.1s
-        local shouldProcessNow = false
-        
-        if #self.currentBatch.towers >= globalEnv.TDX_Config.MaxBatchSize then
-            shouldProcessNow = true
-        elseif tick() - self.currentBatch.startTime >= globalEnv.TDX_Config.BatchCollectionTime then
-            shouldProcessNow = true
-        end
-
-        if shouldProcessNow then
-            self:ProcessCurrentBatchInstant()
-        end
-        
-        return true
-    end
-
-    -- Legacy batch mode (giữ nguyên code cũ cho tương thích)
-    -- ... existing batch logic ...
-    return true
-end
-
--- Xử lý batch ngay lập tức (Instant Mode)
-function BatchProcessor:ProcessCurrentBatchInstant()
-    if #self.currentBatch.towers == 0 then
-        self.currentBatch.isCollecting = false
-        return
-    end
-
-    -- Sao chép tất cả tower hiện tại
-    local towersToRebuild = {}
-    for _, tower in ipairs(self.currentBatch.towers) do
-        table.insert(towersToRebuild, tower)
-    end
-
-    -- Reset batch ngay lập tức để có thể nhận tower mới
-    self.currentBatch.towers = {}
-    self.currentBatch.isCollecting = false
-    self.batchCounter = self.batchCounter + 1
-
-    -- Sắp xếp theo priority
-    table.sort(towersToRebuild, function(a, b)
-        if a.priority == b.priority then
-            return a.deathTime < b.deathTime
-        end
-        return a.priority < b.priority
-    end)
-
-    -- Xử lý tất cả tower song song ngay lập tức
-    task.spawn(function()
-        self:ExecuteInstantBatch(towersToRebuild)
-    end)
-end
-
--- Xử lý batch song song hoàn toàn
-function BatchProcessor:ExecuteInstantBatch(towers)
-    if #towers == 0 then return end
-
-    -- Tạo tất cả task song song ngay lập tức
-    local allTasks = {}
-    
-    for _, tower in ipairs(towers) do
-        if not ShouldSkipTower(tower.x, tower.towerName, tower.firstPlaceLine) then
-            -- Mỗi tower có task riêng xử lý hoàn toàn độc lập
-            local task = task.spawn(function()
-                self:RebuildSingleTowerComplete(tower)
-            end)
-            table.insert(allTasks, {task = task, x = tower.x})
-        else
-            -- Clean up skipped tower
-            RemoveFromRebuildCache(tower.x)
-        end
-    end
-    
-    -- Không chờ đợi - batch tiếp theo có thể bắt đầu ngay
-end
-
--- Rebuild hoàn chỉnh một tower (tất cả phases)
-function BatchProcessor:RebuildSingleTowerComplete(tower)
-    AddToRebuildCache(tower.x)
-    
-    -- Phase 1: Place tower
-    local placeSuccess = false
-    local placeRecord = nil
-    
-    for _, record in ipairs(tower.records) do
-        if record.entry.TowerPlaced then
-            placeRecord = record
-            break
-        end
-    end
-    
-    if placeRecord then
-        local entry = placeRecord.entry
-        local vecTab = {}
-        for coord in entry.TowerVector:gmatch("[^,%s]+") do
-            table.insert(vecTab, tonumber(coord))
-        end
-        
-        if #vecTab == 3 then
-            local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-            local args = {
-                tonumber(entry.TowerA1),
-                entry.TowerPlaced,
-                pos,
-                tonumber(entry.Rotation or 0)
-            }
-            
-            WaitForCash(entry.TowerPlaceCost)
-            placeSuccess = PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
-        end
-    end
-    
-    -- Nếu place thất bại, dừng lại
-    if not placeSuccess then
-        RemoveFromRebuildCache(tower.x)
-        return
-    end
-    
-    -- Phase 2: Process upgrades ngay lập tức
-    local upgradeRecords = {}
-    for _, record in ipairs(tower.records) do
-        if record.entry.TowerUpgraded then
-            table.insert(upgradeRecords, record)
-        end
-    end
-    
-    -- Sort và upgrade ngay
-    table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
-    for _, record in ipairs(upgradeRecords) do
-        local entry = record.entry
-        UpgradeTowerRetry(tonumber(entry.TowerUpgraded), entry.UpgradePath)
-    end
-    
-    -- Phase 3: Process targets ngay lập tức
-    local targetRecords = {}
-    for _, record in ipairs(tower.records) do
-        if record.entry.TowerTargetChange then
-            table.insert(targetRecords, record)
-        end
-    end
-    
-    for _, record in ipairs(targetRecords) do
-        local entry = record.entry
-        ChangeTargetRetry(tonumber(entry.TowerTargetChange), entry.TargetWanted)
-    end
-    
-    -- Phase 4: Process moving skills song song
-    local movingRecords = {}
-    for _, record in ipairs(tower.records) do
-        if record.entry.towermoving then
-            table.insert(movingRecords, record)
-        end
-    end
-    
-    if #movingRecords > 0 then
-        task.spawn(function()
-            local lastMovingRecord = movingRecords[#movingRecords]
-            local entry = lastMovingRecord.entry
-            
-            -- Wait for skill availability
-            while not HasSkill(entry.towermoving, entry.skillindex) do
-                RunService.Heartbeat:Wait()
-            end
-            
-            UseMovingSkillRetry(entry.towermoving, entry.skillindex, entry.location)
-        end)
-    end
-    
-    RemoveFromRebuildCache(tower.x)
-end
-
--- Force process batch nếu cần (Instant Mode)
-function BatchProcessor:ForceProcessCurrentBatch()
-    if self.currentBatch.isCollecting and #self.currentBatch.towers > 0 then
-        if globalEnv.TDX_Config.InstantBatchMode then
-            self:ProcessCurrentBatchInstant()
-        else
-            self:ProcessCurrentBatch() -- Legacy mode
-        end
-    end
-end
-
--- ==== AUTO SELL CONVERTED TOWERS - REBUILD ====
-local soldConvertedX = {}
-
-task.spawn(function()
-    while true do
-        -- Cleanup: Xóa tracking cho X positions không còn có converted towers
-        for x in pairs(soldConvertedX) do
-            local hasConvertedAtX = false
-
-            -- Check xem có tower nào converted tại X này không
-            for hash, tower in pairs(TowerClass.GetTowers()) do
-                if tower.Converted == true then
-                    local spawnCFrame = tower.SpawnCFrame
-                    if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                        if spawnCFrame.Position.X == x then
-                            hasConvertedAtX = true
-                            break
-                        end
-                    end
-                end
-            end
-
-            -- Nếu không có converted tower nào tại X này, xóa khỏi tracking
-            if not hasConvertedAtX then
-                soldConvertedX[x] = nil
-            end
-        end
-
-        -- Check và sell converted towers
-        for hash, tower in pairs(TowerClass.GetTowers()) do
-            if tower.Converted == true then
-                local spawnCFrame = tower.SpawnCFrame
-                if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                    local x = spawnCFrame.Position.X
-
-                    if soldConvertedX[x] then
-                        -- Đã từng sell tower converted tại X này
-                        -- Nhưng bây giờ lại có tower converted → nghĩa là tower mới bị convert
-                        -- Reset cache và sell tower mới này
-                        soldConvertedX[x] = nil
-                    end
-
-                    -- Sell nếu chưa tracking X này
-                    if not soldConvertedX[x] then
-                        soldConvertedX[x] = true
-
-                        pcall(function()
-                            Remotes.SellTower:FireServer(hash)
-                        end)
-                        task.wait(0.1)
-                    end
-                end
-            end
-        end
-
-        RunService.Heartbeat:Wait()
-    end
-end)
-
-local function GetTowerHashBySpawnX(targetX)
-    for hash, tower in pairs(TowerClass.GetTowers()) do
-        local spawnCFrame = tower.SpawnCFrame
-        if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-            local pos = spawnCFrame.Position
-            if pos.X == targetX then
-                return hash, tower, pos
-            end
-        end
-    end
-    return nil, nil, nil
-end
-
-local function GetTowerByAxis(axisX)
-    return GetTowerHashBySpawnX(axisX)
-end
-
-local function WaitForCash(amount)
-    while cash.Value < amount do
-        RunService.Heartbeat:Wait()
-    end
-end
-
-local function GetTowerPriority(towerName)
-    for priority, name in ipairs(globalEnv.TDX_Config.PriorityRebuildOrder or {}) do
-        if towerName == name then
-            return priority
-        end
-    end
-    return math.huge
-end
-
--- ==================== SKIP LOGIC ====================
+-- ==================== SKIP LOGIC (ĐỊNH NGHĨA SỚM) ====================
 local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
     local config = globalEnv.TDX_Config
 
@@ -449,6 +138,39 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
     end
 
     return false
+end
+
+-- Utility functions
+local function GetTowerHashBySpawnX(targetX)
+    for hash, tower in pairs(TowerClass.GetTowers()) do
+        local spawnCFrame = tower.SpawnCFrame
+        if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+            local pos = spawnCFrame.Position
+            if pos.X == targetX then
+                return hash, tower, pos
+            end
+        end
+    end
+    return nil, nil, nil
+end
+
+local function GetTowerByAxis(axisX)
+    return GetTowerHashBySpawnX(axisX)
+end
+
+local function WaitForCash(amount)
+    while cash.Value < amount do
+        RunService.Heartbeat:Wait()
+    end
+end
+
+local function GetTowerPriority(towerName)
+    for priority, name in ipairs(globalEnv.TDX_Config.PriorityRebuildOrder or {}) do
+        if towerName == name then
+            return priority
+        end
+    end
+    return math.huge
 end
 
 -- Function để lấy cost upgrade hiện tại
@@ -636,6 +358,284 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
     return false
 end
 
+-- ==== BATCH PROCESSING SYSTEM ====
+local BatchProcessor = {
+    pendingBatches = {},
+    currentBatch = {
+        towers = {},
+        startTime = tick(),
+        isCollecting = false
+    },
+    batchCounter = 0,
+    prewarmCache = {} -- Cache cho pre-warming
+}
+
+-- Rebuild hoàn chỉnh một tower (tất cả phases)
+function BatchProcessor:RebuildSingleTowerComplete(tower)
+    AddToRebuildCache(tower.x)
+    
+    -- Phase 1: Place tower
+    local placeSuccess = false
+    local placeRecord = nil
+    
+    for _, record in ipairs(tower.records) do
+        if record.entry.TowerPlaced then
+            placeRecord = record
+            break
+        end
+    end
+    
+    if placeRecord then
+        local entry = placeRecord.entry
+        local vecTab = {}
+        for coord in entry.TowerVector:gmatch("[^,%s]+") do
+            table.insert(vecTab, tonumber(coord))
+        end
+        
+        if #vecTab == 3 then
+            local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
+            local args = {
+                tonumber(entry.TowerA1),
+                entry.TowerPlaced,
+                pos,
+                tonumber(entry.Rotation or 0)
+            }
+            
+            WaitForCash(entry.TowerPlaceCost)
+            placeSuccess = PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
+        end
+    end
+    
+    -- Nếu place thất bại, dừng lại
+    if not placeSuccess then
+        RemoveFromRebuildCache(tower.x)
+        return
+    end
+    
+    -- Phase 2: Process upgrades ngay lập tức
+    local upgradeRecords = {}
+    for _, record in ipairs(tower.records) do
+        if record.entry.TowerUpgraded then
+            table.insert(upgradeRecords, record)
+        end
+    end
+    
+    -- Sort và upgrade ngay
+    table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
+    for _, record in ipairs(upgradeRecords) do
+        local entry = record.entry
+        UpgradeTowerRetry(tonumber(entry.TowerUpgraded), entry.UpgradePath)
+    end
+    
+    -- Phase 3: Process targets ngay lập tức
+    local targetRecords = {}
+    for _, record in ipairs(tower.records) do
+        if record.entry.TowerTargetChange then
+            table.insert(targetRecords, record)
+        end
+    end
+    
+    for _, record in ipairs(targetRecords) do
+        local entry = record.entry
+        ChangeTargetRetry(tonumber(entry.TowerTargetChange), entry.TargetWanted)
+    end
+    
+    -- Phase 4: Process moving skills song song
+    local movingRecords = {}
+    for _, record in ipairs(tower.records) do
+        if record.entry.towermoving then
+            table.insert(movingRecords, record)
+        end
+    end
+    
+    if #movingRecords > 0 then
+        task.spawn(function()
+            local lastMovingRecord = movingRecords[#movingRecords]
+            local entry = lastMovingRecord.entry
+            
+            -- Wait for skill availability
+            while not HasSkill(entry.towermoving, entry.skillindex) do
+                RunService.Heartbeat:Wait()
+            end
+            
+            UseMovingSkillRetry(entry.towermoving, entry.skillindex, entry.location)
+        end)
+    end
+    
+    RemoveFromRebuildCache(tower.x)
+end
+
+-- Xử lý batch song song hoàn toàn
+function BatchProcessor:ExecuteInstantBatch(towers)
+    if #towers == 0 then return end
+
+    -- Tạo tất cả task song song ngay lập tức
+    local allTasks = {}
+    
+    for _, tower in ipairs(towers) do
+        if not ShouldSkipTower(tower.x, tower.towerName, tower.firstPlaceLine) then
+            -- Mỗi tower có task riêng xử lý hoàn toàn độc lập
+            local task = task.spawn(function()
+                self:RebuildSingleTowerComplete(tower)
+            end)
+            table.insert(allTasks, {task = task, x = tower.x})
+        else
+            -- Clean up skipped tower
+            RemoveFromRebuildCache(tower.x)
+        end
+    end
+    
+    -- Không chờ đợi - batch tiếp theo có thể bắt đầu ngay
+end
+
+-- Xử lý batch ngay lập tức (Instant Mode)
+function BatchProcessor:ProcessCurrentBatchInstant()
+    if #self.currentBatch.towers == 0 then
+        self.currentBatch.isCollecting = false
+        return
+    end
+
+    -- Sao chép tất cả tower hiện tại
+    local towersToRebuild = {}
+    for _, tower in ipairs(self.currentBatch.towers) do
+        table.insert(towersToRebuild, tower)
+    end
+
+    -- Reset batch ngay lập tức để có thể nhận tower mới
+    self.currentBatch.towers = {}
+    self.currentBatch.isCollecting = false
+    self.batchCounter = self.batchCounter + 1
+
+    -- Sắp xếp theo priority
+    table.sort(towersToRebuild, function(a, b)
+        if a.priority == b.priority then
+            return a.deathTime < b.deathTime
+        end
+        return a.priority < b.priority
+    end)
+
+    -- Xử lý tất cả tower song song ngay lập tức
+    task.spawn(function()
+        self:ExecuteInstantBatch(towersToRebuild)
+    end)
+end
+
+-- Thêm tower vào batch hiện tại hoặc xử lý ngay lập tức
+function BatchProcessor:AddTowerToBatch(x, records, towerName, firstPlaceLine, priority, deathTime)
+    if not globalEnv.TDX_Config.BatchProcessingEnabled then
+        return false -- Không sử dụng batch processing
+    end
+
+    local tower = {
+        x = x,
+        records = records,
+        towerName = towerName,
+        firstPlaceLine = firstPlaceLine,
+        priority = priority,
+        deathTime = deathTime
+    }
+
+    -- Instant Mode: Xử lý ngay lập tức nếu bật
+    if globalEnv.TDX_Config.InstantBatchMode then
+        -- Thêm vào batch hiện tại
+        if not self.currentBatch.isCollecting then
+            self.currentBatch.isCollecting = true
+            self.currentBatch.startTime = tick()
+            self.currentBatch.towers = {}
+        end
+
+        table.insert(self.currentBatch.towers, tower)
+        
+        -- Xử lý ngay lập tức nếu đạt batch size hoặc sau 0.1s
+        local shouldProcessNow = false
+        
+        if #self.currentBatch.towers >= globalEnv.TDX_Config.MaxBatchSize then
+            shouldProcessNow = true
+        elseif tick() - self.currentBatch.startTime >= globalEnv.TDX_Config.BatchCollectionTime then
+            shouldProcessNow = true
+        end
+
+        if shouldProcessNow then
+            self:ProcessCurrentBatchInstant()
+        end
+        
+        return true
+    end
+
+    -- Legacy batch mode (giữ nguyên code cũ cho tương thích)
+    return true
+end
+
+-- Force process batch nếu cần (Instant Mode)
+function BatchProcessor:ForceProcessCurrentBatch()
+    if self.currentBatch.isCollecting and #self.currentBatch.towers > 0 then
+        if globalEnv.TDX_Config.InstantBatchMode then
+            self:ProcessCurrentBatchInstant()
+        else
+            -- Legacy mode processing would go here
+        end
+    end
+end
+
+-- ==== AUTO SELL CONVERTED TOWERS - REBUILD ====
+local soldConvertedX = {}
+
+task.spawn(function()
+    while true do
+        -- Cleanup: Xóa tracking cho X positions không còn có converted towers
+        for x in pairs(soldConvertedX) do
+            local hasConvertedAtX = false
+
+            -- Check xem có tower nào converted tại X này không
+            for hash, tower in pairs(TowerClass.GetTowers()) do
+                if tower.Converted == true then
+                    local spawnCFrame = tower.SpawnCFrame
+                    if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                        if spawnCFrame.Position.X == x then
+                            hasConvertedAtX = true
+                            break
+                        end
+                    end
+                end
+            end
+
+            -- Nếu không có converted tower nào tại X này, xóa khỏi tracking
+            if not hasConvertedAtX then
+                soldConvertedX[x] = nil
+            end
+        end
+
+        -- Check và sell converted towers
+        for hash, tower in pairs(TowerClass.GetTowers()) do
+            if tower.Converted == true then
+                local spawnCFrame = tower.SpawnCFrame
+                if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                    local x = spawnCFrame.Position.X
+
+                    if soldConvertedX[x] then
+                        -- Đã từng sell tower converted tại X này
+                        -- Nhưng bây giờ lại có tower converted → nghĩa là tower mới bị convert
+                        -- Reset cache và sell tower mới này
+                        soldConvertedX[x] = nil
+                    end
+
+                    -- Sell nếu chưa tracking X này
+                    if not soldConvertedX[x] then
+                        soldConvertedX[x] = true
+
+                        pcall(function()
+                            Remotes.SellTower:FireServer(hash)
+                        end)
+                        task.wait(0.1)
+                    end
+                end
+            end
+        end
+
+        RunService.Heartbeat:Wait()
+    end
+end)
+
 -- Instant Batch Worker System - Xử lý ngay lập tức
 local function InstantBatchMonitor()
     task.spawn(function()
@@ -655,32 +655,6 @@ end
 -- Khởi tạo Instant Batch Monitor
 if globalEnv.TDX_Config.InstantBatchMode then
     InstantBatchMonitor()
-else
-    -- Legacy Batch Worker System
-    local function BatchWorker()
-        task.spawn(function()
-            while true do
-                if #BatchProcessor.pendingBatches > 0 then
-                    local batch = table.remove(BatchProcessor.pendingBatches, 1)
-                    BatchProcessor:ExecuteBatch(batch)
-                else
-                    -- Force process current batch nếu đã quá thời gian thu thập
-                    if BatchProcessor.currentBatch.isCollecting then
-                        local timeSinceStart = tick() - BatchProcessor.currentBatch.startTime
-                        if timeSinceStart >= globalEnv.TDX_Config.BatchCollectionTime then
-                            BatchProcessor:ForceProcessCurrentBatch()
-                        end
-                    end
-                    task.wait(0.1)
-                end
-            end
-        end)
-    end
-
-    -- Khởi tạo Batch Workers
-    for i = 1, math.min(globalEnv.TDX_Config.MaxConcurrentRebuilds, 3) do
-        BatchWorker()
-    end
 end
 
 -- Hệ thống chính được tối ưu hóa với Batch Processing
