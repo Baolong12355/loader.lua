@@ -8,29 +8,25 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
 local macroPath = "tdx/macros/recorder_output.json"
 
--- Universal compatibility functions
+-- Ronix compatibility function
 local function getGlobalEnv()
-    if getgenv then return getgenv() end
-    if getfenv then return getfenv() end
-    return _G
+    return getgenv and getgenv() or _G
 end
 
--- Cấu hình mặc định
+-- Config
 local defaultConfig = {
-    ["MaxConcurrentRebuilds"] = 5,
-    ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
-    ["ForceRebuildEvenIfSold"] = false,
-    ["MaxRebuildRetry"] = nil,
-    ["AutoSellConvertDelay"] = 0.2,
-    ["PlaceMode"] = "Rewrite",
-    -- SKIP CONFIGURATIONS
-    ["SkipTowersAtAxis"] = {},
-    ["SkipTowersByName"] = {"Slammer", "Toxicnator"},
-    ["SkipTowersByLine"] = {},
-    -- LAG OPTIMIZATION CONFIG
-    ["UseRealTimeDelays"] = true, -- Sử dụng thời gian thực thay vì frame-based
-    ["MaxWaitTime"] = 5, -- Timeout tối đa cho mỗi action
-    ["FastPollingInterval"] = 0.03, -- Polling nhanh hơn
+    MaxConcurrentRebuilds = 5,
+    PriorityRebuildOrder = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
+    ForceRebuildEvenIfSold = false,
+    MaxRebuildRetry = nil,
+    AutoSellConvertDelay = 0.2,
+    PlaceMode = "Rewrite",
+    SkipTowersAtAxis = {},
+    SkipTowersByName = {"Slammer", "Toxicnator"},
+    SkipTowersByLine = {},
+    UseRealTimeDelays = true,
+    MaxWaitTime = 5,
+    FastPollingInterval = 0.03,
 }
 
 local globalEnv = getGlobalEnv()
@@ -43,15 +39,11 @@ for key, value in pairs(defaultConfig) do
     end
 end
 
--- ⚡ LAG-RESISTANT WAIT FUNCTIONS
+-- Real-time delay functions
 local function preciseSleep(duration)
     if globalEnv.TDX_Config.UseRealTimeDelays then
-        -- Sử dụng thời gian thực thay vì frame-based
         local endTime = tick() + duration
-        while tick() < endTime do
-            -- Không sử dụng wait/heartbeat, chỉ check thời gian thực
-            if tick() >= endTime then break end
-        end
+        while tick() < endTime do end
     else
         task.wait(duration)
     end
@@ -72,7 +64,7 @@ local function smartWait(condition, maxTime, pollInterval)
     return condition()
 end
 
--- Retry logic từ runner system
+-- Retry logic
 local function getMaxAttempts()
     local placeMode = globalEnv.TDX_Config.PlaceMode or "Rewrite"
     if placeMode == "Ashed" then
@@ -84,7 +76,7 @@ local function getMaxAttempts()
     end
 end
 
--- Đọc file an toàn
+-- Safe file read
 local function safeReadFile(path)
     if readfile and isfile and isfile(path) then
         local ok, res = pcall(readfile, path)
@@ -93,7 +85,7 @@ local function safeReadFile(path)
     return nil
 end
 
--- Lấy TowerClass
+-- Safe require
 local function SafeRequire(path, timeout)
     timeout = timeout or 5
     local startTime = tick()
@@ -117,9 +109,9 @@ local function LoadTowerClass()
 end
 
 local TowerClass = LoadTowerClass()
-if not TowerClass then error("Không thể load TowerClass!") end
+if not TowerClass then error("Cannot load TowerClass!") end
 
--- Hàm quản lý cache rebuild
+-- Cache management
 local function AddToRebuildCache(axisX)
     globalEnv.TDX_REBUILDING_TOWERS[axisX] = true
 end
@@ -128,20 +120,14 @@ local function RemoveFromRebuildCache(axisX)
     globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
 end
 
-local function IsInRebuildCache(axisX)
-    return globalEnv.TDX_REBUILDING_TOWERS[axisX] == true
-end
-
--- ==== AUTO SELL CONVERTED TOWERS - REBUILD ====
+-- Auto sell converted towers
 local soldConvertedX = {}
 
 task.spawn(function()
     while true do
-        -- Cleanup: Xóa tracking cho X positions không còn có converted towers
+        -- Cleanup tracking
         for x in pairs(soldConvertedX) do
             local hasConvertedAtX = false
-
-            -- Check xem có tower nào converted tại X này không
             for hash, tower in pairs(TowerClass.GetTowers()) do
                 if tower.Converted == true then
                     local spawnCFrame = tower.SpawnCFrame
@@ -153,28 +139,22 @@ task.spawn(function()
                     end
                 end
             end
-
-            -- Nếu không có converted tower nào tại X này, xóa khỏi tracking
             if not hasConvertedAtX then
                 soldConvertedX[x] = nil
             end
         end
 
-        -- Check và sell converted towers
+        -- Check and sell converted towers
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower.Converted == true then
                 local spawnCFrame = tower.SpawnCFrame
                 if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
                     local x = spawnCFrame.Position.X
-
                     if soldConvertedX[x] then
                         soldConvertedX[x] = nil
                     end
-
-                    -- Sell nếu chưa tracking X này
                     if not soldConvertedX[x] then
                         soldConvertedX[x] = true
-
                         pcall(function()
                             Remotes.SellTower:FireServer(hash)
                         end)
@@ -184,7 +164,6 @@ task.spawn(function()
             end
         end
 
-        -- ⚡ Sử dụng real-time interval thay vì Heartbeat
         if globalEnv.TDX_Config.UseRealTimeDelays then
             preciseSleep(0.1)
         else
@@ -213,7 +192,7 @@ end
 local function WaitForCash(amount)
     return smartWait(function()
         return cash.Value >= amount
-    end, 30) -- Max 30 giây chờ tiền
+    end, 30)
 end
 
 local function GetTowerPriority(towerName)
@@ -225,11 +204,10 @@ local function GetTowerPriority(towerName)
     return math.huge
 end
 
--- ==================== SKIP LOGIC ====================
+-- Skip logic
 local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
     local config = globalEnv.TDX_Config
 
-    -- Skip theo axis X
     if config.SkipTowersAtAxis then
         for _, skipAxis in ipairs(config.SkipTowersAtAxis) do
             if axisX == skipAxis then
@@ -238,7 +216,6 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
         end
     end
 
-    -- Skip theo tên tower
     if config.SkipTowersByName then
         for _, skipName in ipairs(config.SkipTowersByName) do
             if towerName == skipName then
@@ -247,7 +224,6 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
         end
     end
 
-    -- Skip theo line number
     if config.SkipTowersByLine and firstPlaceLine then
         for _, skipLine in ipairs(config.SkipTowersByLine) do
             if firstPlaceLine == skipLine then
@@ -259,7 +235,7 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
     return false
 end
 
--- Function để lấy cost upgrade hiện tại
+-- Get upgrade cost
 local function GetCurrentUpgradeCost(tower, path)
     if not tower or not tower.LevelHandler then return nil end
     local maxLvl = tower.LevelHandler:GetMaxLevel()
@@ -273,7 +249,7 @@ local function GetCurrentUpgradeCost(tower, path)
     return math.floor(baseCost * (1 - disc))
 end
 
--- ⚡ LAG-OPTIMIZED: Đặt tower với retry logic
+-- Place tower with retry
 local function PlaceTowerRetry(args, axisValue, towerName)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
@@ -286,7 +262,6 @@ local function PlaceTowerRetry(args, axisValue, towerName)
         end)
         
         if success then
-            -- ⚡ Sử dụng smartWait thay vì polling thủ công
             local placed = smartWait(function()
                 return GetTowerByAxis(axisValue) ~= nil
             end, 3)
@@ -298,14 +273,14 @@ local function PlaceTowerRetry(args, axisValue, towerName)
         end
         
         attempts = attempts + 1
-        preciseSleep(0.05) -- Ngắn hơn và chính xác hơn
+        preciseSleep(0.05)
     end
     
     RemoveFromRebuildCache(axisValue)
     return false
 end
 
--- ⚡ LAG-OPTIMIZED: Nâng cấp tower với retry logic
+-- Upgrade tower with retry
 local function UpgradeTowerRetry(axisValue, path)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
@@ -315,49 +290,47 @@ local function UpgradeTowerRetry(axisValue, path)
     while attempts < maxAttempts do
         local hash, tower = GetTowerByAxis(axisValue)
         if not hash then 
-            preciseSleep(0.05) -- Chờ ngắn hơn
+            preciseSleep(0.05)
             attempts = attempts + 1
-            continue 
-        end
-        
-        local before = tower.LevelHandler:GetLevelOnPath(path)
-        local cost = GetCurrentUpgradeCost(tower, path)
-        if not cost then 
-            RemoveFromRebuildCache(axisValue)
-            return true 
-        end
-        
-        if not WaitForCash(cost) then
-            RemoveFromRebuildCache(axisValue)
-            return false
-        end
-        
-        local success = pcall(function()
-            Remotes.TowerUpgradeRequest:FireServer(hash, path, 1)
-        end)
-        
-        if success then
-            -- ⚡ Sử dụng smartWait cho upgrade confirmation
-            local upgraded = smartWait(function()
-                local _, t = GetTowerByAxis(axisValue)
-                return t and t.LevelHandler:GetLevelOnPath(path) > before
-            end, 3)
-            
-            if upgraded then 
+        else
+            local before = tower.LevelHandler:GetLevelOnPath(path)
+            local cost = GetCurrentUpgradeCost(tower, path)
+            if not cost then 
                 RemoveFromRebuildCache(axisValue)
                 return true 
             end
+            
+            if not WaitForCash(cost) then
+                RemoveFromRebuildCache(axisValue)
+                return false
+            end
+            
+            local success = pcall(function()
+                Remotes.TowerUpgradeRequest:FireServer(hash, path, 1)
+            end)
+            
+            if success then
+                local upgraded = smartWait(function()
+                    local _, t = GetTowerByAxis(axisValue)
+                    return t and t.LevelHandler:GetLevelOnPath(path) > before
+                end, 3)
+                
+                if upgraded then 
+                    RemoveFromRebuildCache(axisValue)
+                    return true 
+                end
+            end
+            
+            attempts = attempts + 1
+            preciseSleep(0.05)
         end
-        
-        attempts = attempts + 1
-        preciseSleep(0.05)
     end
     
     RemoveFromRebuildCache(axisValue)
     return false
 end
 
--- ⚡ LAG-OPTIMIZED: Đổi target với retry logic
+-- Change target with retry
 local function ChangeTargetRetry(axisValue, targetType)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
@@ -374,23 +347,22 @@ local function ChangeTargetRetry(axisValue, targetType)
             return
         end
         attempts = attempts + 1
-        preciseSleep(0.03) -- Nhanh hơn nhiều
+        preciseSleep(0.03)
     end
     RemoveFromRebuildCache(axisValue)
 end
 
--- Function để check xem skill có tồn tại không
+-- Check if skill exists
 local function HasSkill(axisValue, skillIndex)
     local hash, tower = GetTowerByAxis(axisValue)
     if not hash or not tower or not tower.AbilityHandler then
         return false
     end
-
     local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
     return ability ~= nil
 end
 
--- ⚡ LAG-OPTIMIZED: Function để sử dụng moving skill
+-- Use moving skill with retry
 local function UseMovingSkillRetry(axisValue, skillIndex, location)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
@@ -420,7 +392,6 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
 
             local cooldown = ability.CooldownRemaining or 0
             if cooldown > 0 then
-                -- ⚡ Chờ cooldown chính xác hơn
                 preciseSleep(cooldown + 0.1)
             end
 
@@ -459,7 +430,7 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
     return false
 end
 
--- ⚡ PARALLEL WORKER: Rebuild tower với song song processing
+-- Parallel rebuild tower sequence
 local function RebuildTowerSequence(records)
     local placeRecord = nil
     local upgradeRecords = {}
@@ -480,9 +451,8 @@ local function RebuildTowerSequence(records)
     end
 
     local rebuildSuccess = true
-    local parallelTasks = {}
 
-    -- Step 1: Place tower (MUST be first)
+    -- Step 1: Place tower
     if placeRecord then
         local entry = placeRecord.entry
         local vecTab = {}
@@ -510,14 +480,14 @@ local function RebuildTowerSequence(records)
         return false
     end
 
-    -- Step 2: PARALLEL PROCESSING của upgrades, targets, và moving skills
+    -- Step 2: Parallel processing
     local completedTasks = {}
     local totalTasks = 0
 
-    -- ⚡ PARALLEL: Moving Skills Task
+    -- Moving Skills Task
     if #movingRecords > 0 then
         totalTasks = totalTasks + 1
-        table.insert(parallelTasks, task.spawn(function()
+        task.spawn(function()
             local lastMovingRecord = movingRecords[#movingRecords]
             local entry = lastMovingRecord.entry
 
@@ -530,13 +500,13 @@ local function RebuildTowerSequence(records)
             end
             
             completedTasks["moving"] = true
-        end))
+        end)
     end
 
-    -- ⚡ PARALLEL: Upgrades Task (vẫn theo thứ tự nhưng không block other tasks)
+    -- Upgrades Task
     if #upgradeRecords > 0 then
         totalTasks = totalTasks + 1
-        table.insert(parallelTasks, task.spawn(function()
+        task.spawn(function()
             table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
             
             for _, record in ipairs(upgradeRecords) do
@@ -549,14 +519,13 @@ local function RebuildTowerSequence(records)
             end
             
             completedTasks["upgrades"] = true
-        end))
+        end)
     end
 
-    -- ⚡ PARALLEL: Target Changes Task
+    -- Target Changes Task
     if #targetRecords > 0 then
         totalTasks = totalTasks + 1
-        table.insert(parallelTasks, task.spawn(function()
-            -- Wait một chút để upgrade hoàn thành trước
+        task.spawn(function()
             preciseSleep(0.2)
             
             for _, record in ipairs(targetRecords) do
@@ -566,25 +535,24 @@ local function RebuildTowerSequence(records)
             end
             
             completedTasks["targets"] = true
-        end))
+        end)
     end
 
-    -- Wait cho tất cả parallel tasks complete (với timeout)
+    -- Wait for all tasks
     if totalTasks > 0 then
-        local maxWait = 30 -- 30 giây timeout
+        local maxWait = 30
         local waited = smartWait(function()
             local completed = 0
             for _, status in pairs(completedTasks) do
                 if status == true then
                     completed = completed + 1
                 elseif status == false then
-                    return true -- Task failed, stop waiting
+                    return true
                 end
             end
             return completed >= totalTasks
         end, maxWait)
         
-        -- Check if any upgrade task failed
         if completedTasks["upgrades"] == false then
             rebuildSuccess = false
         end
@@ -593,14 +561,13 @@ local function RebuildTowerSequence(records)
     return rebuildSuccess
 end
 
--- ⚡ LAG-OPTIMIZED: Hệ thống chính 
+-- Main system
 task.spawn(function()
     local lastMacroHash = ""
     local towersByAxis = {}
     local soldAxis = {}
     local rebuildAttempts = {}
 
-    -- Tracking system cho towers đã chết
     local deadTowerTracker = {
         deadTowers = {},
         nextDeathId = 1
@@ -620,16 +587,12 @@ task.spawn(function()
         deadTowerTracker.deadTowers[x] = nil
     end
 
-    -- Worker system với PARALLEL processing capability
     local jobQueue = {}
     local activeJobs = {}
     local maxConcurrentJobs = globalEnv.TDX_Config.MaxConcurrentRebuilds
 
-    -- ⚡ PARALLEL WORKER: Mỗi worker xử lý nhiều tasks song song
     local function ParallelRebuildWorker(workerId)
         task.spawn(function()
-            print("🔧 Worker", workerId, "started - Parallel mode")
-            
             while true do
                 if #jobQueue > 0 then
                     local job = table.remove(jobQueue, 1)
@@ -638,43 +601,33 @@ task.spawn(function()
                     local towerName = job.towerName
                     local firstPlaceLine = job.firstPlaceLine
 
-                    print("⚡ Worker", workerId, "processing tower at X:", x, "Type:", towerName)
-
-                    -- Kiểm tra skip trước khi rebuild
                     if not ShouldSkipTower(x, towerName, firstPlaceLine) then
-                        local startTime = tick()
                         local success = RebuildTowerSequence(records)
-                        local duration = tick() - startTime
                         
                         if success then
                             rebuildAttempts[x] = 0
                             clearTowerDeath(x)
-                            print("✅ Worker", workerId, "completed tower", towerName, "in", string.format("%.2f", duration), "seconds")
-                        else
-                            print("❌ Worker", workerId, "failed to rebuild tower", towerName)
                         end
                     else
                         rebuildAttempts[x] = 0
                         clearTowerDeath(x)
-                        print("⏭️ Worker", workerId, "skipped tower", towerName, "at X:", x)
                     end
 
                     activeJobs[x] = nil
                 else
-                    -- ⚡ Sử dụng precise sleep khi không có job
                     preciseSleep(0.1)
                 end
             end
         end)
     end
 
-    -- Khởi tạo parallel workers
+    -- Initialize workers
     for i = 1, maxConcurrentJobs do
         ParallelRebuildWorker(i)
     end
 
     while true do
-        -- Reload macro record nếu có thay đổi
+        -- Reload macro
         local macroContent = safeReadFile(macroPath)
         if macroContent and #macroContent > 10 then
             local macroHash = tostring(#macroContent) .. "|" .. tostring(macroContent:sub(1,50))
@@ -720,11 +673,10 @@ task.spawn(function()
             end
         end
 
-        -- Producer - Fast detection system with ForceRebuildEvenIfSold support
+        -- Producer
         for x, records in pairs(towersByAxis) do
             local shouldProcessTower = true
             
-            -- Check ForceRebuildEvenIfSold logic
             if not globalEnv.TDX_Config.ForceRebuildEvenIfSold and soldAxis[x] then
                 shouldProcessTower = false
             end
@@ -733,12 +685,9 @@ task.spawn(function()
                 local hash, tower = GetTowerByAxis(x)
                 
                 if not hash or not tower then
-                    -- Tower không tồn tại (chết HOẶC bị bán)
-                    if not activeJobs[x] then -- Chưa có job rebuild
-                        -- Check ForceRebuildEvenIfSold setting
+                    if not activeJobs[x] then
                         local canRebuild = true
                         if soldAxis[x] and not globalEnv.TDX_Config.ForceRebuildEvenIfSold then
-                            -- Tower đã bị bán và không force rebuild
                             canRebuild = false
                         end
 
@@ -763,7 +712,6 @@ task.spawn(function()
                                 local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
 
                                 if not maxRetry or rebuildAttempts[x] <= maxRetry then
-                                    -- Add to queue với priority
                                     activeJobs[x] = true
                                     local priority = GetTowerPriority(towerType)
                                     table.insert(jobQueue, { 
@@ -775,7 +723,6 @@ task.spawn(function()
                                         firstPlaceLine = firstPlaceLine
                                     })
 
-                                    -- Sort by priority, then by death time (older first)
                                     table.sort(jobQueue, function(a, b) 
                                         if a.priority == b.priority then
                                             return a.deathTime < b.deathTime
@@ -787,11 +734,9 @@ task.spawn(function()
                         end
                     end
                 else
-                    -- Tower sống, cleanup
                     clearTowerDeath(x)
                     if activeJobs[x] then
                         activeJobs[x] = nil
-                        -- Remove from queue if exists
                         for i = #jobQueue, 1, -1 do
                             if jobQueue[i].x == x then
                                 table.remove(jobQueue, i)
@@ -803,14 +748,6 @@ task.spawn(function()
             end
         end
 
-        -- ⚡ Sử dụng precise sleep cho main loop
         preciseSleep(0.1)
     end
 end)
-
-print("⚡ TDX PARALLEL LAG-OPTIMIZED Rebuild System loaded!")
-print("🔧 Workers:", maxConcurrentJobs, "- Each worker processes tasks in parallel")
-print("🚀 UseRealTimeDelays:", globalEnv.TDX_Config.UseRealTimeDelays)
-print("⏱️ FastPollingInterval:", globalEnv.TDX_Config.FastPollingInterval)
-print("⏰ MaxWaitTime:", globalEnv.TDX_Config.MaxWaitTime)
-print("⚡ Parallel Processing: Upgrades + Moving Skills + Target Changes run simultaneously")
