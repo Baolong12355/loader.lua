@@ -25,7 +25,7 @@ local defaultConfig = {
     ["AutoSellConvertDelay"] = 0.2,
     -- SKIP CONFIGURATIONS
     ["SkipTowersAtAxis"] = {},
-    ["SkipTowersByName"] = {},
+    ["SkipTowersByName"] = {"Slammer", "Toxicnator"},
     ["SkipTowersByLine"] = {},
 }
 
@@ -175,7 +175,7 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
     return false
 end
 
--- Đặt lại tower (NO TIMEOUT)
+-- Đặt lại tower (ABSOLUTELY NO TIMEOUT)
 local function PlaceTowerEntry(entry)
     local vecTab = {}
     for c in tostring(entry.TowerVector):gmatch("[^,%s]+") do 
@@ -203,9 +203,9 @@ local function PlaceTowerEntry(entry)
     end)
 
     if success then
-        -- Wait vô hạn cho tower xuất hiện
+        -- Wait VÔ HẠN cho tower xuất hiện - NEVER TIMEOUT
         repeat 
-            task.wait()
+            task.wait(0.05) -- Faster polling
         until GetTowerByAxis(pos.X)
 
         if GetTowerByAxis(pos.X) then 
@@ -235,7 +235,7 @@ local function GetCurrentUpgradeCost(tower, path)
     return math.floor(baseCost * (1 - disc))
 end
 
--- Nâng cấp tower (NO TIMEOUT)
+-- Nâng cấp tower (ABSOLUTELY NO TIMEOUT) - Optimized for parallel execution
 local function UpgradeTowerEntry(entry)
     local axis = tonumber(entry.TowerUpgraded)
     local path = entry.UpgradePath
@@ -248,7 +248,7 @@ local function UpgradeTowerEntry(entry)
     while attempts < maxAttempts do
         local hash, tower = GetTowerByAxis(axis)
         if not hash or not tower then 
-            task.wait()
+            task.wait(0.1)
             attempts = attempts + 1
             continue 
         end
@@ -256,8 +256,7 @@ local function UpgradeTowerEntry(entry)
         local before = tower.LevelHandler:GetLevelOnPath(path)
         local cost = GetCurrentUpgradeCost(tower, path)
         if not cost then 
-            -- Clear rebuild flag when no upgrade needed
-            globalEnv.TDX_REBUILDING_TOWERS[axis] = nil
+            -- Upgrade already at max level
             return true 
         end
 
@@ -268,23 +267,20 @@ local function UpgradeTowerEntry(entry)
         end)
 
         if success then
-            -- Wait vô hạn cho upgrade hoàn thành
+            -- Wait VÔ HẠN cho upgrade hoàn thành - NO TIMEOUT EVER
             repeat
-                task.wait()
+                task.wait(0.05) -- Smaller wait for faster response
                 local _, t = GetTowerByAxis(axis)
                 if t and t.LevelHandler:GetLevelOnPath(path) > before then 
-                    -- Don't clear flag here - let sequence handle it
                     return true 
                 end
-            until false -- Will break when upgrade completes
+            until false -- Will break ONLY when upgrade completes successfully
         end
 
         attempts = attempts + 1
-        task.wait()
+        task.wait(0.1)
     end
 
-    -- Clear rebuild flag on failure
-    globalEnv.TDX_REBUILDING_TOWERS[axis] = nil
     return false
 end
 
@@ -381,7 +377,7 @@ local function UseMovingSkillEntry(entry)
     return success
 end
 
--- Rebuild sequence với moving skills
+-- Rebuild sequence với parallel upgrades across workers
 local function RebuildTowerSequence(records)
     local placeRecord = nil
     local upgradeRecords = {}
@@ -432,16 +428,48 @@ local function RebuildTowerSequence(records)
         end)
     end
 
-    -- Step 3: Upgrade towers (in order)
-    if rebuildSuccess then
+    -- Step 3: PARALLEL UPGRADES - Spawn separate tasks for each upgrade
+    if rebuildSuccess and #upgradeRecords > 0 then
         table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
-        for _, record in ipairs(upgradeRecords) do
-            local entry = record.entry
-            if not UpgradeTowerEntry(entry) then
+        
+        local upgradeResults = {}
+        local upgradeTasks = {}
+        
+        for i, record in ipairs(upgradeRecords) do
+            local upgradeTask = task.spawn(function()
+                local entry = record.entry
+                upgradeResults[i] = UpgradeTowerEntry(entry)
+            end)
+            
+            table.insert(upgradeTasks, upgradeTask)
+            
+            -- Small stagger delay between upgrade starts
+            task.wait(0.05)
+        end
+        
+        -- Wait for all upgrades to complete
+        while true do
+            local allComplete = true
+            for i = 1, #upgradeRecords do
+                if upgradeResults[i] == nil then
+                    allComplete = false
+                    break
+                end
+            end
+            
+            if allComplete then
+                break
+            end
+            
+            RunService.Heartbeat:Wait()
+        end
+        
+        -- Check if any upgrade failed
+        for i = 1, #upgradeRecords do
+            if not upgradeResults[i] then
                 rebuildSuccess = false
                 break
             end
-            task.wait(0.1)
         end
     end
 
@@ -473,7 +501,7 @@ task.spawn(function()
     local jobQueue = {}
     local activeJobs = {}
 
-    -- Worker function
+    -- Worker function với parallel upgrade support
     local function RebuildWorker()
         task.spawn(function()
             while true do
@@ -484,6 +512,13 @@ task.spawn(function()
                     local towerName = job.towerName
                     local firstPlaceLine = job.firstPlaceLine
 
+                    -- Mark this worker as handling this tower
+                    activeJobs[x] = {
+                        workerId = math.random(1000, 9999),
+                        startTime = tick(),
+                        towerName = towerName
+                    }
+
                     -- Kiểm tra skip trước khi rebuild
                     if not ShouldSkipTower(x, towerName, firstPlaceLine) then
                         if RebuildTowerSequence(records) then
@@ -493,6 +528,7 @@ task.spawn(function()
                         rebuildAttempts[x] = 0
                     end
 
+                    -- Mark job as completed
                     activeJobs[x] = nil
                 else
                     RunService.Heartbeat:Wait()
