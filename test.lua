@@ -27,7 +27,7 @@ local defaultConfig = {
     ["UpgradeDelay"] = 0.05,
     ["PlaceTimeout"] = 2,
     ["UpgradeTimeout"] = 2,
-    ["RebuildDetectionInterval"] = 0.1,
+    ["RebuildDetectionInterval"] = 0,
     ["SoldTowerTrackingEnabled"] = true, -- MỚI: Cho phép tắt tracking sold towers
     -- SKIP CONFIGURATIONS
     ["SkipTowersAtAxis"] = {},
