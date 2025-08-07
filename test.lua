@@ -459,7 +459,7 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
     return false
 end
 
--- Worker function được tối ưu theo runner system
+-- ⚡ PARALLEL WORKER: Rebuild tower với song song processing
 local function RebuildTowerSequence(records)
     local placeRecord = nil
     local upgradeRecords = {}
@@ -480,8 +480,9 @@ local function RebuildTowerSequence(records)
     end
 
     local rebuildSuccess = true
+    local parallelTasks = {}
 
-    -- Step 1: Place tower
+    -- Step 1: Place tower (MUST be first)
     if placeRecord then
         local entry = placeRecord.entry
         local vecTab = {}
@@ -505,42 +506,87 @@ local function RebuildTowerSequence(records)
         end
     end
 
-    -- Step 2: Apply moving skills ASAP when skills become available
-    if rebuildSuccess and #movingRecords > 0 then
-        task.spawn(function()
+    if not rebuildSuccess then
+        return false
+    end
+
+    -- Step 2: PARALLEL PROCESSING của upgrades, targets, và moving skills
+    local completedTasks = {}
+    local totalTasks = 0
+
+    -- ⚡ PARALLEL: Moving Skills Task
+    if #movingRecords > 0 then
+        totalTasks = totalTasks + 1
+        table.insert(parallelTasks, task.spawn(function()
             local lastMovingRecord = movingRecords[#movingRecords]
             local entry = lastMovingRecord.entry
 
-            -- ⚡ Wait for skill với timeout thay vì vòng lặp vô hạn
             local skillReady = smartWait(function()
                 return HasSkill(entry.towermoving, entry.skillindex)
-            end, 10) -- Max 10 giây chờ skill
+            end, 10)
 
             if skillReady then
                 UseMovingSkillRetry(entry.towermoving, entry.skillindex, entry.location)
             end
-        end)
+            
+            completedTasks["moving"] = true
+        end))
     end
 
-    -- Step 3: Upgrade towers (in order) - Run in parallel with moving skills
-    if rebuildSuccess then
-        table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
-        for _, record in ipairs(upgradeRecords) do
-            local entry = record.entry
-            if not UpgradeTowerRetry(tonumber(entry.TowerUpgraded), entry.UpgradePath) then
-                rebuildSuccess = false
-                break
+    -- ⚡ PARALLEL: Upgrades Task (vẫn theo thứ tự nhưng không block other tasks)
+    if #upgradeRecords > 0 then
+        totalTasks = totalTasks + 1
+        table.insert(parallelTasks, task.spawn(function()
+            table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
+            
+            for _, record in ipairs(upgradeRecords) do
+                local entry = record.entry
+                if not UpgradeTowerRetry(tonumber(entry.TowerUpgraded), entry.UpgradePath) then
+                    completedTasks["upgrades"] = false
+                    return
+                end
+                preciseSleep(0.05)
             end
-            preciseSleep(0.05) -- Ngắn hơn nhiều
-        end
+            
+            completedTasks["upgrades"] = true
+        end))
     end
 
-    -- Step 4: Change targets
-    if rebuildSuccess then
-        for _, record in ipairs(targetRecords) do
-            local entry = record.entry
-            ChangeTargetRetry(tonumber(entry.TowerTargetChange), entry.TargetWanted)
-            preciseSleep(0.03) -- Siêu nhanh
+    -- ⚡ PARALLEL: Target Changes Task
+    if #targetRecords > 0 then
+        totalTasks = totalTasks + 1
+        table.insert(parallelTasks, task.spawn(function()
+            -- Wait một chút để upgrade hoàn thành trước
+            preciseSleep(0.2)
+            
+            for _, record in ipairs(targetRecords) do
+                local entry = record.entry
+                ChangeTargetRetry(tonumber(entry.TowerTargetChange), entry.TargetWanted)
+                preciseSleep(0.03)
+            end
+            
+            completedTasks["targets"] = true
+        end))
+    end
+
+    -- Wait cho tất cả parallel tasks complete (với timeout)
+    if totalTasks > 0 then
+        local maxWait = 30 -- 30 giây timeout
+        local waited = smartWait(function()
+            local completed = 0
+            for _, status in pairs(completedTasks) do
+                if status == true then
+                    completed = completed + 1
+                elseif status == false then
+                    return true -- Task failed, stop waiting
+                end
+            end
+            return completed >= totalTasks
+        end, maxWait)
+        
+        -- Check if any upgrade task failed
+        if completedTasks["upgrades"] == false then
+            rebuildSuccess = false
         end
     end
 
@@ -574,13 +620,16 @@ task.spawn(function()
         deadTowerTracker.deadTowers[x] = nil
     end
 
-    -- Worker system
+    -- Worker system với PARALLEL processing capability
     local jobQueue = {}
     local activeJobs = {}
+    local maxConcurrentJobs = globalEnv.TDX_Config.MaxConcurrentRebuilds
 
-    -- Worker function
-    local function RebuildWorker()
+    -- ⚡ PARALLEL WORKER: Mỗi worker xử lý nhiều tasks song song
+    local function ParallelRebuildWorker(workerId)
         task.spawn(function()
+            print("🔧 Worker", workerId, "started - Parallel mode")
+            
             while true do
                 if #jobQueue > 0 then
                     local job = table.remove(jobQueue, 1)
@@ -589,29 +638,39 @@ task.spawn(function()
                     local towerName = job.towerName
                     local firstPlaceLine = job.firstPlaceLine
 
+                    print("⚡ Worker", workerId, "processing tower at X:", x, "Type:", towerName)
+
                     -- Kiểm tra skip trước khi rebuild
                     if not ShouldSkipTower(x, towerName, firstPlaceLine) then
-                        if RebuildTowerSequence(records) then
+                        local startTime = tick()
+                        local success = RebuildTowerSequence(records)
+                        local duration = tick() - startTime
+                        
+                        if success then
                             rebuildAttempts[x] = 0
                             clearTowerDeath(x)
+                            print("✅ Worker", workerId, "completed tower", towerName, "in", string.format("%.2f", duration), "seconds")
+                        else
+                            print("❌ Worker", workerId, "failed to rebuild tower", towerName)
                         end
                     else
                         rebuildAttempts[x] = 0
                         clearTowerDeath(x)
+                        print("⏭️ Worker", workerId, "skipped tower", towerName, "at X:", x)
                     end
 
                     activeJobs[x] = nil
                 else
-                    -- ⚡ Sử dụng precise sleep thay vì Heartbeat
+                    -- ⚡ Sử dụng precise sleep khi không có job
                     preciseSleep(0.1)
                 end
             end
         end)
     end
 
-    -- Khởi tạo workers
-    for i = 1, globalEnv.TDX_Config.MaxConcurrentRebuilds do
-        RebuildWorker()
+    -- Khởi tạo parallel workers
+    for i = 1, maxConcurrentJobs do
+        ParallelRebuildWorker(i)
     end
 
     while true do
@@ -625,4 +684,133 @@ task.spawn(function()
                 if ok and type(macro) == "table" then
                     towersByAxis = {}
                     soldAxis = {}
-                    for i, entry 
+                    for i, entry in ipairs(macro) do
+                        if entry.SellTower then
+                            local x = tonumber(entry.SellTower)
+                            if x then
+                                soldAxis[x] = true
+                            end
+                        elseif entry.TowerPlaced and entry.TowerVector then
+                            local x = tonumber(entry.TowerVector:match("^([%d%-%.]+),"))
+                            if x then
+                                towersByAxis[x] = towersByAxis[x] or {}
+                                table.insert(towersByAxis[x], {line = i, entry = entry})
+                            end
+                        elseif entry.TowerUpgraded and entry.UpgradePath then
+                            local x = tonumber(entry.TowerUpgraded)
+                            if x then
+                                towersByAxis[x] = towersByAxis[x] or {}
+                                table.insert(towersByAxis[x], {line = i, entry = entry})
+                            end
+                        elseif entry.TowerTargetChange then
+                            local x = tonumber(entry.TowerTargetChange)
+                            if x then
+                                towersByAxis[x] = towersByAxis[x] or {}
+                                table.insert(towersByAxis[x], {line = i, entry = entry})
+                            end
+                        elseif entry.towermoving then
+                            local x = entry.towermoving
+                            if x then
+                                towersByAxis[x] = towersByAxis[x] or {}
+                                table.insert(towersByAxis[x], {line = i, entry = entry})
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Producer - Fast detection system with ForceRebuildEvenIfSold support
+        for x, records in pairs(towersByAxis) do
+            local shouldProcessTower = true
+            
+            -- Check ForceRebuildEvenIfSold logic
+            if not globalEnv.TDX_Config.ForceRebuildEvenIfSold and soldAxis[x] then
+                shouldProcessTower = false
+            end
+            
+            if shouldProcessTower then
+                local hash, tower = GetTowerByAxis(x)
+                
+                if not hash or not tower then
+                    -- Tower không tồn tại (chết HOẶC bị bán)
+                    if not activeJobs[x] then -- Chưa có job rebuild
+                        -- Check ForceRebuildEvenIfSold setting
+                        local canRebuild = true
+                        if soldAxis[x] and not globalEnv.TDX_Config.ForceRebuildEvenIfSold then
+                            -- Tower đã bị bán và không force rebuild
+                            canRebuild = false
+                        end
+
+                        if canRebuild then
+                            recordTowerDeath(x)
+
+                            local towerType = nil
+                            local firstPlaceRecord = nil
+                            local firstPlaceLine = nil
+
+                            for _, record in ipairs(records) do
+                                if record.entry.TowerPlaced then 
+                                    towerType = record.entry.TowerPlaced
+                                    firstPlaceRecord = record
+                                    firstPlaceLine = record.line
+                                    break
+                                end
+                            end
+
+                            if towerType then
+                                rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                                local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
+
+                                if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                                    -- Add to queue với priority
+                                    activeJobs[x] = true
+                                    local priority = GetTowerPriority(towerType)
+                                    table.insert(jobQueue, { 
+                                        x = x, 
+                                        records = records, 
+                                        priority = priority,
+                                        deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick(),
+                                        towerName = towerType,
+                                        firstPlaceLine = firstPlaceLine
+                                    })
+
+                                    -- Sort by priority, then by death time (older first)
+                                    table.sort(jobQueue, function(a, b) 
+                                        if a.priority == b.priority then
+                                            return a.deathTime < b.deathTime
+                                        end
+                                        return a.priority < b.priority 
+                                    end)
+                                end
+                            end
+                        end
+                    end
+                else
+                    -- Tower sống, cleanup
+                    clearTowerDeath(x)
+                    if activeJobs[x] then
+                        activeJobs[x] = nil
+                        -- Remove from queue if exists
+                        for i = #jobQueue, 1, -1 do
+                            if jobQueue[i].x == x then
+                                table.remove(jobQueue, i)
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- ⚡ Sử dụng precise sleep cho main loop
+        preciseSleep(0.1)
+    end
+end)
+
+print("⚡ TDX PARALLEL LAG-OPTIMIZED Rebuild System loaded!")
+print("🔧 Workers:", maxConcurrentJobs, "- Each worker processes tasks in parallel")
+print("🚀 UseRealTimeDelays:", globalEnv.TDX_Config.UseRealTimeDelays)
+print("⏱️ FastPollingInterval:", globalEnv.TDX_Config.FastPollingInterval)
+print("⏰ MaxWaitTime:", globalEnv.TDX_Config.MaxWaitTime)
+print("⚡ Parallel Processing: Upgrades + Moving Skills + Target Changes run simultaneously")
