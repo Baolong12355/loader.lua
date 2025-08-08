@@ -18,18 +18,17 @@ end
 -- FPS Monitor System
 local FPSMonitor = {
     frameTimeHistory = {},
-    historySize = 30, -- Monitor last 30 frames
+    historySize = 30,
     lastFrameTime = tick(),
     currentFPS = 60,
-    fpsUpdateInterval = 0.5, -- Update FPS every 0.5 seconds
+    fpsUpdateInterval = 0.5,
     lastFPSUpdate = 0,
-    lagThreshold = 30 -- FPS threshold for switching to individual processing
+    lagThreshold = 30
 }
 
 function FPSMonitor:Init()
-    -- Initialize frame time history
     for i = 1, self.historySize do
-        self.frameTimeHistory[i] = 1/60 -- Default to 60 FPS
+        self.frameTimeHistory[i] = 1/60
     end
     
     RunService.Heartbeat:Connect(function()
@@ -42,11 +41,9 @@ function FPSMonitor:UpdateFrameTime()
     local frameTime = currentTime - self.lastFrameTime
     self.lastFrameTime = currentTime
     
-    -- Add new frame time to history
     table.remove(self.frameTimeHistory, 1)
     table.insert(self.frameTimeHistory, frameTime)
     
-    -- Update FPS calculation periodically
     if currentTime - self.lastFPSUpdate >= self.fpsUpdateInterval then
         self:CalculateAverageFPS()
         self.lastFPSUpdate = currentTime
@@ -70,10 +67,9 @@ function FPSMonitor:ShouldUseBatchProcessing()
     return self.currentFPS < self.lagThreshold
 end
 
--- Initialize FPS Monitor
 FPSMonitor:Init()
 
--- Cấu hình mặc định với thêm FPS-based settings
+-- Default configuration
 local defaultConfig = {
     ["MaxConcurrentRebuilds"] = 5,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
@@ -81,21 +77,17 @@ local defaultConfig = {
     ["MaxRebuildRetry"] = nil,
     ["AutoSellConvertDelay"] = 0.2,
     ["PlaceMode"] = "Rewrite",
-    -- FPS-BASED CONFIGURATIONS
-    ["FPSBasedFallback"] = true,        -- Enable FPS-based fallback
-    ["FPSThreshold"] = 30,              -- FPS threshold for fallback
-    ["FPSMonitoringEnabled"] = true,    -- Enable FPS monitoring
-    -- BATCH PROCESSING CONFIGURATIONS
+    ["FPSBasedFallback"] = true,
+    ["FPSThreshold"] = 30,
+    ["FPSMonitoringEnabled"] = true,
     ["BatchProcessingEnabled"] = true,
     ["InstantBatchMode"] = true,
     ["MaxBatchSize"] = 20,
     ["BatchCollectionTime"] = 0.1,
     ["ParallelProcessing"] = true,
     ["BatchPrewarmEnabled"] = false,
-    -- INDIVIDUAL PROCESSING CONFIGURATIONS
-    ["IndividualProcessingDelay"] = 0.1, -- Delay between individual tower processing
-    ["MaxIndividualConcurrent"] = 3,     -- Max concurrent individual rebuilds
-    -- SKIP CONFIGURATIONS
+    ["IndividualProcessingDelay"] = 0.1,
+    ["MaxIndividualConcurrent"] = 3,
     ["SkipTowersAtAxis"] = {},
     ["SkipTowersByName"] = {"Slammer", "Toxicnator"},
     ["SkipTowersByLine"] = {},
@@ -111,12 +103,11 @@ for key, value in pairs(defaultConfig) do
     end
 end
 
--- Update FPS threshold from config
 if globalEnv.TDX_Config.FPSThreshold then
     FPSMonitor.lagThreshold = globalEnv.TDX_Config.FPSThreshold
 end
 
--- Retry logic từ runner system
+-- Retry logic
 local function getMaxAttempts()
     local placeMode = globalEnv.TDX_Config.PlaceMode or "Rewrite"
     if placeMode == "Ashed" then
@@ -128,7 +119,7 @@ local function getMaxAttempts()
     end
 end
 
--- Đọc file an toàn
+-- Safe file reading
 local function safeReadFile(path)
     if readfile and isfile and isfile(path) then
         local ok, res = pcall(readfile, path)
@@ -137,7 +128,7 @@ local function safeReadFile(path)
     return nil
 end
 
--- Lấy TowerClass
+-- Tower Class loading
 local function SafeRequire(path, timeout)
     timeout = timeout or 5
     local t0 = tick()
@@ -161,9 +152,9 @@ local function LoadTowerClass()
 end
 
 local TowerClass = LoadTowerClass()
-if not TowerClass then error("Không thể load TowerClass!") end
+if not TowerClass then error("Cannot load TowerClass!") end
 
--- Hàm quản lý cache rebuild
+-- Cache management
 local function AddToRebuildCache(axisX)
     globalEnv.TDX_REBUILDING_TOWERS[axisX] = true
 end
@@ -176,11 +167,10 @@ local function IsInRebuildCache(axisX)
     return globalEnv.TDX_REBUILDING_TOWERS[axisX] == true
 end
 
--- ==================== SKIP LOGIC ====================
+-- Skip logic
 local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
     local config = globalEnv.TDX_Config
 
-    -- Skip theo axis X
     if config.SkipTowersAtAxis then
         for _, skipAxis in ipairs(config.SkipTowersAtAxis) do
             if axisX == skipAxis then
@@ -189,7 +179,6 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
         end
     end
 
-    -- Skip theo tên tower
     if config.SkipTowersByName then
         for _, skipName in ipairs(config.SkipTowersByName) do
             if towerName == skipName then
@@ -198,7 +187,6 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
         end
     end
 
-    -- Skip theo line number
     if config.SkipTowersByLine and firstPlaceLine then
         for _, skipLine in ipairs(config.SkipTowersByLine) do
             if firstPlaceLine == skipLine then
@@ -243,7 +231,6 @@ local function GetTowerPriority(towerName)
     return math.huge
 end
 
--- Function để lấy cost upgrade hiện tại
 local function GetCurrentUpgradeCost(tower, path)
     if not tower or not tower.LevelHandler then return nil end
     local maxLvl = tower.LevelHandler:GetMaxLevel()
@@ -257,7 +244,7 @@ local function GetCurrentUpgradeCost(tower, path)
     return math.floor(baseCost * (1 - disc))
 end
 
--- Đặt tower với retry logic từ runner system
+-- Tower placement with retry
 local function PlaceTowerRetry(args, axisValue, towerName)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
@@ -285,7 +272,7 @@ local function PlaceTowerRetry(args, axisValue, towerName)
     return false
 end
 
--- Nâng cấp tower với retry logic từ runner system
+-- Tower upgrade with retry
 local function UpgradeTowerRetry(axisValue, path)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
@@ -327,7 +314,7 @@ local function UpgradeTowerRetry(axisValue, path)
     return false
 end
 
--- Đổi target với retry logic từ runner system
+-- Change target with retry
 local function ChangeTargetRetry(axisValue, targetType)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
@@ -349,7 +336,7 @@ local function ChangeTargetRetry(axisValue, targetType)
     RemoveFromRebuildCache(axisValue)
 end
 
--- Function để check xem skill có tồn tại không
+-- Skill existence check
 local function HasSkill(axisValue, skillIndex)
     local hash, tower = GetTowerByAxis(axisValue)
     if not hash or not tower or not tower.AbilityHandler then
@@ -360,7 +347,7 @@ local function HasSkill(axisValue, skillIndex)
     return ability ~= nil
 end
 
--- Function để sử dụng moving skill với retry logic từ runner system
+-- Moving skill usage with retry
 local function UseMovingSkillRetry(axisValue, skillIndex, location)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
@@ -428,28 +415,24 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
     return false
 end
 
--- ==== INDIVIDUAL PROCESSING SYSTEM (Fallback Method) ====
+-- Individual Processing System (Fallback Method)
 local IndividualProcessor = {
     activeRebuilds = {},
     rebuildQueue = {},
     maxConcurrent = 3
 }
 
--- Rebuild một tower hoàn chỉnh theo cách individual (legacy method)
 function IndividualProcessor:RebuildSingleTowerIndividual(tower)
-    -- Kiểm tra concurrent limit
     if #self.activeRebuilds >= self.maxConcurrent then
         table.insert(self.rebuildQueue, tower)
         return
     end
 
-    -- Thêm vào active rebuilds
     table.insert(self.activeRebuilds, tower.x)
     
     task.spawn(function()
         AddToRebuildCache(tower.x)
 
-        -- Phase 1: Place tower
         local placeSuccess = false
         local placeRecord = nil
 
@@ -481,17 +464,14 @@ function IndividualProcessor:RebuildSingleTowerIndividual(tower)
             end
         end
 
-        -- Nếu place thất bại, dừng lại và cleanup
         if not placeSuccess then
             self:RemoveFromActiveRebuilds(tower.x)
             RemoveFromRebuildCache(tower.x)
             return
         end
 
-        -- Delay để tránh spam
         task.wait(globalEnv.TDX_Config.IndividualProcessingDelay or 0.1)
 
-        -- Phase 2: Process upgrades tuần tự
         local upgradeRecords = {}
         for _, record in ipairs(tower.records) do
             if record.entry.TowerUpgraded then
@@ -503,10 +483,9 @@ function IndividualProcessor:RebuildSingleTowerIndividual(tower)
         for _, record in ipairs(upgradeRecords) do
             local entry = record.entry
             UpgradeTowerRetry(tonumber(entry.TowerUpgraded), entry.UpgradePath)
-            task.wait(0.05) -- Small delay between upgrades
+            task.wait(0.05)
         end
 
-        -- Phase 3: Process targets tuần tự
         local targetRecords = {}
         for _, record in ipairs(tower.records) do
             if record.entry.TowerTargetChange then
@@ -520,7 +499,6 @@ function IndividualProcessor:RebuildSingleTowerIndividual(tower)
             task.wait(0.05)
         end
 
-        -- Phase 4: Process moving skills
         local movingRecords = {}
         for _, record in ipairs(tower.records) do
             if record.entry.towermoving then
@@ -532,7 +510,6 @@ function IndividualProcessor:RebuildSingleTowerIndividual(tower)
             local lastMovingRecord = movingRecords[#movingRecords]
             local entry = lastMovingRecord.entry
 
-            -- Wait for skill availability
             while not HasSkill(entry.towermoving, entry.skillindex) do
                 RunService.Heartbeat:Wait()
             end
@@ -540,11 +517,8 @@ function IndividualProcessor:RebuildSingleTowerIndividual(tower)
             UseMovingSkillRetry(entry.towermoving, entry.skillindex, entry.location)
         end
 
-        -- Cleanup
         self:RemoveFromActiveRebuilds(tower.x)
         RemoveFromRebuildCache(tower.x)
-
-        -- Process queued towers
         self:ProcessQueue()
     end)
 end
@@ -582,10 +556,9 @@ function IndividualProcessor:AddTowerToIndividual(x, records, towerName, firstPl
     self:RebuildSingleTowerIndividual(tower)
 end
 
--- Update max concurrent from config
 IndividualProcessor.maxConcurrent = globalEnv.TDX_Config.MaxIndividualConcurrent or 3
 
--- ==== BATCH PROCESSING SYSTEM (Optimized Method) ====
+-- Batch Processing System (Optimized Method)
 local BatchProcessor = {
     pendingBatches = {},
     currentBatch = {
@@ -597,11 +570,9 @@ local BatchProcessor = {
     prewarmCache = {}
 }
 
--- Rebuild hoàn chỉnh một tower (tất cả phases) - Batch method
 function BatchProcessor:RebuildSingleTowerComplete(tower)
     AddToRebuildCache(tower.x)
 
-    -- Phase 1: Place tower
     local placeSuccess = false
     local placeRecord = nil
 
@@ -638,7 +609,6 @@ function BatchProcessor:RebuildSingleTowerComplete(tower)
         return
     end
 
-    -- Phase 2: Process upgrades ngay lập tức
     local upgradeRecords = {}
     for _, record in ipairs(tower.records) do
         if record.entry.TowerUpgraded then
@@ -652,7 +622,6 @@ function BatchProcessor:RebuildSingleTowerComplete(tower)
         UpgradeTowerRetry(tonumber(entry.TowerUpgraded), entry.UpgradePath)
     end
 
-    -- Phase 3: Process targets ngay lập tức
     local targetRecords = {}
     for _, record in ipairs(tower.records) do
         if record.entry.TowerTargetChange then
@@ -665,7 +634,6 @@ function BatchProcessor:RebuildSingleTowerComplete(tower)
         ChangeTargetRetry(tonumber(entry.TowerTargetChange), entry.TargetWanted)
     end
 
-    -- Phase 4: Process moving skills song song
     local movingRecords = {}
     for _, record in ipairs(tower.records) do
         if record.entry.towermoving then
@@ -689,7 +657,6 @@ function BatchProcessor:RebuildSingleTowerComplete(tower)
     RemoveFromRebuildCache(tower.x)
 end
 
--- Xử lý batch song song hoàn toàn
 function BatchProcessor:ExecuteInstantBatch(towers)
     if #towers == 0 then return end
 
@@ -783,35 +750,29 @@ function BatchProcessor:ForceProcessCurrentBatch()
     end
 end
 
--- ==== PROCESSING MODE CONTROLLER ====
+-- Processing Mode Controller
 local ProcessingController = {
-    currentMode = "batch", -- "batch" hoặc "individual"
+    currentMode = "batch",
     lastModeSwitch = 0,
-    modeStickiness = 2 -- Giữ mode trong 2 giây trước khi cho phép switch
+    modeStickiness = 2
 }
 
 function ProcessingController:DetermineOptimalMode()
     local currentTime = tick()
     
-    -- Không switch mode quá thường xuyên
     if currentTime - self.lastModeSwitch < self.modeStickiness then
         return self.currentMode
     end
 
-    -- Kiểm tra FPS-based fallback
     if globalEnv.TDX_Config.FPSBasedFallback and globalEnv.TDX_Config.FPSMonitoringEnabled then
         if not FPSMonitor:ShouldUseBatchProcessing() then
-            -- FPS cao (≥30), chuyển về individual processing
             if self.currentMode ~= "individual" then
-                print("[TDX Rebuild] Switching to Individual Processing (FPS: " .. FPSMonitor:GetCurrentFPS() .. ")")
                 self.currentMode = "individual"
                 self.lastModeSwitch = currentTime
             end
             return "individual"
         else
-            -- FPS thấp (<30), dùng batch processing
             if self.currentMode ~= "batch" then
-                print("[TDX Rebuild] Switching to Batch Processing (FPS: " .. FPSMonitor:GetCurrentFPS() .. ")")
                 self.currentMode = "batch"
                 self.lastModeSwitch = currentTime
             end
@@ -826,24 +787,20 @@ function ProcessingController:ProcessTower(x, records, towerName, firstPlaceLine
     local mode = self:DetermineOptimalMode()
     
     if mode == "individual" then
-        -- Sử dụng Individual Processing
         IndividualProcessor:AddTowerToIndividual(x, records, towerName, firstPlaceLine, priority, deathTime)
     else
-        -- Sử dụng Batch Processing
         local addedToBatch = BatchProcessor:AddTowerToBatch(x, records, towerName, firstPlaceLine, priority, deathTime)
         if not addedToBatch then
-            -- Fallback to individual nếu batch thất bại
             IndividualProcessor:AddTowerToIndividual(x, records, towerName, firstPlaceLine, priority, deathTime)
         end
     end
 end
 
--- ==== AUTO SELL CONVERTED TOWERS - REBUILD ====
+-- Auto Sell Converted Towers
 local soldConvertedX = {}
 
 task.spawn(function()
     while true do
-        -- Cleanup: Xóa tracking cho X positions không còn có converted towers
         for x in pairs(soldConvertedX) do
             local hasConvertedAtX = false
 
@@ -859,13 +816,11 @@ task.spawn(function()
                 end
             end
 
-            -- Nếu không có converted tower nào tại X này, xóa khỏi tracking
             if not hasConvertedAtX then
                 soldConvertedX[x] = nil
             end
         end
 
-        -- Check và sell converted towers
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower.Converted == true then
                 local spawnCFrame = tower.SpawnCFrame
@@ -873,13 +828,9 @@ task.spawn(function()
                     local x = spawnCFrame.Position.X
 
                     if soldConvertedX[x] then
-                        -- Đã từng sell tower converted tại X này
-                        -- Nhưng bây giờ lại có tower converted → nghĩa là tower mới bị convert
-                        -- Reset cache và sell tower mới này
                         soldConvertedX[x] = nil
                     end
 
-                    -- Sell nếu chưa tracking X này
                     if not soldConvertedX[x] then
                         soldConvertedX[x] = true
 
@@ -900,7 +851,6 @@ end)
 local function BatchMonitor()
     task.spawn(function()
         while true do
-            -- Monitor và force process batch nếu cần
             if BatchProcessor.currentBatch.isCollecting then
                 local timeSinceStart = tick() - BatchProcessor.currentBatch.startTime
                 if timeSinceStart >= globalEnv.TDX_Config.BatchCollectionTime then
@@ -908,44 +858,24 @@ local function BatchMonitor()
                 end
             end
             
-            -- Process queued individual towers
             IndividualProcessor:ProcessQueue()
             
-            task.wait(0.05) -- Check thường xuyên
+            task.wait(0.05)
         end
     end)
 end
 
--- Initialize monitoring systems
 if globalEnv.TDX_Config.InstantBatchMode or globalEnv.TDX_Config.FPSBasedFallback then
     BatchMonitor()
 end
 
--- FPS Monitoring Display (Optional)
-task.spawn(function()
-    if not globalEnv.TDX_Config.FPSMonitoringEnabled then return end
-    
-    while true do
-        task.wait(5) -- Display FPS every 5 seconds
-        local currentFPS = FPSMonitor:GetCurrentFPS()
-        local currentMode = ProcessingController.currentMode
-        print(string.format("[TDX Rebuild] FPS: %d | Mode: %s | Active Rebuilds: %d | Batch Towers: %d", 
-            currentFPS, 
-            currentMode:upper(), 
-            #IndividualProcessor.activeRebuilds,
-            #BatchProcessor.currentBatch.towers
-        ))
-    end
-end)
-
--- Hệ thống chính được tối ưu hóa với FPS-Based Fallback
+-- Main System
 task.spawn(function()
     local lastMacroHash = ""
     local towersByAxis = {}
     local soldAxis = {}
     local rebuildAttempts = {}
 
-    -- Tracking system cho towers đã chết
     local deadTowerTracker = {
         deadTowers = {},
         nextDeathId = 1
@@ -966,7 +896,6 @@ task.spawn(function()
     end
 
     while true do
-        -- Reload macro record nếu có thay đổi
         local macroContent = safeReadFile(macroPath)
         if macroContent and #macroContent > 10 then
             local macroHash = tostring(#macroContent) .. "|" .. tostring(macroContent:sub(1,50))
@@ -1012,11 +941,9 @@ task.spawn(function()
             end
         end
 
-        -- Producer với Dynamic Processing Mode Selection
         for x, records in pairs(towersByAxis) do
             local shouldProcessTower = true
 
-            -- Check ForceRebuildEvenIfSold logic
             if not globalEnv.TDX_Config.ForceRebuildEvenIfSold and soldAxis[x] then
                 shouldProcessTower = false
             end
@@ -1025,7 +952,6 @@ task.spawn(function()
                 local hash, tower = GetTowerByAxis(x)
 
                 if not hash or not tower then
-                    -- Tower không tồn tại (chết HOẶC bị bán)
                     local canRebuild = true
                     if soldAxis[x] and not globalEnv.TDX_Config.ForceRebuildEvenIfSold then
                         canRebuild = false
@@ -1052,7 +978,6 @@ task.spawn(function()
                             local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
 
                             if not maxRetry or rebuildAttempts[x] <= maxRetry then
-                                -- Sử dụng ProcessingController để chọn method tối ưu
                                 local priority = GetTowerPriority(towerType)
                                 local deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick()
 
@@ -1063,9 +988,8 @@ task.spawn(function()
                         end
                     end
                 else
-                    -- Tower sống, cleanup
                     clearTowerDeath(x)
-                    rebuildAttempts[x] = nil -- Reset rebuild attempts khi tower sống lại
+                    rebuildAttempts[x] = nil
                 end
             end
         end
