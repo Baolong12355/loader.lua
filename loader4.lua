@@ -28,7 +28,7 @@ local function decodeGitHubToken()
     local success, decodedToken = pcall(function()
         return HttpService:base64decode(GITHUB_TOKEN_BASE64)
     end)
-    
+
     if success and decodedToken then
         print("[🔓] GitHub token đã được decode thành công")
         return decodedToken
@@ -58,7 +58,7 @@ local function validateGitHubToken()
             Headers = getHeaders()
         })
     end)
-    
+
     if success and response.StatusCode == 200 then
         local userData = HttpService:JSONDecode(response.Body)
         print("[✅] GitHub token hợp lệ cho user:", userData.login)
@@ -77,7 +77,7 @@ local function getSessionsFromGitHub()
             Headers = getHeaders()
         })
     end)
-    
+
     if success and response.StatusCode == 200 then
         local data = HttpService:JSONDecode(response.Body)
         -- Decode base64 content
@@ -97,16 +97,16 @@ end
 local function saveSessionsToGitHub(sessions, sha)
     local content = HttpService:JSONEncode(sessions)
     local encodedContent = HttpService:base64encode(content)
-    
+
     local requestData = {
         message = "Update sessions - " .. os.date("%Y-%m-%d %H:%M:%S"),
         content = encodedContent
     }
-    
+
     if sha then
         requestData.sha = sha
     end
-    
+
     local success, response = pcall(function()
         return request({
             Url = GITHUB_API_URL,
@@ -115,7 +115,7 @@ local function saveSessionsToGitHub(sessions, sha)
             Body = HttpService:JSONEncode(requestData)
         })
     end)
-    
+
     if success and (response.StatusCode == 200 or response.StatusCode == 201) then
         local responseData = HttpService:JSONDecode(response.Body)
         return true, responseData.content.sha
@@ -161,20 +161,20 @@ local function addSessionToGitHub(key)
         warn("[❌] Cannot get sessions from GitHub")
         return false, 0, nil
     end
-    
+
     local keySessions = sessions[key] or {}
     local activeCount = 0
     for _ in pairs(keySessions) do activeCount = activeCount + 1 end
-    
+
     -- Check session limit
     if activeCount >= MAX_SESSIONS_PER_KEY then
         return false, activeCount, nil
     end
-    
+
     -- Create new session
     local sessionId = generateSessionId()
     local currentTime = os.time()
-    
+
     keySessions[sessionId] = {
         userId = Players.LocalPlayer.UserId,
         username = Players.LocalPlayer.Name,
@@ -183,20 +183,20 @@ local function addSessionToGitHub(key)
         placeId = game.PlaceId,
         server = game.JobId or "Unknown"
     }
-    
+
     sessions[key] = keySessions
-    
+
     -- Save to GitHub
     local saveSuccess, newSha = saveSessionsToGitHub(sessions, sha)
     if not saveSuccess then
         warn("[❌] Failed to save session to GitHub")
         return false, activeCount, nil
     end
-    
+
     print(string.format("[✅] Session added! Active sessions: %d/%d", 
         activeCount + 1, MAX_SESSIONS_PER_KEY))
     print("[ℹ️] Session ID:", sessionId:sub(1, 12) .. "...")
-    
+
     return true, activeCount + 1, sessionId
 end
 
@@ -206,27 +206,27 @@ local function removeSessionFromGitHub(key, sessionId)
         warn("[⚠️] Missing key or sessionId for removal")
         return false 
     end
-    
+
     local sessions, sha = getSessionsFromGitHub()
     if not sessions then 
         warn("[❌] Cannot get sessions for removal")
         return false 
     end
-    
+
     if sessions[key] and sessions[key][sessionId] then
         local sessionData = sessions[key][sessionId]
         local duration = os.time() - sessionData.startTime
-        
+
         print(string.format("[🏁] Removing session: %s (Duration: %d minutes)", 
             sessionData.username, math.floor(duration / 60)))
-        
+
         sessions[key][sessionId] = nil
-        
+
         -- Xóa key nếu không còn session nào
         if next(sessions[key]) == nil then
             sessions[key] = nil
         end
-        
+
         -- Save to GitHub
         local success, newSha = saveSessionsToGitHub(sessions, sha)
         if success then
@@ -244,7 +244,7 @@ end
 -- Setup shutdown handlers - chỉ xóa session khi thực sự tắt
 local function setupShutdownHandlers(key, sessionId)
     local sessionRemoved = false
-    
+
     local function removeSession()
         if not sessionRemoved then
             sessionRemoved = true
@@ -252,25 +252,25 @@ local function setupShutdownHandlers(key, sessionId)
             removeSessionFromGitHub(key, sessionId)
         end
     end
-    
+
     -- Handle game closing
     game:BindToClose(function()
         removeSession()
         wait(3) -- Đảm bảo có thời gian để API call hoàn thành
     end)
-    
+
     -- Handle teleport/server hop
     Players.LocalPlayer.OnTeleport:Connect(function()
         removeSession()
     end)
-    
+
     -- Handle player leaving game
     Players.LocalPlayer.AncestryChanged:Connect(function()
         if not Players.LocalPlayer.Parent then
             removeSession()
         end
     end)
-    
+
     -- Handle manual script stop
     getgenv().endTDXSession = function()
         removeSession()
@@ -312,17 +312,17 @@ getgenv().forceRemoveSession = function(targetSessionId)
         print("[❌] Usage: getgenv().forceRemoveSession('session_id')")
         return
     end
-    
+
     local sessions, sha = getSessionsFromGitHub()
     if not sessions then return end
-    
+
     for key, keySessions in pairs(sessions) do
         if keySessions[targetSessionId] then
             sessions[key][targetSessionId] = nil
             if next(sessions[key]) == nil then
                 sessions[key] = nil
             end
-            
+
             local success = saveSessionsToGitHub(sessions, sha)
             if success then
                 print("[✅] Force removed session:", targetSessionId:sub(1, 12) .. "...")
@@ -332,7 +332,7 @@ getgenv().forceRemoveSession = function(targetSessionId)
             return
         end
     end
-    
+
     print("[❌] Session not found:", targetSessionId:sub(1, 12) .. "...")
 end
 
@@ -342,11 +342,11 @@ getgenv().updateGitHubToken = function(newBase64Token)
         print("[❌] Usage: getgenv().updateGitHubToken('new_base64_token')")
         return
     end
-    
+
     GITHUB_TOKEN_BASE64 = newBase64Token
     GITHUB_TOKEN = decodeGitHubToken()
     print("[✅] GitHub token đã được cập nhật!")
-    
+
     -- Validate new token
     validateGitHubToken()
 end
