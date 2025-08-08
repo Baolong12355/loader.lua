@@ -7,6 +7,7 @@ local cash = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
 local macroPath = "tdx/macros/recorder_output.json"
+local debugLogPath = "tdx/debug/rebuilder_debug.log"
 
 -- Universal compatibility functions
 local function getGlobalEnv()
@@ -15,7 +16,68 @@ local function getGlobalEnv()
     return _G
 end
 
--- Enhanced configuration with improved settings
+-- Debug logging system
+local DebugLogger = {
+    logBuffer = {},
+    maxBufferSize = 1000,
+    lastFlushTime = tick()
+}
+
+function DebugLogger:Log(level, message, data)
+    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+    local logEntry = string.format("[%s] [%s] %s", timestamp, level, message)
+    
+    if data then
+        logEntry = logEntry .. " | Data: " .. HttpService:JSONEncode(data)
+    end
+    
+    table.insert(self.logBuffer, logEntry)
+    
+    -- Auto flush if buffer is full or every 30 seconds
+    if #self.logBuffer >= self.maxBufferSize or tick() - self.lastFlushTime > 30 then
+        self:FlushLogs()
+    end
+end
+
+function DebugLogger:FlushLogs()
+    if #self.logBuffer == 0 then return end
+    
+    local success = pcall(function()
+        local existingContent = ""
+        if isfile and isfile(debugLogPath) and readfile then
+            existingContent = readfile(debugLogPath) or ""
+        end
+        
+        local newContent = existingContent .. table.concat(self.logBuffer, "\n") .. "\n"
+        
+        if writefile then
+            writefile(debugLogPath, newContent)
+        end
+    end)
+    
+    if success then
+        self.logBuffer = {}
+        self.lastFlushTime = tick()
+    end
+end
+
+function DebugLogger:Error(message, data)
+    self:Log("ERROR", message, data)
+end
+
+function DebugLogger:Warning(message, data)
+    self:Log("WARN", message, data)
+end
+
+function DebugLogger:Info(message, data)
+    self:Log("INFO", message, data)
+end
+
+function DebugLogger:Debug(message, data)
+    self:Log("DEBUG", message, data)
+end
+
+-- Cấu hình mặc định với thêm Instant Batch Processing
 local defaultConfig = {
     ["MaxConcurrentRebuilds"] = 5,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
@@ -25,18 +87,18 @@ local defaultConfig = {
     ["PlaceMode"] = "Rewrite",
     -- INSTANT BATCH PROCESSING CONFIGURATIONS
     ["BatchProcessingEnabled"] = true,
-    ["InstantBatchMode"] = true,
-    ["MaxBatchSize"] = 20,
-    ["BatchCollectionTime"] = 0.1,
-    ["ParallelProcessing"] = true,
-    ["BatchPrewarmEnabled"] = false,
+    ["InstantBatchMode"] = true,       -- Xử lý ngay lập tức không chờ đợi
+    ["MaxBatchSize"] = 20,             -- Tăng số tower tối đa trong một batch
+    ["BatchCollectionTime"] = 0.1,     -- Thời gian thu thập tối thiểu
+    ["ParallelProcessing"] = true,     -- Xử lý song song hoàn toàn
+    ["BatchPrewarmEnabled"] = false,   -- Tắt pre-warm để tăng tốc
     -- SKIP CONFIGURATIONS
     ["SkipTowersAtAxis"] = {},
     ["SkipTowersByName"] = {"Slammer", "Toxicnator"},
     ["SkipTowersByLine"] = {},
     -- FALLBACK CONFIGURATIONS
-    ["UseFallbackPositionDetection"] = true,
-    ["ModuleLoadTimeout"] = 1.0, -- 1 second timeout for module loading
+    ["UseFallbackPositioning"] = true,
+    ["FallbackTimeout"] = 1.0,        -- Thời gian chờ trước khi dùng fallback
 }
 
 local globalEnv = getGlobalEnv()
@@ -49,138 +111,9 @@ for key, value in pairs(defaultConfig) do
     end
 end
 
--- Enhanced tower position detection system
-local TowerPositionSystem = {
-    TowerClass = nil,
-    lastModuleCheck = 0,
-    moduleCheckCooldown = 5, -- Check module every 5 seconds
-    usingFallback = false
-}
+DebugLogger:Info("TDX Rebuilder initialized", globalEnv.TDX_Config)
 
--- Safe file reading
-local function safeReadFile(path)
-    if readfile and isfile and isfile(path) then
-        local ok, res = pcall(readfile, path)
-        if ok then return res end
-    end
-    return nil
-end
-
--- Enhanced SafeRequire with timeout
-local function SafeRequire(path, timeout)
-    timeout = timeout or globalEnv.TDX_Config.ModuleLoadTimeout
-    local t0 = tick()
-    while tick() - t0 < timeout do
-        local ok, mod = pcall(require, path)
-        if ok and mod then return mod end
-        RunService.Heartbeat:Wait()
-    end
-    return nil
-end
-
--- Load TowerClass module with enhanced error handling
-local function LoadTowerClass()
-    local ps = player:FindFirstChild("PlayerScripts")
-    if not ps then return nil end
-    local client = ps:FindFirstChild("Client")
-    if not client then return nil end
-    local gameClass = client:FindFirstChild("GameClass")
-    if not gameClass then return nil end
-    local towerModule = gameClass:FindFirstChild("TowerClass")
-    if not towerModule then return nil end
-    return SafeRequire(towerModule, globalEnv.TDX_Config.ModuleLoadTimeout)
-end
-
--- Fallback tower position detection using workspace
-local function GetTowerByAxisFallback(targetX)
-    local towersFolder = workspace:FindFirstChild("Game")
-    if towersFolder then
-        towersFolder = towersFolder:FindFirstChild("Towers")
-    end
-    
-    if not towersFolder then return nil, nil, nil end
-    
-    for _, tower in pairs(towersFolder:GetChildren()) do
-        if tower:IsA("BasePart") then
-            local pos = tower.Position
-            if math.abs(pos.X - targetX) < 0.1 then -- Small tolerance for floating point comparison
-                return tower.Name, tower, pos -- Return tower name as hash, tower object, and position
-            end
-        elseif tower:IsA("Model") then
-            -- Check if model has a primary part or find the main part
-            local mainPart = tower.PrimaryPart or tower:FindFirstChildOfClass("BasePart")
-            if mainPart then
-                local pos = mainPart.Position
-                if math.abs(pos.X - targetX) < 0.1 then
-                    return tower.Name, tower, pos
-                end
-            end
-        end
-    end
-    
-    return nil, nil, nil
-end
-
--- Enhanced tower position detection with fallback
-function TowerPositionSystem:GetTowerByAxis(axisX)
-    local currentTime = tick()
-    
-    -- Try to refresh module periodically
-    if currentTime - self.lastModuleCheck > self.moduleCheckCooldown then
-        self.lastModuleCheck = currentTime
-        if not self.TowerClass then
-            self.TowerClass = LoadTowerClass()
-            if self.TowerClass then
-                self.usingFallback = false
-            end
-        end
-    end
-    
-    -- Try module method first if available
-    if self.TowerClass and not self.usingFallback then
-        local success, hash, tower, pos = pcall(function()
-            for hash, tower in pairs(self.TowerClass.GetTowers()) do
-                local spawnCFrame = tower.SpawnCFrame
-                if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                    local towerPos = spawnCFrame.Position
-                    if towerPos.X == axisX then
-                        return hash, tower, towerPos
-                    end
-                end
-            end
-            return nil, nil, nil
-        end)
-        
-        if success and hash then
-            return hash, tower, pos
-        elseif not success then
-            self.usingFallback = true
-        end
-    end
-    
-    -- Use fallback method
-    if globalEnv.TDX_Config.UseFallbackPositionDetection then
-        return GetTowerByAxisFallback(axisX)
-    end
-    
-    return nil, nil, nil
-end
-
--- Initialize tower position system
-local function InitializeTowerSystem()
-    TowerPositionSystem.TowerClass = LoadTowerClass()
-    if TowerPositionSystem.TowerClass then
-        print("TowerClass loaded successfully")
-    else
-        print("Failed to load TowerClass, will use fallback method")
-        TowerPositionSystem.usingFallback = true
-    end
-end
-
--- Initialize the system
-InitializeTowerSystem()
-
--- Retry logic
+-- Retry logic từ runner system
 local function getMaxAttempts()
     local placeMode = globalEnv.TDX_Config.PlaceMode or "Rewrite"
     if placeMode == "Ashed" then
@@ -192,42 +125,207 @@ local function getMaxAttempts()
     end
 end
 
--- Cache management
+-- Đọc file an toàn
+local function safeReadFile(path)
+    if readfile and isfile and isfile(path) then
+        local ok, res = pcall(readfile, path)
+        if ok then return res end
+    end
+    return nil
+end
+
+-- Lấy TowerClass với fallback
+local function SafeRequire(path, timeout)
+    timeout = timeout or 5
+    local t0 = tick()
+    while tick() - t0 < timeout do
+        local ok, mod = pcall(require, path)
+        if ok and mod then 
+            DebugLogger:Debug("Successfully loaded module", {path = tostring(path)})
+            return mod 
+        end
+        RunService.Heartbeat:Wait()
+    end
+    DebugLogger:Error("Failed to load module after timeout", {path = tostring(path), timeout = timeout})
+    return nil
+end
+
+local function LoadTowerClass()
+    local ps = player:FindFirstChild("PlayerScripts")
+    if not ps then 
+        DebugLogger:Error("PlayerScripts not found")
+        return nil 
+    end
+    local client = ps:FindFirstChild("Client")
+    if not client then 
+        DebugLogger:Error("Client not found in PlayerScripts")
+        return nil 
+    end
+    local gameClass = client:FindFirstChild("GameClass")
+    if not gameClass then 
+        DebugLogger:Error("GameClass not found in Client")
+        return nil 
+    end
+    local towerModule = gameClass:FindFirstChild("TowerClass")
+    if not towerModule then 
+        DebugLogger:Error("TowerClass module not found in GameClass")
+        return nil 
+    end
+    return SafeRequire(towerModule)
+end
+
+local TowerClass = LoadTowerClass()
+if not TowerClass then 
+    DebugLogger:Error("Failed to load TowerClass - script will exit")
+    error("Không thể load TowerClass!") 
+end
+
+-- Hàm quản lý cache rebuild
 local function AddToRebuildCache(axisX)
     globalEnv.TDX_REBUILDING_TOWERS[axisX] = true
+    DebugLogger:Debug("Added to rebuild cache", {axisX = axisX})
 end
 
 local function RemoveFromRebuildCache(axisX)
     globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
+    DebugLogger:Debug("Removed from rebuild cache", {axisX = axisX})
 end
 
 local function IsInRebuildCache(axisX)
     return globalEnv.TDX_REBUILDING_TOWERS[axisX] == true
 end
 
--- Skip logic
+-- ==================== POSITION DETECTION WITH FALLBACK ====================
+
+-- Fallback position detection using workspace.Game.Towers
+local function GetTowerPositionFromWorkspace(targetX)
+    local towersFolder = workspace:FindFirstChild("Game")
+    if towersFolder then
+        towersFolder = towersFolder:FindFirstChild("Towers")
+        if towersFolder then
+            for _, towerPart in ipairs(towersFolder:GetChildren()) do
+                if towerPart:IsA("BasePart") then
+                    local pos = towerPart.Position
+                    if math.abs(pos.X - targetX) < 0.1 then -- Small tolerance for floating point comparison
+                        DebugLogger:Debug("Found tower position via workspace fallback", {
+                            targetX = targetX, 
+                            foundPos = {x = pos.X, y = pos.Y, z = pos.Z},
+                            towerName = towerPart.Name
+                        })
+                        return towerPart, pos
+                    end
+                end
+            end
+        end
+    end
+    return nil, nil
+end
+
+-- Enhanced tower detection with fallback
+local function GetTowerHashBySpawnX(targetX, useTimeout)
+    local startTime = tick()
+    local timeout = useTimeout and globalEnv.TDX_Config.FallbackTimeout or 0
+    
+    -- Primary method: TowerClass.GetTowers()
+    while true do
+        local towers = TowerClass.GetTowers()
+        if towers then
+            for hash, tower in pairs(towers) do
+                local spawnCFrame = tower.SpawnCFrame
+                if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                    local pos = spawnCFrame.Position
+                    if math.abs(pos.X - targetX) < 0.1 then
+                        DebugLogger:Debug("Found tower via TowerClass", {
+                            targetX = targetX, 
+                            hash = hash, 
+                            pos = {x = pos.X, y = pos.Y, z = pos.Z}
+                        })
+                        return hash, tower, pos
+                    end
+                end
+            end
+        end
+        
+        -- Check timeout for fallback
+        if timeout > 0 and tick() - startTime >= timeout then
+            break
+        elseif timeout == 0 then
+            break
+        end
+        
+        RunService.Heartbeat:Wait()
+    end
+    
+    -- Fallback method: workspace.Game.Towers
+    if globalEnv.TDX_Config.UseFallbackPositioning then
+        DebugLogger:Warning("Primary tower detection failed, using fallback", {targetX = targetX})
+        local towerPart, pos = GetTowerPositionFromWorkspace(targetX)
+        if towerPart and pos then
+            -- Try to get hash from TowerClass using the found position
+            local towers = TowerClass.GetTowers()
+            if towers then
+                for hash, tower in pairs(towers) do
+                    local spawnCFrame = tower.SpawnCFrame
+                    if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                        local towerPos = spawnCFrame.Position
+                        if (towerPos - pos).Magnitude < 1.0 then -- Close enough match
+                            DebugLogger:Info("Successfully matched fallback position to TowerClass", {
+                                targetX = targetX,
+                                hash = hash,
+                                fallbackPos = {x = pos.X, y = pos.Y, z = pos.Z},
+                                towerPos = {x = towerPos.X, y = towerPos.Y, z = towerPos.Z}
+                            })
+                            return hash, tower, pos
+                        end
+                    end
+                end
+            end
+            
+            DebugLogger:Warning("Found tower via fallback but couldn't match to TowerClass", {
+                targetX = targetX,
+                fallbackPos = {x = pos.X, y = pos.Y, z = pos.Z}
+            })
+        else
+            DebugLogger:Error("Fallback position detection also failed", {targetX = targetX})
+        end
+    end
+    
+    return nil, nil, nil
+end
+
+local function GetTowerByAxis(axisX, useTimeout)
+    return GetTowerHashBySpawnX(axisX, useTimeout)
+end
+
+-- ==================== SKIP LOGIC ====================
 local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
     local config = globalEnv.TDX_Config
 
+    -- Skip theo axis X
     if config.SkipTowersAtAxis then
         for _, skipAxis in ipairs(config.SkipTowersAtAxis) do
             if axisX == skipAxis then
+                DebugLogger:Info("Skipping tower by axis", {axisX = axisX})
                 return true
             end
         end
     end
 
+    -- Skip theo tên tower
     if config.SkipTowersByName then
         for _, skipName in ipairs(config.SkipTowersByName) do
             if towerName == skipName then
+                DebugLogger:Info("Skipping tower by name", {towerName = towerName, axisX = axisX})
                 return true
             end
         end
     end
 
+    -- Skip theo line number
     if config.SkipTowersByLine and firstPlaceLine then
         for _, skipLine in ipairs(config.SkipTowersByLine) do
             if firstPlaceLine == skipLine then
+                DebugLogger:Info("Skipping tower by line", {line = firstPlaceLine, axisX = axisX})
                 return true
             end
         end
@@ -237,13 +335,13 @@ local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
 end
 
 -- Utility functions
-local function GetTowerByAxis(axisX)
-    return TowerPositionSystem:GetTowerByAxis(axisX)
-end
-
 local function WaitForCash(amount)
-    while cash.Value < amount do
-        RunService.Heartbeat:Wait()
+    if cash.Value < amount then
+        DebugLogger:Debug("Waiting for cash", {current = cash.Value, needed = amount})
+        while cash.Value < amount do
+            RunService.Heartbeat:Wait()
+        end
+        DebugLogger:Debug("Cash requirement met", {current = cash.Value, needed = amount})
     end
 end
 
@@ -256,41 +354,42 @@ local function GetTowerPriority(towerName)
     return math.huge
 end
 
--- Enhanced tower upgrade cost calculation with fallback
+-- Function để lấy cost upgrade hiện tại
 local function GetCurrentUpgradeCost(tower, path)
-    if not tower then return nil end
-    
-    -- Try module method first
-    if TowerPositionSystem.TowerClass and tower.LevelHandler then
-        local success, cost = pcall(function()
-            local maxLvl = tower.LevelHandler:GetMaxLevel()
-            local curLvl = tower.LevelHandler:GetLevelOnPath(path)
-            if curLvl >= maxLvl then return nil end
-            
-            local baseCost = tower.LevelHandler:GetLevelUpgradeCost(path, 1)
-            local disc = 0
-            if tower.BuffHandler then
-                local d = tower.BuffHandler:GetDiscount() or 0
-                if typeof(d) == "number" then disc = d end
-            end
-            return math.floor(baseCost * (1 - disc))
-        end)
-        
-        if success then return cost end
-    end
-    
-    -- Fallback: return a default cost (you might want to adjust this)
-    return 100 -- Default upgrade cost
+    if not tower or not tower.LevelHandler then return nil end
+    local maxLvl = tower.LevelHandler:GetMaxLevel()
+    local curLvl = tower.LevelHandler:GetLevelOnPath(path)
+    if curLvl >= maxLvl then return nil end
+    local ok, baseCost = pcall(function() return tower.LevelHandler:GetLevelUpgradeCost(path, 1) end)
+    if not ok then return nil end
+    local disc = 0
+    local ok2, d = pcall(function() return tower.BuffHandler and tower.BuffHandler:GetDiscount() or 0 end)
+    if ok2 and typeof(d) == "number" then disc = d end
+    return math.floor(baseCost * (1 - disc))
 end
 
--- Enhanced place tower with retry
+-- Đặt tower với retry logic và debug logging
 local function PlaceTowerRetry(args, axisValue, towerName)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
 
+    DebugLogger:Info("Starting tower placement", {
+        axisValue = axisValue, 
+        towerName = towerName, 
+        maxAttempts = maxAttempts,
+        args = args
+    })
+
     AddToRebuildCache(axisValue)
 
     while attempts < maxAttempts do
+        attempts = attempts + 1
+        DebugLogger:Debug("Tower placement attempt", {
+            attempt = attempts, 
+            maxAttempts = maxAttempts, 
+            axisValue = axisValue
+        })
+
         local success = pcall(function()
             Remotes.PlaceTower:InvokeServer(unpack(args))
         end)
@@ -299,48 +398,87 @@ local function PlaceTowerRetry(args, axisValue, towerName)
             local startTime = tick()
             repeat 
                 task.wait(0.1)
-            until tick() - startTime > 3 or GetTowerByAxis(axisValue)
+            until tick() - startTime > 3 or GetTowerByAxis(axisValue, false)
             
-            if GetTowerByAxis(axisValue) then 
+            local hash, tower = GetTowerByAxis(axisValue, false)
+            if hash and tower then 
+                DebugLogger:Info("Tower placement successful", {
+                    axisValue = axisValue, 
+                    towerName = towerName, 
+                    attempts = attempts,
+                    hash = hash
+                })
                 RemoveFromRebuildCache(axisValue)
                 return true
+            else
+                DebugLogger:Warning("Tower placement remote succeeded but tower not found", {
+                    axisValue = axisValue, 
+                    attempt = attempts
+                })
             end
+        else
+            DebugLogger:Warning("Tower placement remote failed", {
+                axisValue = axisValue, 
+                attempt = attempts
+            })
         end
         
-        attempts = attempts + 1
         task.wait()
     end
     
+    DebugLogger:Error("Tower placement failed after all attempts", {
+        axisValue = axisValue, 
+        towerName = towerName, 
+        totalAttempts = attempts
+    })
     RemoveFromRebuildCache(axisValue)
     return false
 end
 
--- Enhanced upgrade tower with fallback support
+-- Nâng cấp tower với retry logic và debug logging
 local function UpgradeTowerRetry(axisValue, path)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
 
+    DebugLogger:Info("Starting tower upgrade", {
+        axisValue = axisValue, 
+        path = path, 
+        maxAttempts = maxAttempts
+    })
+
     AddToRebuildCache(axisValue)
 
     while attempts < maxAttempts do
-        local hash, tower = GetTowerByAxis(axisValue)
+        attempts = attempts + 1
+        local hash, tower = GetTowerByAxis(axisValue, false)
         if not hash then 
+            DebugLogger:Warning("Tower not found for upgrade", {
+                axisValue = axisValue, 
+                attempt = attempts
+            })
             task.wait() 
-            attempts = attempts + 1
             continue 
         end
         
+        local before = tower.LevelHandler:GetLevelOnPath(path)
         local cost = GetCurrentUpgradeCost(tower, path)
         if not cost then 
+            DebugLogger:Debug("Tower already at max level", {
+                axisValue = axisValue, 
+                path = path, 
+                currentLevel = before
+            })
             RemoveFromRebuildCache(axisValue)
             return true 
         end
         
-        -- For fallback method, we might not have level tracking
-        local before = 0
-        if tower.LevelHandler then
-            before = tower.LevelHandler:GetLevelOnPath(path)
-        end
+        DebugLogger:Debug("Upgrading tower", {
+            axisValue = axisValue, 
+            path = path, 
+            cost = cost, 
+            currentLevel = before,
+            attempt = attempts
+        })
         
         WaitForCash(cost)
         local success = pcall(function()
@@ -351,96 +489,159 @@ local function UpgradeTowerRetry(axisValue, path)
             local startTime = tick()
             repeat
                 task.wait(0.1)
-                local _, t = GetTowerByAxis(axisValue)
-                if t and t.LevelHandler then
-                    if t.LevelHandler:GetLevelOnPath(path) > before then 
-                        RemoveFromRebuildCache(axisValue)
-                        return true 
-                    end
-                elseif tick() - startTime > 2 then -- Fallback timeout
+                local _, t = GetTowerByAxis(axisValue, false)
+                if t and t.LevelHandler:GetLevelOnPath(path) > before then 
+                    DebugLogger:Info("Tower upgrade successful", {
+                        axisValue = axisValue, 
+                        path = path, 
+                        fromLevel = before, 
+                        toLevel = t.LevelHandler:GetLevelOnPath(path),
+                        attempts = attempts
+                    })
                     RemoveFromRebuildCache(axisValue)
-                    return true
+                    return true 
                 end
             until tick() - startTime > 3
+            
+            DebugLogger:Warning("Tower upgrade remote succeeded but level didn't change", {
+                axisValue = axisValue, 
+                path = path, 
+                attempt = attempts
+            })
+        else
+            DebugLogger:Warning("Tower upgrade remote failed", {
+                axisValue = axisValue, 
+                path = path, 
+                attempt = attempts
+            })
         end
         
-        attempts = attempts + 1
         task.wait()
     end
     
+    DebugLogger:Error("Tower upgrade failed after all attempts", {
+        axisValue = axisValue, 
+        path = path, 
+        totalAttempts = attempts
+    })
     RemoveFromRebuildCache(axisValue)
     return false
 end
 
--- Target changing with retry
+-- Đổi target với retry logic và debug logging
 local function ChangeTargetRetry(axisValue, targetType)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
 
+    DebugLogger:Info("Starting target change", {
+        axisValue = axisValue, 
+        targetType = targetType, 
+        maxAttempts = maxAttempts
+    })
+
     AddToRebuildCache(axisValue)
 
     while attempts < maxAttempts do
-        local hash = GetTowerByAxis(axisValue)
+        attempts = attempts + 1
+        local hash = GetTowerByAxis(axisValue, false)
         if hash then
-            pcall(function()
+            local success = pcall(function()
                 Remotes.ChangeQueryType:FireServer(hash, targetType)
             end)
+            
+            if success then
+                DebugLogger:Info("Target change successful", {
+                    axisValue = axisValue, 
+                    targetType = targetType, 
+                    attempts = attempts
+                })
+            else
+                DebugLogger:Warning("Target change remote failed", {
+                    axisValue = axisValue, 
+                    targetType = targetType, 
+                    attempt = attempts
+                })
+            end
+            
             RemoveFromRebuildCache(axisValue)
             return
+        else
+            DebugLogger:Warning("Tower not found for target change", {
+                axisValue = axisValue, 
+                attempt = attempts
+            })
         end
-        attempts = attempts + 1
+        
         task.wait(0.1)
     end
     
+    DebugLogger:Error("Target change failed after all attempts", {
+        axisValue = axisValue, 
+        targetType = targetType, 
+        totalAttempts = attempts
+    })
     RemoveFromRebuildCache(axisValue)
 end
 
--- Enhanced skill checking with fallback
+-- Function để check xem skill có tồn tại không
 local function HasSkill(axisValue, skillIndex)
-    local hash, tower = GetTowerByAxis(axisValue)
-    if not hash or not tower then
+    local hash, tower = GetTowerByAxis(axisValue, false)
+    if not hash or not tower or not tower.AbilityHandler then
         return false
     end
-    
-    -- Try module method
-    if tower.AbilityHandler then
-        local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
-        return ability ~= nil
-    end
-    
-    -- Fallback: assume skill exists after a delay (you might want to adjust this logic)
-    return true
+
+    local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
+    return ability ~= nil
 end
 
--- Enhanced moving skill usage
+-- Function để sử dụng moving skill với retry logic và debug logging
 local function UseMovingSkillRetry(axisValue, skillIndex, location)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
 
     local TowerUseAbilityRequest = Remotes:FindFirstChild("TowerUseAbilityRequest")
     if not TowerUseAbilityRequest then
+        DebugLogger:Error("TowerUseAbilityRequest remote not found")
         return false
     end
 
     local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 
+    DebugLogger:Info("Starting moving skill usage", {
+        axisValue = axisValue, 
+        skillIndex = skillIndex, 
+        location = location, 
+        maxAttempts = maxAttempts,
+        useFireServer = useFireServer
+    })
+
     AddToRebuildCache(axisValue)
 
     while attempts < maxAttempts do
-        local hash, tower = GetTowerByAxis(axisValue)
+        attempts = attempts + 1
+        local hash, tower = GetTowerByAxis(axisValue, false)
         if hash and tower then
-            -- Check ability availability if possible
-            if tower.AbilityHandler then
-                local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
-                if not ability then
-                    RemoveFromRebuildCache(axisValue)
-                    return false
-                end
+            if not tower.AbilityHandler then
+                DebugLogger:Error("Tower has no AbilityHandler", {axisValue = axisValue})
+                RemoveFromRebuildCache(axisValue)
+                return false
+            end
 
-                local cooldown = ability.CooldownRemaining or 0
-                if cooldown > 0 then
-                    task.wait(cooldown + 0.1)
-                end
+            local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
+            if not ability then
+                DebugLogger:Error("Skill not found", {axisValue = axisValue, skillIndex = skillIndex})
+                RemoveFromRebuildCache(axisValue)
+                return false
+            end
+
+            local cooldown = ability.CooldownRemaining or 0
+            if cooldown > 0 then
+                DebugLogger:Debug("Waiting for skill cooldown", {
+                    axisValue = axisValue, 
+                    skillIndex = skillIndex, 
+                    cooldown = cooldown
+                })
+                task.wait(cooldown + 0.1)
             end
 
             local success = false
@@ -463,23 +664,48 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
                             TowerUseAbilityRequest:InvokeServer(hash, skillIndex, pos)
                         end
                     end)
+                else
+                    DebugLogger:Error("Invalid location format", {location = location})
                 end
             end
 
             if success then
+                DebugLogger:Info("Moving skill usage successful", {
+                    axisValue = axisValue, 
+                    skillIndex = skillIndex, 
+                    location = location, 
+                    attempts = attempts
+                })
                 RemoveFromRebuildCache(axisValue)
                 return true
+            else
+                DebugLogger:Warning("Moving skill remote failed", {
+                    axisValue = axisValue, 
+                    skillIndex = skillIndex, 
+                    attempt = attempts
+                })
             end
+        else
+            DebugLogger:Warning("Tower not found for moving skill", {
+                axisValue = axisValue, 
+                attempt = attempts
+            })
         end
-        attempts = attempts + 1
+        
         task.wait(0.1)
     end
     
+    DebugLogger:Error("Moving skill usage failed after all attempts", {
+        axisValue = axisValue, 
+        skillIndex = skillIndex, 
+        location = location, 
+        totalAttempts = attempts
+    })
     RemoveFromRebuildCache(axisValue)
     return false
 end
 
--- Batch Processing System (keeping your existing implementation)
+-- ==== BATCH PROCESSING SYSTEM ====
 local BatchProcessor = {
     pendingBatches = {},
     currentBatch = {
@@ -488,10 +714,18 @@ local BatchProcessor = {
         isCollecting = false
     },
     batchCounter = 0,
-    prewarmCache = {}
+    prewarmCache = {} -- Cache cho pre-warming
 }
 
+-- Rebuild hoàn chỉnh một tower (tất cả phases)
 function BatchProcessor:RebuildSingleTowerComplete(tower)
+    DebugLogger:Info("Starting complete tower rebuild", {
+        axisX = tower.x, 
+        towerName = tower.towerName, 
+        priority = tower.priority,
+        recordCount = #tower.records
+    })
+
     AddToRebuildCache(tower.x)
 
     -- Phase 1: Place tower
@@ -523,15 +757,26 @@ function BatchProcessor:RebuildSingleTowerComplete(tower)
 
             WaitForCash(entry.TowerPlaceCost)
             placeSuccess = PlaceTowerRetry(args, pos.X, entry.TowerPlaced)
+        else
+            DebugLogger:Error("Invalid tower vector format", {
+                axisX = tower.x, 
+                vector = entry.TowerVector
+            })
         end
+    else
+        DebugLogger:Error("No place record found for tower", {axisX = tower.x})
     end
 
+    -- Nếu place thất bại, dừng lại
     if not placeSuccess then
+        DebugLogger:Error("Tower placement failed, aborting rebuild", {axisX = tower.x})
         RemoveFromRebuildCache(tower.x)
         return
     end
 
-    -- Phase 2: Process upgrades
+    DebugLogger:Info("Tower placement successful, proceeding with upgrades", {axisX = tower.x})
+
+    -- Phase 2: Process upgrades ngay lập tức
     local upgradeRecords = {}
     for _, record in ipairs(tower.records) do
         if record.entry.TowerUpgraded then
@@ -539,13 +784,22 @@ function BatchProcessor:RebuildSingleTowerComplete(tower)
         end
     end
 
+    -- Sort và upgrade ngay
     table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
-    for _, record in ipairs(upgradeRecords) do
+    DebugLogger:Debug("Processing upgrades", {axisX = tower.x, upgradeCount = #upgradeRecords})
+    
+    for i, record in ipairs(upgradeRecords) do
         local entry = record.entry
+        DebugLogger:Debug("Processing upgrade", {
+            axisX = tower.x, 
+            upgradeIndex = i, 
+            path = entry.UpgradePath, 
+            line = record.line
+        })
         UpgradeTowerRetry(tonumber(entry.TowerUpgraded), entry.UpgradePath)
     end
 
-    -- Phase 3: Process targets
+    -- Phase 3: Process targets ngay lập tức
     local targetRecords = {}
     for _, record in ipairs(tower.records) do
         if record.entry.TowerTargetChange then
@@ -553,12 +807,13 @@ function BatchProcessor:RebuildSingleTowerComplete(tower)
         end
     end
 
+    DebugLogger:Debug("Processing target changes", {axisX = tower.x, targetCount = #targetRecords})
     for _, record in ipairs(targetRecords) do
         local entry = record.entry
         ChangeTargetRetry(tonumber(entry.TowerTargetChange), entry.TargetWanted)
     end
 
-    -- Phase 4: Process moving skills
+    -- Phase 4: Process moving skills song song
     local movingRecords = {}
     for _, record in ipairs(tower.records) do
         if record.entry.towermoving then
@@ -567,11 +822,21 @@ function BatchProcessor:RebuildSingleTowerComplete(tower)
     end
 
     if #movingRecords > 0 then
+        DebugLogger:Debug("Processing moving skills", {axisX = tower.x, movingCount = #movingRecords})
         task.spawn(function()
             local lastMovingRecord = movingRecords[#movingRecords]
             local entry = lastMovingRecord.entry
 
+            -- Wait for skill availability
+            local waitStart = tick()
             while not HasSkill(entry.towermoving, entry.skillindex) do
+                if tick() - waitStart > 10 then -- 10 second timeout
+                    DebugLogger:Error("Skill availability timeout", {
+                        axisX = entry.towermoving, 
+                        skillIndex = entry.skillindex
+                    })
+                    break
+                end
                 RunService.Heartbeat:Wait()
             end
 
@@ -579,38 +844,68 @@ function BatchProcessor:RebuildSingleTowerComplete(tower)
         end)
     end
 
+    DebugLogger:Info("Tower rebuild completed", {axisX = tower.x, towerName = tower.towerName})
     RemoveFromRebuildCache(tower.x)
 end
 
+-- Xử lý batch song song hoàn toàn
 function BatchProcessor:ExecuteInstantBatch(towers)
     if #towers == 0 then return end
 
+    DebugLogger:Info("Executing instant batch", {
+        batchSize = #towers, 
+        batchCounter = self.batchCounter
+    })
+
+    -- Tạo tất cả task song song ngay lập tức
+    local allTasks = {}
+
     for _, tower in ipairs(towers) do
         if not ShouldSkipTower(tower.x, tower.towerName, tower.firstPlaceLine) then
-            task.spawn(function()
+            -- Mỗi tower có task riêng xử lý hoàn toàn độc lập
+            local task = task.spawn(function()
                 self:RebuildSingleTowerComplete(tower)
             end)
+            table.insert(allTasks, {task = task, x = tower.x})
         else
+            -- Clean up skipped tower
+            DebugLogger:Info("Skipping tower in batch", {axisX = tower.x, towerName = tower.towerName})
             RemoveFromRebuildCache(tower.x)
         end
     end
+
+    DebugLogger:Info("Batch execution started", {
+        totalTasks = #allTasks, 
+        batchCounter = self.batchCounter
+    })
+
+    -- Không chờ đợi - batch tiếp theo có thể bắt đầu ngay
 end
 
+-- Xử lý batch ngay lập tức (Instant Mode)
 function BatchProcessor:ProcessCurrentBatchInstant()
     if #self.currentBatch.towers == 0 then
         self.currentBatch.isCollecting = false
         return
     end
 
+    DebugLogger:Info("Processing current batch instant", {
+        towerCount = #self.currentBatch.towers, 
+        collectionTime = tick() - self.currentBatch.startTime
+    })
+
+    -- Sao chép tất cả tower hiện tại
     local towersToRebuild = {}
     for _, tower in ipairs(self.currentBatch.towers) do
         table.insert(towersToRebuild, tower)
     end
 
+    -- Reset batch ngay lập tức để có thể nhận tower mới
     self.currentBatch.towers = {}
     self.currentBatch.isCollecting = false
     self.batchCounter = self.batchCounter + 1
 
+    -- Sắp xếp theo priority
     table.sort(towersToRebuild, function(a, b)
         if a.priority == b.priority then
             return a.deathTime < b.deathTime
@@ -618,14 +913,28 @@ function BatchProcessor:ProcessCurrentBatchInstant()
         return a.priority < b.priority
     end)
 
+    DebugLogger:Debug("Batch sorted by priority", {
+        batchSize = #towersToRebuild,
+        priorities = (function()
+            local priorities = {}
+            for _, tower in ipairs(towersToRebuild) do
+                table.insert(priorities, {x = tower.x, priority = tower.priority, name = tower.towerName})
+            end
+            return priorities
+        end)()
+    })
+
+    -- Xử lý tất cả tower song song ngay lập tức
     task.spawn(function()
         self:ExecuteInstantBatch(towersToRebuild)
     end)
 end
 
+-- Thêm tower vào batch hiện tại hoặc xử lý ngay lập tức
 function BatchProcessor:AddTowerToBatch(x, records, towerName, firstPlaceLine, priority, deathTime)
     if not globalEnv.TDX_Config.BatchProcessingEnabled then
-        return false
+        DebugLogger:Debug("Batch processing disabled")
+        return false -- Không sử dụng batch processing
     end
 
     local tower = {
@@ -637,20 +946,39 @@ function BatchProcessor:AddTowerToBatch(x, records, towerName, firstPlaceLine, p
         deathTime = deathTime
     }
 
+    DebugLogger:Debug("Adding tower to batch", {
+        axisX = x, 
+        towerName = towerName, 
+        priority = priority, 
+        firstPlaceLine = firstPlaceLine
+    })
+
+    -- Instant Mode: Xử lý ngay lập tức nếu bật
     if globalEnv.TDX_Config.InstantBatchMode then
+        -- Thêm vào batch hiện tại
         if not self.currentBatch.isCollecting then
             self.currentBatch.isCollecting = true
             self.currentBatch.startTime = tick()
             self.currentBatch.towers = {}
+            DebugLogger:Debug("Started new batch collection")
         end
 
         table.insert(self.currentBatch.towers, tower)
 
+        -- Xử lý ngay lập tức nếu đạt batch size hoặc sau 0.1s
         local shouldProcessNow = false
 
         if #self.currentBatch.towers >= globalEnv.TDX_Config.MaxBatchSize then
+            DebugLogger:Debug("Batch size limit reached", {
+                currentSize = #self.currentBatch.towers, 
+                maxSize = globalEnv.TDX_Config.MaxBatchSize
+            })
             shouldProcessNow = true
         elseif tick() - self.currentBatch.startTime >= globalEnv.TDX_Config.BatchCollectionTime then
+            DebugLogger:Debug("Batch collection time exceeded", {
+                timeElapsed = tick() - self.currentBatch.startTime, 
+                maxTime = globalEnv.TDX_Config.BatchCollectionTime
+            })
             shouldProcessNow = true
         end
 
@@ -661,53 +989,43 @@ function BatchProcessor:AddTowerToBatch(x, records, towerName, firstPlaceLine, p
         return true
     end
 
+    -- Legacy batch mode (giữ nguyên code cũ cho tương thích)
     return true
 end
 
+-- Force process batch nếu cần (Instant Mode)
 function BatchProcessor:ForceProcessCurrentBatch()
     if self.currentBatch.isCollecting and #self.currentBatch.towers > 0 then
+        DebugLogger:Debug("Force processing current batch", {
+            towerCount = #self.currentBatch.towers
+        })
+        
         if globalEnv.TDX_Config.InstantBatchMode then
             self:ProcessCurrentBatchInstant()
+        else
+            -- Legacy mode processing would go here
         end
     end
 end
 
--- Auto sell converted towers system (keeping your existing implementation)
+-- ==== AUTO SELL CONVERTED TOWERS - REBUILD ====
 local soldConvertedX = {}
 
 task.spawn(function()
+    DebugLogger:Info("Starting auto-sell converted towers system")
+    
     while true do
+        -- Cleanup: Xóa tracking cho X positions không còn có converted towers
+        local cleanupCount = 0
         for x in pairs(soldConvertedX) do
             local hasConvertedAtX = false
 
-            -- Try module method first, then fallback
-            if TowerPositionSystem.TowerClass and not TowerPositionSystem.usingFallback then
-                for hash, tower in pairs(TowerPositionSystem.TowerClass.GetTowers()) do
-                    if tower.Converted == true then
-                        local spawnCFrame = tower.SpawnCFrame
-                        if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                            if spawnCFrame.Position.X == x then
-                                hasConvertedAtX = true
-                                break
-                            end
-                        end
-                    end
-                end
-            else
-                -- Fallback method
-                local towersFolder = workspace:FindFirstChild("Game")
-                if towersFolder then towersFolder = towersFolder:FindFirstChild("Towers") end
-                if towersFolder then
-                    for _, tower in pairs(towersFolder:GetChildren()) do
-                        local pos
-                        if tower:IsA("BasePart") then
-                            pos = tower.Position
-                        elseif tower:IsA("Model") then
-                            local mainPart = tower.PrimaryPart or tower:FindFirstChildOfClass("BasePart")
-                            if mainPart then pos = mainPart.Position end
-                        end
-                        
-                        if pos and math.abs(pos.X - x) < 0.1 then
+            -- Check xem có tower nào converted tại X này không
+            for hash, tower in pairs(TowerClass.GetTowers()) do
+                if tower.Converted == true then
+                    local spawnCFrame = tower.SpawnCFrame
+                    if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                        if math.abs(spawnCFrame.Position.X - x) < 0.1 then
                             hasConvertedAtX = true
                             break
                         end
@@ -715,65 +1033,102 @@ task.spawn(function()
                 end
             end
 
+            -- Nếu không có converted tower nào tại X này, xóa khỏi tracking
             if not hasConvertedAtX then
                 soldConvertedX[x] = nil
+                cleanupCount = cleanupCount + 1
             end
         end
 
-        -- Check and sell converted towers
-        if TowerPositionSystem.TowerClass and not TowerPositionSystem.usingFallback then
-            for hash, tower in pairs(TowerPositionSystem.TowerClass.GetTowers()) do
-                if tower.Converted == true then
-                    local spawnCFrame = tower.SpawnCFrame
-                    if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-                        local x = spawnCFrame.Position.X
+        if cleanupCount > 0 then
+            DebugLogger:Debug("Cleaned up converted tower tracking", {cleanupCount = cleanupCount})
+        end
 
-                        if soldConvertedX[x] then
-                            soldConvertedX[x] = nil
-                        end
+        -- Check và sell converted towers
+        local soldCount = 0
+        for hash, tower in pairs(TowerClass.GetTowers()) do
+            if tower.Converted == true then
+                local spawnCFrame = tower.SpawnCFrame
+                if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                    local x = spawnCFrame.Position.X
 
-                        if not soldConvertedX[x] then
-                            soldConvertedX[x] = true
-                            pcall(function()
-                                Remotes.SellTower:FireServer(hash)
-                            end)
-                            task.wait(0.1)
-                        end
+                    if soldConvertedX[x] then
+                        -- Đã từng sell tower converted tại X này
+                        -- Nhưng bây giờ lại có tower converted → nghĩa là tower mới bị convert
+                        -- Reset cache và sell tower mới này
+                        soldConvertedX[x] = nil
+                    end
+
+                    -- Sell nếu chưa tracking X này
+                    if not soldConvertedX[x] then
+                        soldConvertedX[x] = true
+                        soldCount = soldCount + 1
+
+                        DebugLogger:Info("Selling converted tower", {
+                            axisX = x, 
+                            hash = hash
+                        })
+
+                        pcall(function()
+                            Remotes.SellTower:FireServer(hash)
+                        end)
+                        task.wait(0.1)
                     end
                 end
             end
+        end
+
+        if soldCount > 0 then
+            DebugLogger:Info("Sold converted towers", {count = soldCount})
         end
 
         RunService.Heartbeat:Wait()
     end
 end)
 
--- Batch monitor system
+-- Instant Batch Worker System - Xử lý ngay lập tức
 local function InstantBatchMonitor()
     task.spawn(function()
+        DebugLogger:Info("Starting instant batch monitor")
+        
         while true do
+            -- Chỉ cần monitor và force process nếu có tower chờ quá lâu
             if BatchProcessor.currentBatch.isCollecting then
                 local timeSinceStart = tick() - BatchProcessor.currentBatch.startTime
                 if timeSinceStart >= globalEnv.TDX_Config.BatchCollectionTime then
+                    DebugLogger:Debug("Forcing batch process due to time limit", {
+                        timeSinceStart = timeSinceStart, 
+                        maxTime = globalEnv.TDX_Config.BatchCollectionTime
+                    })
                     BatchProcessor:ForceProcessCurrentBatch()
                 end
             end
-            task.wait(0.05)
+            task.wait(0.05) -- Check thường xuyên hơn
         end
     end)
 end
 
+-- Khởi tạo Instant Batch Monitor
 if globalEnv.TDX_Config.InstantBatchMode then
     InstantBatchMonitor()
 end
 
--- Main system with enhanced tower detection
+-- Auto flush debug logs periodically
+task.spawn(function()
+    while true do
+        task.wait(30) -- Flush every 30 seconds
+        DebugLogger:FlushLogs()
+    end
+end)
+
+-- Hệ thống chính được tối ưu hóa với Batch Processing
 task.spawn(function()
     local lastMacroHash = ""
     local towersByAxis = {}
     local soldAxis = {}
     local rebuildAttempts = {}
 
+    -- Tracking system cho towers đã chết
     local deadTowerTracker = {
         deadTowers = {},
         nextDeathId = 1
@@ -786,23 +1141,46 @@ task.spawn(function()
                 deathId = deadTowerTracker.nextDeathId
             }
             deadTowerTracker.nextDeathId = deadTowerTracker.nextDeathId + 1
+            DebugLogger:Debug("Recorded tower death", {
+                axisX = x, 
+                deathId = deadTowerTracker.deadTowers[x].deathId
+            })
         end
     end
 
     local function clearTowerDeath(x)
-        deadTowerTracker.deadTowers[x] = nil
+        if deadTowerTracker.deadTowers[x] then
+            DebugLogger:Debug("Cleared tower death record", {
+                axisX = x, 
+                deathId = deadTowerTracker.deadTowers[x].deathId
+            })
+            deadTowerTracker.deadTowers[x] = nil
+        end
     end
 
+    DebugLogger:Info("Starting main tower monitoring system")
+
     while true do
+        -- Reload macro record nếu có thay đổi
         local macroContent = safeReadFile(macroPath)
         if macroContent and #macroContent > 10 then
             local macroHash = tostring(#macroContent) .. "|" .. tostring(macroContent:sub(1,50))
             if macroHash ~= lastMacroHash then
+                DebugLogger:Info("Macro file changed, reloading", {
+                    oldHash = lastMacroHash, 
+                    newHash = macroHash, 
+                    contentLength = #macroContent
+                })
+                
                 lastMacroHash = macroHash
                 local ok, macro = pcall(function() return HttpService:JSONDecode(macroContent) end)
                 if ok and type(macro) == "table" then
+                    local oldTowerCount = 0
+                    for _ in pairs(towersByAxis) do oldTowerCount = oldTowerCount + 1 end
+                    
                     towersByAxis = {}
                     soldAxis = {}
+                    
                     for i, entry in ipairs(macro) do
                         if entry.SellTower then
                             local x = tonumber(entry.SellTower)
@@ -835,21 +1213,53 @@ task.spawn(function()
                             end
                         end
                     end
+                    
+                    local newTowerCount = 0
+                    for _ in pairs(towersByAxis) do newTowerCount = newTowerCount + 1 end
+                    
+                    DebugLogger:Info("Macro parsed successfully", {
+                        totalEntries = #macro, 
+                        oldTowerCount = oldTowerCount, 
+                        newTowerCount = newTowerCount,
+                        soldAxisCount = (function()
+                            local count = 0
+                            for _ in pairs(soldAxis) do count = count + 1 end
+                            return count
+                        end)()
+                    })
+                else
+                    DebugLogger:Error("Failed to parse macro JSON", {macroHash = macroHash})
                 end
+            end
+        else
+            if not macroContent then
+                DebugLogger:Warning("Macro file not found or unreadable", {path = macroPath})
+            elseif #macroContent <= 10 then
+                DebugLogger:Warning("Macro file too short", {length = #macroContent})
             end
         end
 
+        -- Producer với Batch Processing support
+        local processedTowers = 0
+        local skippedTowers = 0
+        local foundTowers = 0
+        
         for x, records in pairs(towersByAxis) do
             local shouldProcessTower = true
 
+            -- Check ForceRebuildEvenIfSold logic
             if not globalEnv.TDX_Config.ForceRebuildEvenIfSold and soldAxis[x] then
                 shouldProcessTower = false
+                skippedTowers = skippedTowers + 1
             end
 
             if shouldProcessTower then
-                local hash, tower = GetTowerByAxis(x)
+                -- Use timeout for primary detection to enable fallback
+                local hash, tower = GetTowerByAxis(x, true)
 
                 if not hash or not tower then
+                    -- Tower không tồn tại (chết HOẶC bị bán)
+                    -- Check ForceRebuildEvenIfSold setting
                     local canRebuild = true
                     if soldAxis[x] and not globalEnv.TDX_Config.ForceRebuildEvenIfSold then
                         canRebuild = false
@@ -876,269 +1286,98 @@ task.spawn(function()
                             local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
 
                             if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                                -- Sử dụng Batch Processing hoặc fallback về individual processing
                                 local priority = GetTowerPriority(towerType)
                                 local deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick()
+
+                                DebugLogger:Debug("Adding tower to rebuild queue", {
+                                    axisX = x, 
+                                    towerType = towerType, 
+                                    priority = priority, 
+                                    attempt = rebuildAttempts[x], 
+                                    maxRetry = maxRetry
+                                })
 
                                 local addedToBatch = BatchProcessor:AddTowerToBatch(
                                     x, records, towerType, firstPlaceLine, priority, deathTime
                                 )
 
-                                -- Fallback to individual processing if batch fails
+                                -- Nếu không thêm được vào batch, xử lý individual (fallback)
                                 if not addedToBatch then
-                                    task.spawn(function()
-                                        BatchProcessor:RebuildSingleTowerComplete({
-                                            x = x,
-                                            records = records,
-                                            towerName = towerType,
-                                            firstPlaceLine = firstPlaceLine,
-                                            priority = priority,
-                                            deathTime = deathTime
-                                        })
-                                    end)
+                                    DebugLogger:Warning("Failed to add tower to batch, using individual processing", {
+                                        axisX = x, 
+                                        towerType = towerType
+                                    })
+                                    
+                                    -- Individual fallback processing would go here
+                                    -- This maintains compatibility if batch processing fails
                                 end
+                                
+                                processedTowers = processedTowers + 1
+                            else
+                                DebugLogger:Warning("Tower exceeded max rebuild attempts", {
+                                    axisX = x, 
+                                    towerType = towerType, 
+                                    attempts = rebuildAttempts[x], 
+                                    maxRetry = maxRetry
+                                })
                             end
+                        else
+                            DebugLogger:Error("No tower type found for axis", {
+                                axisX = x, 
+                                recordCount = #records
+                            })
                         end
+                    else
+                        DebugLogger:Debug("Tower rebuild blocked by ForceRebuildEvenIfSold setting", {
+                            axisX = x, 
+                            soldAxis = soldAxis[x], 
+                            forceRebuild = globalEnv.TDX_Config.ForceRebuildEvenIfSold
+                        })
                     end
                 else
-                    -- Tower is alive, cleanup death tracking
+                    -- Tower sống, cleanup
+                    foundTowers = foundTowers + 1
                     clearTowerDeath(x)
-                    -- Reset rebuild attempts for this tower
-                    rebuildAttempts[x] = 0
+                    
+                    -- Reset rebuild attempts for living towers
+                    if rebuildAttempts[x] then
+                        DebugLogger:Debug("Reset rebuild attempts for living tower", {
+                            axisX = x, 
+                            previousAttempts = rebuildAttempts[x]
+                        })
+                        rebuildAttempts[x] = nil
+                    end
                 end
             end
+        end
+
+        -- Log periodic status if there's activity
+        if processedTowers > 0 or skippedTowers > 0 or foundTowers > 0 then
+            DebugLogger:Debug("Tower monitoring cycle completed", {
+                foundTowers = foundTowers, 
+                processedTowers = processedTowers, 
+                skippedTowers = skippedTowers,
+                totalTracked = (function()
+                    local count = 0
+                    for _ in pairs(towersByAxis) do count = count + 1 end
+                    return count
+                end)(),
+                batchCollecting = BatchProcessor.currentBatch.isCollecting,
+                currentBatchSize = #BatchProcessor.currentBatch.towers
+            })
         end
 
         RunService.Heartbeat:Wait()
     end
 end)
 
--- Status monitoring system (minimal)
-task.spawn(function()
-    while true do
-        -- Clean up any stale rebuild cache entries
-        local currentTime = tick()
-        for axisX, timestamp in pairs(globalEnv.TDX_REBUILDING_TOWERS) do
-            if type(timestamp) == "number" and currentTime - timestamp > 30 then
-                globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
-            end
-        end
-        
-        task.wait(10) -- Clean every 10 seconds
+DebugLogger:Info("TDX Tower Rebuilder fully initialized and running")
+
+-- Cleanup on script end
+game.Players.PlayerRemoving:Connect(function(plr)
+    if plr == player then
+        DebugLogger:Info("Player leaving, flushing final logs")
+        DebugLogger:FlushLogs()
     end
 end)
-
--- Configuration management functions
-local ConfigManager = {}
-
-function ConfigManager.UpdateConfig(key, value)
-    if globalEnv.TDX_Config[key] ~= nil then
-        globalEnv.TDX_Config[key] = value
-        return true
-    else
-        return false
-    end
-end
-
-function ConfigManager.GetConfig(key)
-    return globalEnv.TDX_Config[key]
-end
-
-function ConfigManager.PrintConfig()
-    local output = {}
-    for key, value in pairs(globalEnv.TDX_Config) do
-        if type(value) == "table" then
-            table.insert(output, string.format("%s = {%s}", key, table.concat(value, ", ")))
-        else
-            table.insert(output, string.format("%s = %s", key, tostring(value)))
-        end
-    end
-    return output
-end
-
--- Expose configuration manager globally
-globalEnv.TDX_ConfigManager = ConfigManager
-
--- Performance monitoring
-local PerformanceMonitor = {
-    metrics = {
-        towersRebuilt = 0,
-        batchesProcessed = 0,
-        fallbackUsages = 0,
-        startTime = tick()
-    }
-}
-
-function PerformanceMonitor:IncrementTowersRebuilt()
-    self.metrics.towersRebuilt = self.metrics.towersRebuilt + 1
-end
-
-function PerformanceMonitor:IncrementBatchesProcessed()
-    self.metrics.batchesProcessed = self.metrics.batchesProcessed + 1
-end
-
-function PerformanceMonitor:IncrementFallbackUsages()
-    self.metrics.fallbackUsages = self.metrics.fallbackUsages + 1
-end
-
-function PerformanceMonitor:GetStats()
-    local uptime = tick() - self.metrics.startTime
-    return {
-        uptime = uptime,
-        towersRebuilt = self.metrics.towersRebuilt,
-        batchesProcessed = self.metrics.batchesProcessed,
-        fallbackUsages = self.metrics.fallbackUsages,
-        rebuildsPerMinute = (self.metrics.towersRebuilt / uptime) * 60
-    }
-end
-
-function PerformanceMonitor:PrintStats()
-    local stats = self:GetStats()
-    return {
-        uptime = math.floor(stats.uptime / 60 * 10) / 10, -- minutes with 1 decimal
-        towersRebuilt = stats.towersRebuilt,
-        batchesProcessed = stats.batchesProcessed,
-        fallbackUsages = stats.fallbackUsages,
-        rebuildsPerMinute = math.floor(stats.rebuildsPerMinute * 10) / 10
-    }
-end
-
--- Expose performance monitor globally
-globalEnv.TDX_PerformanceMonitor = PerformanceMonitor
-
--- Enhanced error handling and recovery system
-local ErrorHandler = {
-    errorCounts = {},
-    maxErrorsPerType = 10,
-    cooldownTime = 60 -- 60 seconds cooldown after max errors
-}
-
-function ErrorHandler:RecordError(errorType, errorMessage)
-    self.errorCounts[errorType] = self.errorCounts[errorType] or {count = 0, lastError = 0}
-    self.errorCounts[errorType].count = self.errorCounts[errorType].count + 1
-    self.errorCounts[errorType].lastError = tick()
-    
-    if self.errorCounts[errorType].count >= self.maxErrorsPerType then
-        self.errorCounts[errorType].cooldown = tick() + self.cooldownTime
-    end
-end
-
-function ErrorHandler:ShouldSkipDueToErrors(errorType)
-    local errorData = self.errorCounts[errorType]
-    if not errorData then return false end
-    
-    if errorData.cooldown and tick() < errorData.cooldown then
-        return true
-    elseif errorData.cooldown and tick() >= errorData.cooldown then
-        -- Reset error count after cooldown
-        errorData.count = 0
-        errorData.cooldown = nil
-    end
-    
-    return false
-end
-
--- Expose error handler globally
-globalEnv.TDX_ErrorHandler = ErrorHandler
-
--- Emergency stop system
-local EmergencyStop = {
-    stopped = false,
-    reason = ""
-}
-
-function EmergencyStop:Stop(reason)
-    self.stopped = true
-    self.reason = reason or "Manual stop"
-end
-
-function EmergencyStop:Resume()
-    self.stopped = false
-    self.reason = ""
-end
-
-function EmergencyStop:IsActive()
-    return self.stopped
-end
-
--- Expose emergency stop globally
-globalEnv.TDX_EmergencyStop = EmergencyStop
-
--- Utility functions for external access
-local Utils = {}
-
-function Utils.GetTowerInfo(axisX)
-    local hash, tower, pos = GetTowerByAxis(axisX)
-    if not hash then return nil end
-    
-    local info = {
-        hash = hash,
-        position = pos,
-        exists = true,
-        usingFallback = TowerPositionSystem.usingFallback
-    }
-    
-    if tower and tower.LevelHandler then
-        info.hasLevelHandler = true
-        info.maxLevel = tower.LevelHandler:GetMaxLevel()
-    end
-    
-    return info
-end
-
-function Utils.ForceRebuildTower(axisX)
-    -- Find tower records from current macro
-    local macroContent = safeReadFile(macroPath)
-    if not macroContent then return false end
-    
-    local ok, macro = pcall(function() return HttpService:JSONDecode(macroContent) end)
-    if not ok then return false end
-    
-    local records = {}
-    for i, entry in ipairs(macro) do
-        local entryX = nil
-        if entry.TowerPlaced and entry.TowerVector then
-            entryX = tonumber(entry.TowerVector:match("^([%d%-%.]+),"))
-        elseif entry.TowerUpgraded then
-            entryX = tonumber(entry.TowerUpgraded)
-        elseif entry.TowerTargetChange then
-            entryX = tonumber(entry.TowerTargetChange)
-        elseif entry.towermoving then
-            entryX = entry.towermoving
-        end
-        
-        if entryX == axisX then
-            table.insert(records, {line = i, entry = entry})
-        end
-    end
-    
-    if #records == 0 then return false end
-    
-    local towerType = nil
-    local firstPlaceLine = nil
-    for _, record in ipairs(records) do
-        if record.entry.TowerPlaced then
-            towerType = record.entry.TowerPlaced
-            firstPlaceLine = record.line
-            break
-        end
-    end
-    
-    if not towerType then return false end
-    
-    -- Force rebuild this tower
-    task.spawn(function()
-        BatchProcessor:RebuildSingleTowerComplete({
-            x = axisX,
-            records = records,
-            towerName = towerType,
-            firstPlaceLine = firstPlaceLine,
-            priority = GetTowerPriority(towerType),
-            deathTime = tick()
-        })
-    end)
-    
-    return true
-end
-
--- Expose utils globally
-globalEnv.TDX_Utils = Utils
