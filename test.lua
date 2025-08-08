@@ -132,7 +132,6 @@ function TowerPositionSystem:GetTowerByAxis(axisX)
             self.TowerClass = LoadTowerClass()
             if self.TowerClass then
                 self.usingFallback = false
-                print("TowerClass module loaded successfully")
             end
         end
     end
@@ -155,7 +154,6 @@ function TowerPositionSystem:GetTowerByAxis(axisX)
         if success and hash then
             return hash, tower, pos
         elseif not success then
-            print("TowerClass method failed, switching to fallback")
             self.usingFallback = true
         end
     end
@@ -914,48 +912,18 @@ task.spawn(function()
     end
 end)
 
--- Status monitoring and debugging system
+-- Status monitoring system (minimal)
 task.spawn(function()
-    local lastStatusTime = 0
-    local statusInterval = 30 -- Print status every 30 seconds
-    
     while true do
+        -- Clean up any stale rebuild cache entries
         local currentTime = tick()
-        if currentTime - lastStatusTime >= statusInterval then
-            lastStatusTime = currentTime
-            
-            local totalTowers = 0
-            local rebuildingCount = 0
-            
-            -- Count total rebuilding towers
-            for _ in pairs(globalEnv.TDX_REBUILDING_TOWERS) do
-                rebuildingCount = rebuildingCount + 1
-            end
-            
-            -- Count total towers (try both methods)
-            if TowerPositionSystem.TowerClass and not TowerPositionSystem.usingFallback then
-                for _ in pairs(TowerPositionSystem.TowerClass.GetTowers()) do
-                    totalTowers = totalTowers + 1
-                end
-            else
-                local towersFolder = workspace:FindFirstChild("Game")
-                if towersFolder then towersFolder = towersFolder:FindFirstChild("Towers") end
-                if towersFolder then
-                    totalTowers = #towersFolder:GetChildren()
-                end
-            end
-            
-            print(string.format("[TDX Rebuild] Status - Total Towers: %d, Rebuilding: %d, Using Fallback: %s", 
-                totalTowers, rebuildingCount, tostring(TowerPositionSystem.usingFallback)))
-            
-            if BatchProcessor.currentBatch.isCollecting then
-                print(string.format("[TDX Rebuild] Current Batch - Towers: %d, Time Collecting: %.1fs", 
-                    #BatchProcessor.currentBatch.towers, 
-                    currentTime - BatchProcessor.currentBatch.startTime))
+        for axisX, timestamp in pairs(globalEnv.TDX_REBUILDING_TOWERS) do
+            if type(timestamp) == "number" and currentTime - timestamp > 30 then
+                globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
             end
         end
         
-        task.wait(1)
+        task.wait(10) -- Clean every 10 seconds
     end
 end)
 
@@ -965,10 +933,8 @@ local ConfigManager = {}
 function ConfigManager.UpdateConfig(key, value)
     if globalEnv.TDX_Config[key] ~= nil then
         globalEnv.TDX_Config[key] = value
-        print(string.format("[TDX Config] Updated %s = %s", key, tostring(value)))
         return true
     else
-        print(string.format("[TDX Config] Unknown config key: %s", key))
         return false
     end
 end
@@ -978,15 +944,15 @@ function ConfigManager.GetConfig(key)
 end
 
 function ConfigManager.PrintConfig()
-    print("=== TDX Rebuild Configuration ===")
+    local output = {}
     for key, value in pairs(globalEnv.TDX_Config) do
         if type(value) == "table" then
-            print(string.format("%s = {%s}", key, table.concat(value, ", ")))
+            table.insert(output, string.format("%s = {%s}", key, table.concat(value, ", ")))
         else
-            print(string.format("%s = %s", key, tostring(value)))
+            table.insert(output, string.format("%s = %s", key, tostring(value)))
         end
     end
-    print("================================")
+    return output
 end
 
 -- Expose configuration manager globally
@@ -1027,13 +993,13 @@ end
 
 function PerformanceMonitor:PrintStats()
     local stats = self:GetStats()
-    print("=== TDX Rebuild Performance Stats ===")
-    print(string.format("Uptime: %.1f minutes", stats.uptime / 60))
-    print(string.format("Towers Rebuilt: %d", stats.towersRebuilt))
-    print(string.format("Batches Processed: %d", stats.batchesProcessed))
-    print(string.format("Fallback Usages: %d", stats.fallbackUsages))
-    print(string.format("Rebuilds/Minute: %.1f", stats.rebuildsPerMinute))
-    print("=====================================")
+    return {
+        uptime = math.floor(stats.uptime / 60 * 10) / 10, -- minutes with 1 decimal
+        towersRebuilt = stats.towersRebuilt,
+        batchesProcessed = stats.batchesProcessed,
+        fallbackUsages = stats.fallbackUsages,
+        rebuildsPerMinute = math.floor(stats.rebuildsPerMinute * 10) / 10
+    }
 end
 
 -- Expose performance monitor globally
@@ -1051,10 +1017,7 @@ function ErrorHandler:RecordError(errorType, errorMessage)
     self.errorCounts[errorType].count = self.errorCounts[errorType].count + 1
     self.errorCounts[errorType].lastError = tick()
     
-    print(string.format("[TDX Error] %s: %s (Count: %d)", errorType, errorMessage, self.errorCounts[errorType].count))
-    
     if self.errorCounts[errorType].count >= self.maxErrorsPerType then
-        print(string.format("[TDX Error] Maximum errors reached for %s, entering cooldown", errorType))
         self.errorCounts[errorType].cooldown = tick() + self.cooldownTime
     end
 end
@@ -1069,7 +1032,6 @@ function ErrorHandler:ShouldSkipDueToErrors(errorType)
         -- Reset error count after cooldown
         errorData.count = 0
         errorData.cooldown = nil
-        print(string.format("[TDX Error] Cooldown expired for %s, resuming operations", errorType))
     end
     
     return false
@@ -1087,13 +1049,11 @@ local EmergencyStop = {
 function EmergencyStop:Stop(reason)
     self.stopped = true
     self.reason = reason or "Manual stop"
-    print(string.format("[TDX Emergency] System stopped: %s", self.reason))
 end
 
 function EmergencyStop:Resume()
     self.stopped = false
     self.reason = ""
-    print("[TDX Emergency] System resumed")
 end
 
 function EmergencyStop:IsActive()
@@ -1182,22 +1142,3 @@ end
 
 -- Expose utils globally
 globalEnv.TDX_Utils = Utils
-
-print("=== TDX Enhanced Auto-Rebuild System Loaded ===")
-print("Features:")
-print("- Enhanced tower position detection with fallback")
-print("- Batch processing with instant mode")
-print("- Automatic converted tower selling")
-print("- Performance monitoring")
-print("- Error handling and recovery")
-print("- Emergency stop system")
-print("")
-print("Available commands:")
-print("TDX_ConfigManager.PrintConfig() - Show current configuration")
-print("TDX_ConfigManager.UpdateConfig(key, value) - Update configuration")
-print("TDX_PerformanceMonitor.PrintStats() - Show performance statistics")
-print("TDX_EmergencyStop.Stop(reason) - Emergency stop")
-print("TDX_EmergencyStop.Resume() - Resume operations")
-print("TDX_Utils.GetTowerInfo(axisX) - Get tower information")
-print("TDX_Utils.ForceRebuildTower(axisX) - Force rebuild specific tower")
-print("===============================================")
