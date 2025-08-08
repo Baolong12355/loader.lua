@@ -1,4 +1,4 @@
--- GITHUB SESSION MANAGEMENT - OPTIMIZED VERSION
+
 -- Chỉ tạo session khi bắt đầu, xóa khi tắt - KHÔNG timeout, KHÔNG heartbeat
 -- Hỗ trợ Base64 Token Decode
 
