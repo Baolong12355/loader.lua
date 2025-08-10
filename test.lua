@@ -79,16 +79,16 @@ end
 
 -- Cấu hình mặc định với thêm Instant Batch Processing
 local defaultConfig = {
-    ["MaxConcurrentRebuilds"] = 5,
+    ["MaxConcurrentRebuilds"] = 10,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
     ["AutoSellConvertDelay"] = 0.2,
-    ["PlaceMode"] = "Rewrite",
+    ["PlaceMode"] = "Ashed",
     -- INSTANT BATCH PROCESSING CONFIGURATIONS
     ["BatchProcessingEnabled"] = true,
     ["InstantBatchMode"] = true,       -- Xử lý ngay lập tức không chờ đợi
-    ["MaxBatchSize"] = 20,             -- Tăng số tower tối đa trong một batch
+    ["MaxBatchSize"] = 100,             -- Tăng số tower tối đa trong một batch
     ["BatchCollectionTime"] = 0.1,     -- Thời gian thu thập tối thiểu
     ["ParallelProcessing"] = true,     -- Xử lý song song hoàn toàn
     ["BatchPrewarmEnabled"] = false,   -- Tắt pre-warm để tăng tốc
