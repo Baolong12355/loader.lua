@@ -24,7 +24,7 @@ local stats = {
 
 -- Create Window
 local Window = Rayfield:CreateWindow({
-   Name = "🎯 Auto Mining Tool",
+   Name = "Auto Mining Tool",
    Icon = "pickaxe",
    LoadingTitle = "Mining Assistant",
    LoadingSubtitle = "by AI Helper",
@@ -55,7 +55,7 @@ MainTab:CreateSection("Auto Mining Controls")
 
 -- Auto Mining Toggle
 local AutoToggle = MainTab:CreateToggle({
-   Name = "🤖 Auto Mining",
+   Name = "Auto Mining",
    CurrentValue = false,
    Flag = "AutoMining",
    Callback = function(Value)
@@ -69,7 +69,7 @@ local AutoToggle = MainTab:CreateToggle({
 
 -- Auto Accept Toggle
 local AcceptToggle = MainTab:CreateToggle({
-   Name = "✅ Auto Accept Prompts",
+   Name = "Auto Accept Prompts",
    CurrentValue = true,
    Flag = "AutoAccept",
    Callback = function(Value)
@@ -80,14 +80,14 @@ local AcceptToggle = MainTab:CreateToggle({
 })
 
 -- Status Label
-local StatusLabel = MainTab:CreateLabel("⏸️ Status: Stopped", "activity")
+local StatusLabel = MainTab:CreateLabel("Status: Stopped", "activity")
 
 -- Settings Tab
 SettingsTab:CreateSection("Performance Settings")
 
 -- Accuracy Slider
 local AccuracySlider = SettingsTab:CreateSlider({
-   Name = "🎯 Hit Accuracy",
+   Name = "Hit Accuracy",
    Range = {50, 100},
    Increment = 5,
    Suffix = "%",
@@ -100,20 +100,20 @@ local AccuracySlider = SettingsTab:CreateSlider({
 
 -- Delay Slider  
 local DelaySlider = SettingsTab:CreateSlider({
-   Name = "⏱️ Human Delay",
-   Range = {50, 300},
-   Increment = 25,
-   Suffix = "ms",
-   CurrentValue = 100,
-   Flag = "Delay",
+   Name = "Click Randomness",
+   Range = {0, 100},
+   Increment = 10,
+   Suffix = "%",
+   CurrentValue = 50,
+   Flag = "ClickRandom",
    Callback = function(Value)
-       -- Update delay setting
+       -- Update click randomness setting
    end,
 })
 
 -- Zone Priority Dropdown
 local PriorityDropdown = SettingsTab:CreateDropdown({
-   Name = "🎯 Target Priority",
+   Name = "Target Priority",
    Options = {"Special > Gold > Normal", "Gold > Special > Normal", "Highest Value Only"},
    CurrentOption = {"Special > Gold > Normal"},
    Flag = "Priority",
@@ -125,15 +125,15 @@ local PriorityDropdown = SettingsTab:CreateDropdown({
 -- Stats Tab
 StatsTab:CreateSection("Session Statistics")
 
-local HitsLabel = StatsTab:CreateLabel("🎯 Total Hits: 0", "target")
-local MissesLabel = StatsTab:CreateLabel("❌ Total Misses: 0", "x")
-local GamesLabel = StatsTab:CreateLabel("🎮 Games Played: 0", "gamepad-2")
-local SpecialLabel = StatsTab:CreateLabel("⭐ Special Hits: 0", "star")
-local AccuracyLabel = StatsTab:CreateLabel("📈 Accuracy: 0%", "trending-up")
+local HitsLabel = StatsTab:CreateLabel("Total Hits: 0", "target")
+local MissesLabel = StatsTab:CreateLabel("Total Misses: 0", "x")
+local GamesLabel = StatsTab:CreateLabel("Games Played: 0", "gamepad-2")
+local SpecialLabel = StatsTab:CreateLabel("Special Hits: 0", "star")
+local AccuracyLabel = StatsTab:CreateLabel("Accuracy: 0%", "trending-up")
 
 -- Reset Stats Button
 local ResetStatsButton = StatsTab:CreateButton({
-   Name = "🔄 Reset Statistics",
+   Name = "Reset Statistics",
    Callback = function()
        stats = {totalHits = 0, totalMisses = 0, totalGames = 0, specialHits = 0}
        updateStatsDisplay()
@@ -166,9 +166,8 @@ local function findMiningMinigame()
     local gameplay = ui:FindFirstChild("Gameplay")
     if not gameplay then return nil end
     
-    local minigame = gameplay:FindFirstChild("MiningMinigame") or 
-                    gameplay:FindFirstChild("MineMinigame") or
-                    gameplay:FindFirstChild("Minigame")
+    -- Đường dẫn chính xác từ user
+    local minigame = gameplay:FindFirstChild("MinigameUI")
     
     return minigame
 end
@@ -232,16 +231,22 @@ local function detectOptimalHit(minigame)
         return false, nil
     end
     
-    local sliderPos = slider.AbsolutePosition.X + slider.AbsoluteSize.X/2
+    -- Sử dụng AbsolutePosition và AbsoluteSize như user chỉ dẫn
+    local sliderPos = slider.AbsolutePosition.X
+    local sliderSize = slider.AbsoluteSize.X
+    local sliderCenter = sliderPos + sliderSize/2
     
     local bestZone = nil
     local highestPriority = 0
     
     for _, zone in pairs(zones) do
-        local zoneStart = zone.position
-        local zoneEnd = zone.position + zone.size
+        local zonePos = zone.frame.AbsolutePosition.X
+        local zoneSize = zone.frame.AbsoluteSize.X
+        local zoneStart = zonePos
+        local zoneEnd = zonePos + zoneSize
         
-        if sliderPos >= zoneStart and sliderPos <= zoneEnd then
+        -- Check collision: slider center trong zone
+        if sliderCenter >= zoneStart and sliderCenter <= zoneEnd then
             if zone.priority >= highestPriority then
                 bestZone = zone
                 highestPriority = zone.priority
@@ -254,7 +259,6 @@ end
 
 local function simulateClick(zone)
     local accuracy = AccuracySlider.CurrentValue / 100
-    local delay = DelaySlider.CurrentValue / 1000
     
     -- Check accuracy
     if math.random() > accuracy then
@@ -263,11 +267,22 @@ local function simulateClick(zone)
         return
     end
     
-    wait(delay)
+    -- Không dùng delay, thay vào đó click random trong zone size
+    local clickX, clickY = 0, 0
     
-    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+    if zone and zone.frame then
+        -- Click vào vị trí random trong zone để bypass detection
+        local zonePos = zone.frame.AbsolutePosition
+        local zoneSize = zone.frame.AbsoluteSize
+        
+        clickX = zonePos.X + math.random(0, zoneSize.X)
+        clickY = zonePos.Y + math.random(0, zoneSize.Y)
+    end
+    
+    -- Click tại vị trí random trong zone
+    VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, true, game, 1)
     wait(0.05)
-    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+    VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, false, game, 1)
     
     -- Update stats
     stats.totalHits = stats.totalHits + 1
