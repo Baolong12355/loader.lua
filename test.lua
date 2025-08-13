@@ -176,62 +176,66 @@ end
 
 -- Hàm main auto play với khả năng đợi zone mới
 local function autoPlay()
-    local minigame = findMiningMinigame()
-    if not minigame then return end
-    
-    local bar = minigame:FindFirstChild("Bar")
-    if not bar then return end
-    
-    local slider = bar:FindFirstChild("Slider")
-    if not slider then return end
-    
-    -- Lấy tất cả target zones
-    local targetZones = getTargetZones(minigame)
-    if #targetZones == 0 then 
-        -- Reset nếu không còn zone nào
+    pcall(function()
+        local minigame = findMiningMinigame()
+        if not minigame then return end
+        
+        local bar = minigame:FindFirstChild("Bar")
+        if not bar then return end
+        
+        local slider = bar:FindFirstChild("Slider")
+        if not slider then return end
+        
+        -- Lấy tất cả target zones
+        local targetZones = getTargetZones(minigame)
+        if #targetZones == 0 then 
+            -- Reset nếu không còn zone nào
+            if waitingForNewZone then
+                waitingForNewZone = false
+                lastClickedZone = nil
+                lastZonePositions = {}
+                print("No zones found, ready for new zones")
+            end
+            return 
+        end
+        
+        -- Kiểm tra xem có zone mới hay không
         if waitingForNewZone then
-            waitingForNewZone = false
-            lastClickedZone = nil
-            print("No zones found, ready for new zones")
-        end
-        return 
-    end
-    
-    -- Kiểm tra xem có zone mới hay không
-    if waitingForNewZone then
-        local hasChanged = hasZoneChanged(targetZones)
-        if not hasChanged then
-            return -- Vẫn đang đợi zone mới
+            local hasChanged = hasZoneChanged(targetZones)
+            if not hasChanged then
+                return -- Vẫn đang đợi zone mới
+            else
+                waitingForNewZone = false
+                lastClickedZone = nil
+                updateZonePositions(targetZones)
+                print("New zones detected, ready to click")
+            end
         else
-            waitingForNewZone = false
-            lastClickedZone = nil
+            -- Cập nhật vị trí zones lần đầu
             updateZonePositions(targetZones)
-            print("New zones detected, ready to click")
         end
-    end
-    
-    -- Kiểm tra collision với từng zone
-    local foundCollision = false
-    for _, zone in pairs(targetZones) do
-        if zone.Parent and zone.Visible then
-            local sliderPos = slider.AbsolutePosition
-            local sliderSize = slider.AbsoluteSize
-            local zonePos = zone.AbsolutePosition
-            local zoneSize = zone.AbsoluteSize
-            
-            -- Kiểm tra collision
-            if checkCollision(sliderPos, sliderSize, zonePos, zoneSize) then
-                local clicked = simulateClick(zone)
-                if clicked then
-                    print("Auto clicked on zone with color:", zone.BackgroundColor3)
-                    updateZonePositions(targetZones)
-                    foundCollision = true
-                    -- Chỉ click một zone mỗi lần để tránh spam
-                    break
+        
+        -- Kiểm tra collision với từng zone
+        for _, zone in pairs(targetZones) do
+            if zone and zone.Parent and zone.Visible then
+                local sliderPos = slider.AbsolutePosition
+                local sliderSize = slider.AbsoluteSize
+                local zonePos = zone.AbsolutePosition
+                local zoneSize = zone.AbsoluteSize
+                
+                -- Kiểm tra collision
+                if checkCollision(sliderPos, sliderSize, zonePos, zoneSize) then
+                    local clicked = simulateClick(zone)
+                    if clicked then
+                        print("Auto clicked on zone with color:", zone.BackgroundColor3)
+                        updateZonePositions(targetZones)
+                        -- Chỉ click một zone mỗi lần để tránh spam
+                        break
+                    end
                 end
             end
         end
-    end
+    end)
 end
 
 -- Hàm toggle auto play
@@ -315,11 +319,11 @@ end
 -- Tự động bật khi detect minigame
 spawn(function()
     while true do
-        wait()
+        wait(0.5)
         local minigame = findMiningMinigame()
         if minigame and not isAutoPlaying then
             print("Mining minigame detected! Press F to toggle auto play")
-            wait() -- Đợi 1 giây trước khi check lại
+            wait(1) -- Đợi 1 giây trước khi check lại
         end
     end
 end)
