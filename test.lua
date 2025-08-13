@@ -86,8 +86,8 @@ local AcceptToggle = MainTab:CreateToggle({
 })
 
 -- Status Label
-local StatusLabel = MainTab:CreateLabel("⏸️ Status: Stopped", "activity")
-local MinigameStatusLabel = MainTab:CreateLabel("📱 Minigame: Not Found", "smartphone")
+local StatusLabel = MainTab:CreateLabel("⏸️ Status: Stopped")
+local MinigameStatusLabel = MainTab:CreateLabel("📱 Minigame: Not Found")
 
 -- Settings Tab
 SettingsTab:CreateSection("Performance Settings")
@@ -152,20 +152,20 @@ local WaitPerfectToggle = SettingsTab:CreateToggle({
 -- Stats Tab
 StatsTab:CreateSection("Session Statistics")
 
-local HitsLabel = StatsTab:CreateLabel("🎯 Total Hits: 0", "target")
-local MissesLabel = StatsTab:CreateLabel("❌ Total Misses: 0", "x")
-local GamesLabel = StatsTab:CreateLabel("🎮 Games Played: 0", "gamepad-2")
-local SpecialLabel = StatsTab:CreateLabel("⭐ Special Hits: 0", "star")
-local GoldLabel = StatsTab:CreateLabel("🥇 Gold Hits: 0", "award")
-local AccuracyLabel = StatsTab:CreateLabel("📈 Accuracy: 0%", "trending-up")
+local HitsLabel = StatsTab:CreateLabel("🎯 Total Hits: 0")
+local MissesLabel = StatsTab:CreateLabel("❌ Total Misses: 0") 
+local GamesLabel = StatsTab:CreateLabel("🎮 Games Played: 0")
+local SpecialLabel = StatsTab:CreateLabel("⭐ Special Hits: 0")
+local GoldLabel = StatsTab:CreateLabel("🥇 Gold Hits: 0")
+local AccuracyLabel = StatsTab:CreateLabel("📈 Accuracy: 0%")
 
 -- Debug Tab
 DebugTab:CreateSection("Debug Information")
-local DebugMinigameLabel = DebugTab:CreateLabel("🎮 Minigame: Searching...", "gamepad")
-local DebugSliderLabel = DebugTab:CreateLabel("🎚️ Slider: Not Found", "sliders")
-local DebugZoneLabel = DebugTab:CreateLabel("🎯 Zones: 0 found", "target")
-local DebugPositionLabel = DebugTab:CreateLabel("📍 Position: Waiting...", "map-pin")
-local DebugTimingLabel = DebugTab:CreateLabel("⏰ Last Click: Never", "clock")
+local DebugMinigameLabel = DebugTab:CreateLabel("🎮 Minigame: Searching...")
+local DebugSliderLabel = DebugTab:CreateLabel("🎚️ Slider: Not Found")
+local DebugZoneLabel = DebugTab:CreateLabel("🎯 Zones: 0 found") 
+local DebugPositionLabel = DebugTab:CreateLabel("📍 Position: Waiting...")
+local DebugTimingLabel = DebugTab:CreateLabel("⏰ Last Click: Never")
 
 -- Reset Stats Button
 local ResetStatsButton = StatsTab:CreateButton({
@@ -183,16 +183,22 @@ local ResetStatsButton = StatsTab:CreateButton({
 })
 
 -- Utility Functions
+local function updateLabel(label, text)
+    if label and label.Text then
+        label.Text = text
+    end
+end
+
 local function updateStatsDisplay()
-    HitsLabel:Set(string.format("🎯 Total Hits: %d", stats.totalHits))
-    MissesLabel:Set(string.format("❌ Total Misses: %d", stats.totalMisses))
-    GamesLabel:Set(string.format("🎮 Games Played: %d", stats.totalGames))
-    SpecialLabel:Set(string.format("⭐ Special Hits: %d", stats.specialHits))
-    GoldLabel:Set(string.format("🥇 Gold Hits: %d", stats.goldHits))
+    updateLabel(HitsLabel, string.format("🎯 Total Hits: %d", stats.totalHits))
+    updateLabel(MissesLabel, string.format("❌ Total Misses: %d", stats.totalMisses))
+    updateLabel(GamesLabel, string.format("🎮 Games Played: %d", stats.totalGames))
+    updateLabel(SpecialLabel, string.format("⭐ Special Hits: %d", stats.specialHits))
+    updateLabel(GoldLabel, string.format("🥇 Gold Hits: %d", stats.goldHits))
     
     local totalAttempts = stats.totalHits + stats.totalMisses
     local accuracy = totalAttempts > 0 and math.floor((stats.totalHits / totalAttempts) * 100) or 0
-    AccuracyLabel:Set(string.format("📈 Accuracy: %d%%", accuracy))
+    updateLabel(AccuracyLabel, string.format("📈 Accuracy: %d%%", accuracy))
 end
 
 local function findMiningMinigame()
@@ -211,30 +217,31 @@ local function findMiningMinigame()
         if minigame and minigame:IsA("CanvasGroup") and minigame.Visible then
             if not minigameActive then
                 minigameActive = true
-                MinigameStatusLabel:Set("📱 Minigame: Just Started")
-                DebugMinigameLabel:Set("🎮 Minigame: Active (CanvasGroup)")
+                updateLabel(MinigameStatusLabel, "📱 Minigame: Just Started")
+                updateLabel(DebugMinigameLabel, "🎮 Minigame: Active (CanvasGroup)")
             else
-                MinigameStatusLabel:Set("📱 Minigame: Running")
-                DebugMinigameLabel:Set("🎮 Minigame: Running (CanvasGroup)")
+                updateLabel(MinigameStatusLabel, "📱 Minigame: Running")
+                updateLabel(DebugMinigameLabel, "🎮 Minigame: Running (CanvasGroup)")
             end
             return minigame
         else
             if minigameActive then
                 minigameActive = false
-                MinigameStatusLabel:Set("📱 Minigame: Just Ended")
-                DebugMinigameLabel:Set("🎮 Minigame: Ended")
+                updateLabel(MinigameStatusLabel, "📱 Minigame: Just Ended")
+                updateLabel(DebugMinigameLabel, "🎮 Minigame: Ended")
             else
-                MinigameStatusLabel:Set("📱 Minigame: Not Found")
-                DebugMinigameLabel:Set("🎮 Minigame: Searching...")
+                updateLabel(MinigameStatusLabel, "📱 Minigame: Not Found")
+                updateLabel(DebugMinigameLabel, "🎮 Minigame: Searching...")
             end
             return nil
         end
     end)
     
     if success then
+        updateLabel(DebugMinigameLabel, "🎮 Minigame: Error - " .. tostring(result))
         return result
     else
-        DebugMinigameLabel:Set("🎮 Minigame: Error - " .. tostring(result))
+        updateLabel(DebugMinigameLabel, "🎮 Minigame: Error - " .. tostring(result))
         return nil
     end
 end
@@ -556,6 +563,75 @@ function setupAutoAccept()
                         Title = "Auto Accepted",
                         Content = "Mining prompt accepted automatically!",
                         Duration = 2,
+                        Image = 4483362458,
+                    })
+                    return true
+                end
+                return false
+            end
+        end)
+        
+        if not success then
+            Rayfield:Notify({
+                Title = "Auto Accept Setup Failed",
+                Content = "Could not setup auto accept: " .. tostring(error),
+                Duration = 4,
+                Image = 4483362458,
+            })
+        end
+    end)
+end
+
+-- Initialize
+spawn(function()
+    wait(2)
+    if AcceptToggle.CurrentValue then
+        setupAutoAccept()
+    end
+    updateStatsDisplay()
+    
+    Rayfield:Notify({
+        Title = "Mining Tool Loaded",
+        Content = "Fixed all Rayfield label update errors!",
+        Duration = 4,
+        Image = 4483362458,
+    })
+end)
+
+-- Cleanup và monitoring
+Players.PlayerRemoving:Connect(function(player)
+    if player == LocalPlayer then
+        StopAutoMining()
+    end
+end)
+
+-- Background monitor
+spawn(function()
+    while true do
+        wait(2)
+        if isAutoRunning and not minigameActive then
+            local timeout = 5
+            local startTime = tick()
+            while tick() - startTime < timeout do
+                if findMiningMinigame() then
+                    break
+                end
+                wait(0.5)
+            end
+            
+            if tick() - startTime >= timeout and isAutoRunning then
+                wait(1)
+                if not findMiningMinigame() then
+                    minigameActive = false
+                end
+            end
+        end
+    end
+end)lower(), "mining") then
+                    Rayfield:Notify({
+                        Title = "Auto Accepted",
+                        Content = "Mining prompt accepted automatically!",
+                        Duration = 2,
                         Image = "check",
                     })
                     return true
@@ -577,7 +653,7 @@ end
 
 -- Initialize
 spawn(function()
-    wait(2)
+    wait()
     if AcceptToggle.CurrentValue then
         setupAutoAccept()
     end
@@ -601,21 +677,21 @@ end)
 -- Background monitor để cleanup
 spawn(function()
     while true do
-        wait(2)
+        wait()
         if isAutoRunning and not minigameActive then
             -- Tự động dừng nếu không tìm được minigame trong 5 giây
-            local timeout = 5
+            local timeout = 1
             local startTime = tick()
             while tick() - startTime < timeout do
                 if findMiningMinigame() then
                     break
                 end
-                wait(0.5)
+                wait(0.1)
             end
             
             if tick() - startTime >= timeout and isAutoRunning then
                 -- Timeout - có thể minigame đã kết thúc
-                wait(1) -- Đợi thêm 1 giây
+                wait() -- Đợi thêm 1 giây
                 if not findMiningMinigame() then
                     -- Vẫn không tìm thấy, reset trạng thái
                     minigameActive = false
