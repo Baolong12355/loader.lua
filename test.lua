@@ -152,20 +152,20 @@ local WaitPerfectToggle = SettingsTab:CreateToggle({
 -- Stats Tab
 StatsTab:CreateSection("Session Statistics")
 
-local HitsLabel = StatsTab:CreateLabel("🎯 Total Hits: 0")
-local MissesLabel = StatsTab:CreateLabel("❌ Total Misses: 0") 
-local GamesLabel = StatsTab:CreateLabel("🎮 Games Played: 0")
-local SpecialLabel = StatsTab:CreateLabel("⭐ Special Hits: 0")
-local GoldLabel = StatsTab:CreateLabel("🥇 Gold Hits: 0")
-local AccuracyLabel = StatsTab:CreateLabel("📈 Accuracy: 0%")
+local HitsLabel = StatsTab:CreateLabel("🎯 Total Hits: 0", 4483362458, Color3.fromRGB(255, 255, 255), false)
+local MissesLabel = StatsTab:CreateLabel("❌ Total Misses: 0", 4483362458, Color3.fromRGB(255, 255, 255), false) 
+local GamesLabel = StatsTab:CreateLabel("🎮 Games Played: 0", 4483362458, Color3.fromRGB(255, 255, 255), false)
+local SpecialLabel = StatsTab:CreateLabel("⭐ Special Hits: 0", 4483362458, Color3.fromRGB(255, 255, 255), false)
+local GoldLabel = StatsTab:CreateLabel("🥇 Gold Hits: 0", 4483362458, Color3.fromRGB(255, 255, 255), false)
+local AccuracyLabel = StatsTab:CreateLabel("📈 Accuracy: 0%", 4483362458, Color3.fromRGB(255, 255, 255), false)
 
 -- Debug Tab
 DebugTab:CreateSection("Debug Information")
-local DebugMinigameLabel = DebugTab:CreateLabel("🎮 Minigame: Searching...")
-local DebugSliderLabel = DebugTab:CreateLabel("🎚️ Slider: Not Found")
-local DebugZoneLabel = DebugTab:CreateLabel("🎯 Zones: 0 found") 
-local DebugPositionLabel = DebugTab:CreateLabel("📍 Position: Waiting...")
-local DebugTimingLabel = DebugTab:CreateLabel("⏰ Last Click: Never")
+local DebugMinigameLabel = DebugTab:CreateLabel("🎮 Minigame: Searching...", 4483362458, Color3.fromRGB(255, 255, 255), false)
+local DebugSliderLabel = DebugTab:CreateLabel("🎚️ Slider: Not Found", 4483362458, Color3.fromRGB(255, 255, 255), false)
+local DebugZoneLabel = DebugTab:CreateLabel("🎯 Zones: 0 found", 4483362458, Color3.fromRGB(255, 255, 255), false) 
+local DebugPositionLabel = DebugTab:CreateLabel("📍 Position: Waiting...", 4483362458, Color3.fromRGB(255, 255, 255), false)
+local DebugTimingLabel = DebugTab:CreateLabel("⏰ Last Click: Never", 4483362458, Color3.fromRGB(255, 255, 255), false)
 
 -- Reset Stats Button
 local ResetStatsButton = StatsTab:CreateButton({
@@ -653,7 +653,7 @@ end
 
 -- Initialize
 spawn(function()
-    wait()
+    wait(2)
     if AcceptToggle.CurrentValue then
         setupAutoAccept()
     end
@@ -677,21 +677,21 @@ end)
 -- Background monitor để cleanup
 spawn(function()
     while true do
-        wait()
+        wait(2)
         if isAutoRunning and not minigameActive then
             -- Tự động dừng nếu không tìm được minigame trong 5 giây
-            local timeout = 1
+            local timeout = 5
             local startTime = tick()
             while tick() - startTime < timeout do
                 if findMiningMinigame() then
                     break
                 end
-                wait(0.1)
+                wait(0.5)
             end
             
             if tick() - startTime >= timeout and isAutoRunning then
                 -- Timeout - có thể minigame đã kết thúc
-                wait() -- Đợi thêm 1 giây
+                wait(1) -- Đợi thêm 1 giây
                 if not findMiningMinigame() then
                     -- Vẫn không tìm thấy, reset trạng thái
                     minigameActive = false
