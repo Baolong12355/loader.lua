@@ -142,33 +142,20 @@ local function simulateClick(zone)
     lastClickedZone = zone
     waitingForNewZone = true
     
+    -- Sử dụng phương pháp direct fire event thay vì getconnections
     if isOnMobile then
         -- Mobile: Sử dụng Touch input
-        local fakeInputObject = {
+        UserInputService.InputBegan:Fire({
             UserInputType = Enum.UserInputType.Touch,
             KeyCode = Enum.KeyCode.Unknown,
             Position = Vector3.new(0, 0, 0)
-        }
-        
-        -- Fire touch event
-        for _, connection in pairs(getconnections(UserInputService.InputBegan)) do
-            pcall(function()
-                connection:Fire(fakeInputObject, false)
-            end)
-        end
+        }, false)
     else
-        -- PC: Sử dụng MouseButton1
-        local fakeInputObject = {
+        -- PC: Sử dụng MouseButton1  
+        UserInputService.InputBegan:Fire({
             UserInputType = Enum.UserInputType.MouseButton1,
             KeyCode = Enum.KeyCode.Unknown
-        }
-        
-        -- Fire mouse event
-        for _, connection in pairs(getconnections(UserInputService.InputBegan)) do
-            pcall(function()
-                connection:Fire(fakeInputObject, false)
-            end)
-        end
+        }, false)
     end
     
     return true
@@ -254,18 +241,20 @@ local function toggleAutoPlay()
     end
 end
 
--- Bind phím Toggle cho cả PC và Mobile (cả hai đều có thể dùng F)
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    
-    if input.KeyCode == Enum.KeyCode.F then
-        toggleAutoPlay()
-    end
-end)
+-- Bind phím Toggle - PC dùng F, Mobile chỉ dùng button
+if not isOnMobile then
+    -- Chỉ PC mới có phím F
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        
+        if input.KeyCode == Enum.KeyCode.F then
+            toggleAutoPlay()
+        end
+    end)
+end
 
--- Thêm button cho mobile (tùy chọn)
+-- Mobile: Tạo toggle button (bắt buộc vì không có phím F)
 if isOnMobile then
-    -- Mobile: Tạo toggle button (backup cho trường hợp không có bàn phím)
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "AutoMiningToggle"
     screenGui.Parent = PlayerGui
@@ -329,11 +318,10 @@ spawn(function()
 end)
 
 print("Auto Mining Minigame Script loaded!")
-print("Press F to toggle auto play ON/OFF (works on both PC and Mobile)")
 if isOnMobile then
-    print("Mobile detected: Also use the toggle button on screen if needed")
+    print("Mobile detected: Use the toggle button on screen to enable/disable")
 else
-    print("PC detected")
+    print("PC detected: Press F to toggle auto play ON/OFF")
 end
 print("Target colors: Yellow (255,227,114) and Orange (255,140,64)")
 print("Script waits for new zones after each click")
