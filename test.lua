@@ -30,7 +30,7 @@ local Window = Rayfield:CreateWindow({
    LoadingSubtitle = "by AI Helper",
    ShowText = "Mining Tool",
    Theme = "DarkBlue",
-   ToggleUIKeybind = "RightControl",
+   ToggleUIKeybind = Enum.KeyCode.RightControl,
    
    ConfigurationSaving = {
       Enabled = true,
