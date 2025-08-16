@@ -1,5 +1,5 @@
--- QTE Auto Perfect Script (Fixed UI Access)
--- Automatically hits perfect timing on Quick Time Events
+-- QTE Auto Perfect Script for Mobile
+-- Uses touch/click simulation at GUI position
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -7,7 +7,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 
-print("QTE Auto Script Loaded!")
+print("QTE Auto Script for Mobile Loaded!")
 
 -- Safely check for UI elements
 local function safeGetProperty(obj, property)
@@ -22,6 +22,80 @@ local function safeGetChild(parent, childName)
         return parent:FindFirstChild(childName)
     end)
     return success and result or nil
+end
+
+-- Touch/Click simulation function
+local function simulateTouch(element)
+    pcall(function()
+        print("Attempting touch simulation...")
+        
+        -- Get element position and size
+        local absPos = element.AbsolutePosition
+        local absSize = element.AbsoluteSize
+        local centerX = absPos.X + absSize.X / 2
+        local centerY = absPos.Y + absSize.Y / 2
+        
+        print("Touch position:", centerX, centerY)
+        
+        -- Method 1: VirtualInputManager touch
+        pcall(function()
+            local vim = game:GetService("VirtualInputManager")
+            vim:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1)
+            task.wait(0.05)
+            vim:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1)
+            print("VirtualInputManager touch sent!")
+        end)
+        
+        -- Method 2: Mouse simulation functions
+        pcall(function()
+            if mouse1click then
+                mouse1click(centerX, centerY)
+                print("mouse1click executed!")
+            elseif mousemoveabs and mouse1press and mouse1release then
+                mousemoveabs(centerX, centerY)
+                mouse1press()
+                task.wait(0.05)
+                mouse1release()
+                print("Manual mouse click executed!")
+            end
+        end)
+        
+        -- Method 3: Touch event simulation
+        pcall(function()
+            local touchInput = {
+                UserInputType = Enum.UserInputType.Touch,
+                Position = Vector3.new(centerX, centerY, 0)
+            }
+            
+            -- Fire touch began
+            for _, connection in pairs(getconnections(UserInputService.TouchTapInWorld)) do
+                connection:Fire(touchInput, nil)
+            end
+            
+            for _, connection in pairs(getconnections(UserInputService.TouchTap)) do
+                connection:Fire(touchInput, nil)
+            end
+            print("Touch events fired!")
+        end)
+        
+        -- Method 4: Direct GuiButton activation
+        pcall(function()
+            if element:IsA("GuiButton") or element:IsA("TextButton") then
+                -- Fire all Activated connections
+                for i, connection in pairs(getconnections(element.Activated)) do
+                    connection:Fire()
+                    print("Button Activated connection", i, "fired!")
+                end
+                
+                -- Fire MouseButton1Click connections
+                for i, connection in pairs(getconnections(element.MouseButton1Click)) do
+                    connection:Fire()
+                    print("MouseButton1Click connection", i, "fired!")
+                end
+            end
+        end)
+        
+    end)
 end
 
 -- Monitor for QTE and auto-press at perfect timing
@@ -43,90 +117,34 @@ RunService.Heartbeat:Connect(function()
                         -- Debug info
                         if sizeScale <= 0.5 then
                             local buttonText = safeGetProperty(button, "Text") or "Unknown"
-                            print("Ring size:", sizeScale, "Button text:", buttonText)
+                            print("Ring size:", math.floor(sizeScale * 1000) / 1000, "Button text:", buttonText)
                         end
                         
                         -- Check if ring is at perfect timing
                         if sizeScale <= 0.17 and sizeScale >= 0.15 then
                             print("PERFECT TIMING DETECTED! Ring size:", sizeScale)
+                            print("Button absolute position:", button.AbsolutePosition)
+                            print("Button absolute size:", button.AbsoluteSize)
                             
+                            -- Simulate touch on button
+                            simulateTouch(button)
+                            
+                            -- Also try keyboard input as backup
                             local keyName = safeGetProperty(button, "Text")
                             if keyName and keyName ~= "" then
-                                print("Attempting to press key:", keyName)
-                                
-                                -- Method 1: Fire InputBegan connections
                                 local keyCode = Enum.KeyCode[keyName]
                                 if keyCode then
-                                    print("KeyCode found:", keyCode)
-                                    
                                     pcall(function()
-                                        local fakeInput = {
-                                            KeyCode = keyCode,
-                                            UserInputType = Enum.UserInputType.Keyboard
-                                        }
-                                        local inputConnections = getconnections(UserInputService.InputBegan)
-                                        print("InputBegan connections found:", #inputConnections)
-                                        for i, connection in pairs(inputConnections) do
-                                            pcall(function()
-                                                print("Firing InputBegan connection", i)
-                                                connection:Fire(fakeInput, false)
-                                            end)
-                                        end
+                                        local vim = game:GetService("VirtualInputManager")
+                                        vim:SendKeyEvent(true, keyCode, false, game)
+                                        task.wait(0.01)
+                                        vim:SendKeyEvent(false, keyCode, false, game)
+                                        print("Backup keyboard input sent:", keyName)
                                     end)
                                 end
-                                
-                                -- Method 2: Click button directly
-                                pcall(function()
-                                    local buttonConnections = getconnections(button.Activated)
-                                    print("Button connections found:", #buttonConnections)
-                                    for i, connection in pairs(buttonConnections) do
-                                        pcall(function()
-                                            print("Firing button connection", i)
-                                            connection:Fire()
-                                        end)
-                                    end
-                                end)
-                                
-                                -- Method 3: Use VirtualInputManager
-                                pcall(function()
-                                    print("Trying VirtualInputManager...")
-                                    local vim = game:GetService("VirtualInputManager")
-                                    vim:SendKeyEvent(true, keyCode, false, game)
-                                    task.wait(0.01)
-                                    vim:SendKeyEvent(false, keyCode, false, game)
-                                    print("VirtualInputManager key sent!")
-                                end)
-                                
-                                -- Method 4: Direct firesignal if available
-                                pcall(function()
-                                    if firesignal then
-                                        print("Trying firesignal...")
-                                        firesignal(button.Activated)
-                                        print("Firesignal executed!")
-                                    end
-                                end)
-                                
-                                -- Method 5: Mouse click simulation
-                                pcall(function()
-                                    if mousemoveabs and mouse1press and mouse1release then
-                                        print("Trying mouse click simulation...")
-                                        local buttonPos = button.AbsolutePosition
-                                        local buttonSize = button.AbsoluteSize
-                                        local centerX = buttonPos.X + buttonSize.X / 2
-                                        local centerY = buttonPos.Y + buttonSize.Y / 2
-                                        
-                                        mousemoveabs(centerX, centerY)
-                                        mouse1press()
-                                        task.wait(0.01)
-                                        mouse1release()
-                                        print("Mouse click executed!")
-                                    end
-                                end)
-                                
-                                print("All methods attempted!")
-                            else
-                                print("No key name found on button")
                             end
+                            
+                            print("All touch methods attempted!")
                         end
                     end
                 end
