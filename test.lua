@@ -1,53 +1,144 @@
--- Script tự động ấn nút QTE khi vòng tròn đạt kích thước lý tưởng
+-- Load Rayfield Library
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- Services
+local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
 
+-- Variables
 local LocalPlayer = Players.LocalPlayer
-local lastPressTime = 0
-local cooldown = 0.5 -- Giây
+local PLACE_ID = 119078961994407
 
-print("Script tự động ấn nút QTE đã kích hoạt!")
+-- Create Window
+local Window = Rayfield:CreateWindow({
+   Name = "Script GUI",
+   Icon = 0,
+   LoadingTitle = "Đang tải GUI...",
+   LoadingSubtitle = "Vui lòng đợi",
+   ShowText = "Script GUI",
+   Theme = "Default",
+   
+   ToggleUIKeybind = "K",
+   
+   DisableRayfieldPrompts = false,
+   DisableBuildWarnings = false,
+   
+   ConfigurationSaving = {
+      Enabled = false
+   },
+   
+   KeySystem = false
+})
 
-RunService.Heartbeat:Connect(function()
-    -- Kiểm tra thời gian chờ
-    if tick() - lastPressTime < cooldown then return end
-    
-    -- Tìm GUI QTE
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if not playerGui then return end
-    
-    local qteGui = playerGui:FindFirstChild("QuickTimeEvent")
-    if not qteGui then return end
-    
-    -- Tìm nút và vòng tròn
-    local button = qteGui:FindFirstChild("Button")
-    local ring = qteGui:FindFirstChild("Ring")
-    if not button or not ring then return end
-    
-    -- Kiểm tra kích thước vòng tròn
-    local ringSize = ring.Size.X.Scale
-    if ringSize >= 0.15 and ringSize <= 0.17 then
-        lastPressTime = tick()
-        print("Phát hiện thời điểm hoàn hảo, tự động ấn nút...")
-        
-        -- Phương pháp 1: Kích hoạt trực tiếp (hiệu quả nhất)
-        pcall(function()
-            for _, conn in ipairs(getconnections(button.Activated)) do
-                conn:Fire()
-            end
-        end)
-        
-        -- Phương pháp 2: Mô phỏng chạm (dự phòng)
-        pcall(function()
-            local absPos = button.AbsolutePosition
-            local absSize = button.AbsoluteSize
-            local centerX = absPos.X + absSize.X/2
-            local centerY = absPos.Y + absSize.Y/2
-            
-            VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1)
-            task.wait(0.05)
-            VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1)
-        end)
-    end
+-- Create Main Tab
+local MainTab = Window:CreateTab("Chức năng chính", "star")
+
+-- Create Section
+local TeleportSection = MainTab:CreateSection("Teleport")
+
+-- Chức năng 1: Teleport Button
+local TeleportButton = MainTab:CreateButton({
+   Name = "Teleport đến Place ID",
+   Callback = function()
+      Rayfield:Notify({
+         Title = "Đang teleport...",
+         Content = "Đang chuyển đến Place ID: " .. PLACE_ID,
+         Duration = 3,
+         Image = "airplane"
+      })
+      
+      -- Teleport to the specified place
+      local success, errorMessage = pcall(function()
+         TeleportService:Teleport(PLACE_ID, LocalPlayer)
+      end)
+      
+      if not success then
+         Rayfield:Notify({
+            Title = "Lỗi Teleport",
+            Content = "Không thể teleport: " .. tostring(errorMessage),
+            Duration = 5,
+            Image = "alert-circle"
+         })
+      end
+   end,
+})
+
+-- Create GUI Management Section
+local GuiSection = MainTab:CreateSection("Quản lý GUI")
+
+-- Chức năng 2: Delete QuickTimeEvent GUI khi nhấn Delete
+local DeleteGuiToggle = MainTab:CreateToggle({
+   Name = "Xóa QuickTimeEvent GUI (Delete)",
+   CurrentValue = false,
+   Flag = "DeleteGui",
+   Callback = function(Value)
+      if Value then
+         Rayfield:Notify({
+            Title = "Chức năng kích hoạt",
+            Content = "Nhấn phím Delete để xóa QuickTimeEvent GUI",
+            Duration = 4,
+            Image = "trash-2"
+         })
+      else
+         Rayfield:Notify({
+            Title = "Chức năng tắt",
+            Content = "Đã tắt chức năng xóa GUI",
+            Duration = 3,
+            Image = "x"
+         })
+      end
+   end,
+})
+
+-- Handle Delete key press
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+   if gameProcessed then return end
+   
+   if input.KeyCode == Enum.KeyCode.Delete and Rayfield.Flags.DeleteGui then
+      local success, errorMessage = pcall(function()
+         local playerGui = LocalPlayer.PlayerGui
+         local quickTimeEvent = playerGui:FindFirstChild("QuickTimeEvent")
+         
+         if quickTimeEvent then
+            quickTimeEvent:Destroy()
+            Rayfield:Notify({
+               Title = "Thành công",
+               Content = "Đã xóa QuickTimeEvent GUI",
+               Duration = 3,
+               Image = "check"
+            })
+         else
+            Rayfield:Notify({
+               Title = "Không tìm thấy",
+               Content = "Không tìm thấy QuickTimeEvent GUI",
+               Duration = 3,
+               Image = "search"
+            })
+         end
+      end)
+      
+      if not success then
+         Rayfield:Notify({
+            Title = "Lỗi",
+            Content = "Không thể xóa GUI: " .. tostring(errorMessage),
+            Duration = 4,
+            Image = "alert-triangle"
+         })
+      end
+   end
 end)
+
+-- Info Section
+local InfoSection = MainTab:CreateSection("Thông tin")
+
+local InfoLabel = MainTab:CreateLabel("🔹 Nhấn nút để teleport đến Place ID", "info")
+local InfoLabel2 = MainTab:CreateLabel("🔹 Bật toggle và nhấn Delete để xóa GUI", "info")
+
+-- Initial notification
+Rayfield:Notify({
+   Title = "GUI đã sẵn sàng!",
+   Content = "Tất cả chức năng đã được tải thành công",
+   Duration = 4,
+   Image = "check-circle"
+})
