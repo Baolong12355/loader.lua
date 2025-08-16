@@ -1,42 +1,53 @@
--- QTE Auto Perfect Script for Mobile (Focus on Most Effective Method)
+-- Script tự động ấn nút QTE khi vòng tròn đạt kích thước lý tưởng
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
-local pressedThisQTE = false
+local lastPressTime = 0
+local cooldown = 0.5 -- Giây
 
-print("QTE Auto Perfect Script Activated - Mobile Focus")
+print("Script tự động ấn nút QTE đã kích hoạt!")
 
 RunService.Heartbeat:Connect(function()
-    -- Kiểm tra nhanh các điều kiện cần thiết
+    -- Kiểm tra thời gian chờ
+    if tick() - lastPressTime < cooldown then return end
+    
+    -- Tìm GUI QTE
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if not playerGui then return end
     
     local qteGui = playerGui:FindFirstChild("QuickTimeEvent")
     if not qteGui then return end
     
+    -- Tìm nút và vòng tròn
     local button = qteGui:FindFirstChild("Button")
-    if not button then return end
-    
     local ring = qteGui:FindFirstChild("Ring")
-    if not ring then return end
+    if not button or not ring then return end
     
-    -- Chỉ tập trung vào phương pháp hiệu quả nhất: kích hoạt trực tiếp sự kiện Activated
+    -- Kiểm tra kích thước vòng tròn
     local ringSize = ring.Size.X.Scale
-    if ringSize >= 0.15 and ringSize <= 0.17 and not pressedThisQTE then
-        pressedThisQTE = true
-        print("PERFECT TIMING DETECTED! Auto-pressing button...")
+    if ringSize >= 0.15 and ringSize <= 0.17 then
+        lastPressTime = tick()
+        print("Phát hiện thời điểm hoàn hảo, tự động ấn nút...")
         
-        -- Phương pháp hiệu quả nhất: Kích hoạt trực tiếp các kết nối Activated
-        for _, connection in ipairs(getconnections(button.Activated)) do
-            connection:Fire()
-        end
-        
-        -- Thêm độ trễ nhỏ trước khi reset để tránh kích hoạt nhiều lần
-        task.delay(0.5, function()
-            pressedThisQTE = false
+        -- Phương pháp 1: Kích hoạt trực tiếp (hiệu quả nhất)
+        pcall(function()
+            for _, conn in ipairs(getconnections(button.Activated)) do
+                conn:Fire()
+            end
         end)
-    elseif ringSize > 0.17 then
-        pressedThisQTE = false -- Reset khi QTE mới bắt đầu
+        
+        -- Phương pháp 2: Mô phỏng chạm (dự phòng)
+        pcall(function()
+            local absPos = button.AbsolutePosition
+            local absSize = button.AbsoluteSize
+            local centerX = absPos.X + absSize.X/2
+            local centerY = absPos.Y + absSize.Y/2
+            
+            VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1)
+        end)
     end
 end)
