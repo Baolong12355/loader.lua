@@ -1,64 +1,42 @@
--- QTE Auto Perfect Script for Mobile (Optimized Version)
+-- QTE Auto Perfect Script for Mobile (Focus on Most Effective Method)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 local pressedThisQTE = false
 
-print("QTE")
+print("QTE Auto Perfect Script Activated - Mobile Focus")
 
--- Optimized monitoring with debounce
 RunService.Heartbeat:Connect(function()
+    -- Kiểm tra nhanh các điều kiện cần thiết
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if not playerGui then return end
     
     local qteGui = playerGui:FindFirstChild("QuickTimeEvent")
     if not qteGui then return end
     
-    local ring = qteGui:FindFirstChild("Ring")
     local button = qteGui:FindFirstChild("Button")
-    if not ring or not button then return end
+    if not button then return end
     
+    local ring = qteGui:FindFirstChild("Ring")
+    if not ring then return end
+    
+    -- Chỉ tập trung vào phương pháp hiệu quả nhất: kích hoạt trực tiếp sự kiện Activated
     local ringSize = ring.Size.X.Scale
-    if not ringSize then return end
-    
-    -- Check for perfect timing (0.15-0.17 scale)
     if ringSize >= 0.15 and ringSize <= 0.17 and not pressedThisQTE then
         pressedThisQTE = true
-        print("Perfect timing detected! Attempting press...")
+        print("PERFECT TIMING DETECTED! Auto-pressing button...")
         
-        -- Method 1: Directly fire button activation (most reliable)
-        local success = pcall(function()
-            for _, connection in ipairs(getconnections(button.Activated)) do
-                connection:Fire()
-            end
+        -- Phương pháp hiệu quả nhất: Kích hoạt trực tiếp các kết nối Activated
+        for _, connection in ipairs(getconnections(button.Activated)) do
+            connection:Fire()
+        end
+        
+        -- Thêm độ trễ nhỏ trước khi reset để tránh kích hoạt nhiều lần
+        task.delay(0.5, function()
+            pressedThisQTE = false
         end)
-        
-        -- Method 2: Virtual touch as fallback
-        if not success then
-            pcall(function()
-                local absPos = button.AbsolutePosition
-                local absSize = button.AbsoluteSize
-                local centerX = absPos.X + absSize.X/2
-                local centerY = absPos.Y + absSize.Y/2
-                
-                VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1)
-                task.wait(0.05)
-                VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1)
-            end)
-        end
-        
-        -- Method 3: Keyboard input as last resort
-        local buttonText = button.Text
-        if buttonText and Enum.KeyCode[buttonText] then
-            pcall(function()
-                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode[buttonText], false, game)
-                task.wait(0.01)
-                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode[buttonText], false, game)
-            end)
-        end
     elseif ringSize > 0.17 then
-        pressedThisQTE = false -- Reset for next QTE
+        pressedThisQTE = false -- Reset khi QTE mới bắt đầu
     end
 end)
