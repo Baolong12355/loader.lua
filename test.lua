@@ -1,6 +1,5 @@
 -- Auto Crate Farm Script
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
@@ -10,7 +9,6 @@ local Humanoid = Character:WaitForChild("Humanoid")
 local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
 
 -- Cấu hình
-local TELEPORT_SPEED = 50 -- Tốc độ teleport
 local CHECK_DELAY = 0.1 -- Delay giữa các lần check
 local FARMING_ENABLED = true
 
@@ -27,19 +25,11 @@ local lastChatMessage = ""
 
 print("🚀 Auto Crate Farm Script đã khởi động!")
 
--- Hàm teleport với animation mượt
+-- Hàm teleport instant
 local function teleportToPosition(position)
     if not Character or not HumanoidRootPart then return end
     
-    local tweenInfo = TweenInfo.new(
-        (HumanoidRootPart.Position - position).Magnitude / TELEPORT_SPEED,
-        Enum.EasingStyle.Linear,
-        Enum.EasingDirection.InOut
-    )
-    
-    local tween = TweenService:Create(HumanoidRootPart, tweenInfo, {CFrame = CFrame.new(position)})
-    tween:Play()
-    tween.Completed:Wait()
+    HumanoidRootPart.CFrame = CFrame.new(position)
     wait(CHECK_DELAY)
 end
 
