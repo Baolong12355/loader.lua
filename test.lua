@@ -109,7 +109,7 @@ local function teleportTo(pos)
     local char = game:GetService("Players").LocalPlayer.Character
     if char and char:FindFirstChild("HumanoidRootPart") then
         char.HumanoidRootPart.CFrame = CFrame.new(pos)
-        task.wait(0.05) -- Delay ngắn cho teleport thường
+        task.wait() -- Delay ngắn cho teleport thường
         debugLog("Teleported to: " .. tostring(pos))
     else
         debugLog("ERROR: Cannot teleport - no character/HRP")
@@ -222,7 +222,7 @@ local function collectCrateWithLoop(cratePos, prox)
     
     -- Collect crate
     fastTeleport(cratePos)
-    task.wait(0.1)
+    task.wait()
     fireproximityprompt(prox, 1, true)
     
     -- Chờ disable
