@@ -10,7 +10,7 @@ local checkDelay = 0.05
 local crateRoot = workspace.ItemSpawns.LabCrate
 local lastChat = ""
 local chatHistory = {}
-local proximityMethod = 1 -- 1 = Distance, 2 = Invisible Part
+local proximityMethod = 2 -- 1 = Distance, 2 = Invisible Part
 local invisiblePart = nil
 
 -- ========== THEO DÕI CHAT ==========
@@ -91,7 +91,7 @@ local function modifyProximityDistance(prox)
     
     pcall(function()
         if prox:FindFirstChild("ProximityPrompt") then
-            prox.ProximityPrompt.MaxActivationDistance = 99999999
+            prox.ProximityPrompt.MaxActivationDistance = 50
             prox.ProximityPrompt.RequiresLineOfSight = false
         end
     end)
