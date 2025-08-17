@@ -1,240 +1,115 @@
--- Auto Crate Farm Script
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
+assert(writefile and getconnections, "⚠️ Cần exploit hỗ trợ writefile và getconnections!")
 
-local LocalPlayer = Players.LocalPlayer
-local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local Humanoid = Character:WaitForChild("Humanoid")
-local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-
--- Cấu hình
-local CHECK_DELAY = 0.1 -- Delay giữa các lần check
-local FARMING_ENABLED = true
-
--- Các vị trí spawn crate
-local SPAWN_POSITIONS = {
-    Vector3.new(-746.103271484375, 86.75001525878906, -620.12060546875),
+-- ======== CẤU HÌNH ========
+local teleportPositions = {
+    Vector3.new(-746.103271484375, 86.75001525878906, 0),
+    Vector3.new(-620.12060546875, 86.75, 0),
     Vector3.new(-353.05078125, 132.3436279296875, 50.36767578125),
     Vector3.new(-70.82891845703125, 81.39054107666016, 834.0664672851562)
 }
+local spawnRoot = workspace.ItemSpawns.LabCrate
+local keywordSpawn = "equipment crate+has been reported!"
+local keywordDespawn = "equipment crate+has despawned or been turned in!"
+local checkInterval = 0.25
 
--- Biến trạng thái
-local isWaitingForSpawn = false -- Bắt đầu với false để check crate ngay
-local lastChatMessage = ""
+-- ======== HÀM GHI LOG CHAT ========
+local logFile = "ChatDump_" .. os.time() .. ".txt"
+writefile(logFile, "")
+local lastChat = ""
 
-print("🚀 Auto Crate Farm Script đã khởi động!")
-
--- Hàm teleport instant
-local function teleportToPosition(position)
-    if not Character or not HumanoidRootPart then return end
-    
-    HumanoidRootPart.CFrame = CFrame.new(position)
-    wait(0.25)
+local function logToFile(text)
+    appendfile(logFile, text .. "\n")
+    lastChat = text
 end
 
--- Hàm gọi remote TurnInCrate
-local function turnInCrate()
-    local success, result = pcall(function()
-        local args = {
-            [1] = "TurnInCrate"
-        }
-        
-        return ReplicatedStorage:WaitForChild("ReplicatedModules")
-            :WaitForChild("KnitPackage")
-            :WaitForChild("Knit")
-            :WaitForChild("Services")
-            :WaitForChild("DialogueService")
-            :WaitForChild("RF")
-            :WaitForChild("CheckRequirement"):InvokeServer(unpack(args))
-    end)
-    
-    if success then
-        print("✅ Đã gọi TurnInCrate thành công!")
-    else
-        warn("❌ Lỗi khi gọi TurnInCrate: " .. tostring(result))
-    end
-end
-
--- Hàm kiểm tra và tương tác với crate
-local function checkAndInteractWithCrate()
-    local itemSpawns = workspace:FindFirstChild("ItemSpawns")
-    if not itemSpawns then return false end
-    
-    local labCrate = itemSpawns:FindFirstChild("LabCrate")
-    if not labCrate then return false end
-    
-    local children = labCrate:GetChildren()
-    if #children == 0 then return false end
-    
-    -- Kiểm tra tất cả children thay vì chỉ children[2]
-    for _, crateChild in pairs(children) do
-        local crate = crateChild:FindFirstChild("Crate")
-        if crate then
-            local proximityAttachment = crate:FindFirstChild("ProximityAttachment")
-            if proximityAttachment then
-                local interaction = proximityAttachment:FindFirstChild("Interaction")
-                if interaction and interaction.Enabled then
-                    print("🎯 Tìm thấy crate có thể tương tác tại: " .. crateChild.Name)
-                    
-                    -- Kích hoạt proximity cho đến khi disabled
-                    while interaction.Enabled and FARMING_ENABLED do
-                        -- Trigger proximity prompt
-                        if interaction:IsA("ProximityPrompt") then
-                            fireproximityprompt(interaction)
-                        end
-                        wait(0.1)
-                    end
-                    
-                    print("📦 Đã tương tác xong với crate!")
-                    
-                    -- Gọi remote sau khi tương tác
-                    wait(0.5) -- Đợi một chút trước khi gọi remote
-                    turnInCrate()
-                    
-                    return true
-                end
-            end
-        end
-    end
-    
-    return false
-end
-
--- Hàm theo dõi chat để phát hiện thông báo spawn
-local function setupChatMonitoring()
-    -- Tạo file log chat
-    local LogFile = "CrateFarm_ChatLog_" .. os.time() .. ".txt"
-    if writefile then
-        writefile(LogFile, "=== Auto Crate Farm Chat Monitor ===\n")
-    end
-    
-    local function logChat(text)
-        lastChatMessage = text
-        if writefile then
-            appendfile(LogFile, "[" .. os.date() .. "] " .. text .. "\n")
-        end
-        -- Chỉ log chat liên quan đến crate
-        if string.find(text, "lost equipment crate") then
-            print("💬 Crate Chat: " .. text)
-        end
-        
-        -- Kiểm tra thông báo spawn crate
-        if string.find(text, "lost equipment crate") and string.find(text, "has been reported!") then
-            print("🚨 Phát hiện crate mới spawn!")
-            isWaitingForSpawn = false
-        end
-        
-        -- Kiểm tra thông báo crate despawn
-        if string.find(text, "lost equipment crate") and (string.find(text, "despawned") or string.find(text, "turned in")) then
-            print("⏰ Crate đã despawn hoặc được turn in")
-            isWaitingForSpawn = true
-        end
-    end
-    
-    -- Theo dõi chat GUI
-    local function scanChatLabels(container)
-        if not container then return end
-        
-        -- Theo dõi TextLabel mới được thêm
+local function monitorChat()
+    local function scan(container)
         container.DescendantAdded:Connect(function(desc)
-            if desc:IsA("TextLabel") and desc.Text and #desc.Text > 0 and string.find(desc.Text, "lost equipment crate") then
-                logChat("[GUI Chat] " .. desc.Text)
+            if desc:IsA("TextLabel") and desc.Text and #desc.Text > 0 then
+                local text = desc.Text
+                logToFile("[GUI Chat] " .. text)
             end
         end)
-        
-        -- Kiểm tra TextLabel hiện có (chỉ crate-related)
-        for _, desc in pairs(container:GetDescendants()) do
-            if desc:IsA("TextLabel") and desc.Text and #desc.Text > 0 and string.find(desc.Text, "lost equipment crate") then
-                logChat("[GUI Chat] " .. desc.Text)
-            end
-        end
     end
-    
-    -- Theo dõi các GUI container có thể chứa chat
-    local guiContainers = {
-        LocalPlayer:WaitForChild("PlayerGui"),
+
+    local guiTargets = {
+        game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui"),
         game:GetService("CoreGui")
     }
-    
-    for _, gui in ipairs(guiContainers) do
-        scanChatLabels(gui)
-        
-        -- Theo dõi GUI mới được tạo
-        gui.ChildAdded:Connect(function(child)
-            wait(0.1) -- Đợi GUI load xong
-            scanChatLabels(child)
-        end)
+
+    for _, gui in ipairs(guiTargets) do
+        scan(gui)
+        gui.ChildAdded:Connect(scan)
     end
 end
 
--- Vòng lặp chính
-local function mainLoop()
-    -- Dịch chuyển một lần đầu tiên
-    print("🎯 Bắt đầu kiểm tra các vị trí spawn...")
-    
-    while FARMING_ENABLED do
-        if not isWaitingForSpawn then
-            local foundCrate = false
-            
-            -- Kiểm tra từng vị trí spawn
-            for i, position in ipairs(SPAWN_POSITIONS) do
-                if not FARMING_ENABLED then break end
-                
-                print("🔍 Kiểm tra vị trí " .. i .. ": " .. tostring(position))
-                teleportToPosition(position)
-                
-                -- Kiểm tra crate tại vị trí hiện tại
-                if checkAndInteractWithCrate() then
-                    foundCrate = true
-                    break
-                end
+-- ======== HÀM TELEPORT ========
+local function teleportTo(position)
+    local character = game:GetService("Players").LocalPlayer.Character
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        character:MoveTo(position)
+    end
+end
+
+-- ======== HÀM KIỂM TRA SPAWN ========
+local function getValidCrate()
+    for _, spawn in ipairs(spawnRoot:GetChildren()) do
+        if spawn:IsA("Model") and spawn:FindFirstChild("Crate") then
+            local proximity = spawn.Crate:FindFirstChild("ProximityAttachment") and spawn.Crate.ProximityAttachment:FindFirstChild("Interaction")
+            if proximity and proximity.Enabled then
+                return proximity
             end
-            
-            -- Nếu không tìm thấy crate nào, chuyển sang chế độ chờ
-            if not foundCrate then
-                print("⌛ Không tìm thấy crate khả dụng, chuyển sang chế độ chờ...")
-                isWaitingForSpawn = true
-            end
-        else
-            print("⏳ Đang chờ thông báo spawn crate mới...")
-            wait(1) -- Chờ lâu hơn khi không có crate
         end
-        
-        wait(CHECK_DELAY)
+    end
+    return nil
+end
+
+-- ======== HÀM TƯƠNG TÁC CRATE ========
+local function turnInCrate()
+    local args = {
+        [1] = "TurnInCrate"
+    }
+    game:GetService("ReplicatedStorage"):WaitForChild("ReplicatedModules"):WaitForChild("KnitPackage"):WaitForChild("Knit"):WaitForChild("Services"):WaitForChild("DialogueService"):WaitForChild("RF"):WaitForChild("CheckRequirement"):InvokeServer(unpack(args))
+end
+
+-- ======== HÀM ĐỢI CHAT CHỨA TỪ KHÓA ========
+local function waitForKeyword(keyword)
+    while true do
+        if lastChat:lower():find(keyword:lower()) then
+            break
+        end
+        task.wait(0.25)
     end
 end
 
--- Khởi động script
-setupChatMonitoring()
+-- ======== VÒNG LẶP CHÍNH ========
+monitorChat()
+teleportTo(teleportPositions[1]) -- dịch chuyển ban đầu
 
--- Đợi một chút để chat system load
-wait(2)
+while true do
+    local found = false
 
--- Bắt đầu vòng lặp chính
-spawn(function()
-    mainLoop()
-end)
+    for _, pos in ipairs(teleportPositions) do
+        teleportTo(pos)
+        task.wait(checkInterval)
 
--- Lệnh điều khiển
-local function stopFarming()
-    FARMING_ENABLED = false
-    print("🛑 Đã dừng Auto Crate Farm!")
+        local proximity = getValidCrate()
+        if proximity then
+            fireproximityprompt(proximity, 1, true)
+
+            repeat
+                task.wait()
+            until not proximity.Enabled
+
+            turnInCrate()
+            found = true
+            break
+        end
+    end
+
+    if not found then
+        waitForKeyword(keywordSpawn)
+    else
+        waitForKeyword(keywordDespawn)
+    end
 end
-
-local function startFarming()
-    FARMING_ENABLED = true
-    print("▶️ Đã khởi động lại Auto Crate Farm!")
-    spawn(function()
-        mainLoop()
-    end)
-end
-
--- Export functions để có thể điều khiển từ console
-_G.StopCrateFarm = stopFarming
-_G.StartCrateFarm = startFarming
-
-print("📋 Lệnh điều khiển:")
-print("   _G.StopCrateFarm() - Dừng farm")
-print("   _G.StartCrateFarm() - Bắt đầu farm")
-print("🎮 Script đã sẵn sàng!")
