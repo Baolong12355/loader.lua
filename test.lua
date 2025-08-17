@@ -325,7 +325,7 @@ while true do
     local success, err = pcall(mainLoop)
     if not success then
         debugLog("ERROR in mainLoop: " .. tostring(err))
-        task.wait(2) -- Giảm thời gian chờ khi lỗi
+        task.wait() -- Giảm thời gian chờ khi lỗi
     end
-    task.wait(0.5) -- Giảm delay giữa các loop chính
+    task.wait() -- Giảm delay giữa các loop chính
 end
