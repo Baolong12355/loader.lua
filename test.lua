@@ -30,7 +30,7 @@ local function teleportToPosition(position)
     if not Character or not HumanoidRootPart then return end
     
     HumanoidRootPart.CFrame = CFrame.new(position)
-    wait(CHECK_DELAY)
+    wait(0.25)
 end
 
 -- Hàm gọi remote TurnInCrate
