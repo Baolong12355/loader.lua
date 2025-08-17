@@ -85,13 +85,13 @@ end
 -- ========== METHOD 1: DISTANCE & RAYCAST ==========
 local function modifyProximityDistance(prox)
     pcall(function()
-        prox.MaxActivationDistance = 9999999
+        prox.MaxActivationDistance = 50
         prox.RequiresLineOfSight = false
     end)
     
     pcall(function()
         if prox:FindFirstChild("ProximityPrompt") then
-            prox.ProximityPrompt.MaxActivationDistance = 50
+            prox.ProximityPrompt.MaxActivationDistance = 99999999
             prox.ProximityPrompt.RequiresLineOfSight = false
         end
     end)
@@ -134,23 +134,21 @@ end
 local function hijackProximity(originalProx)
     local carrier = invisiblePart or createInvisiblePart()
     
-    local newProx = originalProx:Clone()
-    newProx.Parent = carrier
+    -- Cắt trực tiếp proximity từ crate gốc
+    originalProx.Parent = carrier
     
     pcall(function()
-        newProx.MaxActivationDistance = 50
-        newProx.RequiresLineOfSight = false
-        if newProx:FindFirstChild("ProximityPrompt") then
-            newProx.ProximityPrompt.MaxActivationDistance = 50
-            newProx.ProximityPrompt.RequiresLineOfSight = false
+        originalProx.MaxActivationDistance = 50
+        originalProx.RequiresLineOfSight = false
+        if originalProx:FindFirstChild("ProximityPrompt") then
+            originalProx.ProximityPrompt.MaxActivationDistance = 50
+            originalProx.ProximityPrompt.RequiresLineOfSight = false
         end
     end)
     
-    originalProx.Enabled = false
-    
     game:GetService("RunService").Heartbeat:Connect(movePartToCamera)
     
-    return newProx
+    return originalProx
 end
 
 -- ========== KIỂM TRA CRATE ==========
