@@ -20,7 +20,7 @@ local SPAWN_POSITIONS = {
 }
 
 -- Biến trạng thái
-local isWaitingForSpawn = false
+local isWaitingForSpawn = false -- Bắt đầu với false để check crate ngay
 local lastChatMessage = ""
 
 print("🚀 Auto Crate Farm Script đã khởi động!")
@@ -65,38 +65,37 @@ local function checkAndInteractWithCrate()
     if not labCrate then return false end
     
     local children = labCrate:GetChildren()
-    if #children < 2 then return false end
+    if #children == 0 then return false end
     
-    local crateChild = children[2]
-    local crate = crateChild:FindFirstChild("Crate")
-    if not crate then return false end
-    
-    local proximityAttachment = crate:FindFirstChild("ProximityAttachment")
-    if not proximityAttachment then return false end
-    
-    local interaction = proximityAttachment:FindFirstChild("Interaction")
-    if not interaction then return false end
-    
-    -- Kiểm tra nếu interaction enabled
-    if interaction.Enabled then
-        print("🎯 Tìm thấy crate có thể tương tác!")
-        
-        -- Kích hoạt proximity cho đến khi disabled
-        while interaction.Enabled and FARMING_ENABLED do
-            -- Trigger proximity prompt
-            if interaction:IsA("ProximityPrompt") then
-                fireproximityprompt(interaction)
+    -- Kiểm tra tất cả children thay vì chỉ children[2]
+    for _, crateChild in pairs(children) do
+        local crate = crateChild:FindFirstChild("Crate")
+        if crate then
+            local proximityAttachment = crate:FindFirstChild("ProximityAttachment")
+            if proximityAttachment then
+                local interaction = proximityAttachment:FindFirstChild("Interaction")
+                if interaction and interaction.Enabled then
+                    print("🎯 Tìm thấy crate có thể tương tác tại: " .. crateChild.Name)
+                    
+                    -- Kích hoạt proximity cho đến khi disabled
+                    while interaction.Enabled and FARMING_ENABLED do
+                        -- Trigger proximity prompt
+                        if interaction:IsA("ProximityPrompt") then
+                            fireproximityprompt(interaction)
+                        end
+                        wait(0.1)
+                    end
+                    
+                    print("📦 Đã tương tác xong với crate!")
+                    
+                    -- Gọi remote sau khi tương tác
+                    wait(0.5) -- Đợi một chút trước khi gọi remote
+                    turnInCrate()
+                    
+                    return true
+                end
             end
-            wait(0.1)
         end
-        
-        print("📦 Đã tương tác xong với crate!")
-        
-        -- Gọi remote sau khi tương tác
-        wait(0.5) -- Đợi một chút trước khi gọi remote
-        turnInCrate()
-        
-        return true
     end
     
     return false
@@ -115,7 +114,10 @@ local function setupChatMonitoring()
         if writefile then
             appendfile(LogFile, "[" .. os.date() .. "] " .. text .. "\n")
         end
-        print("💬 Chat: " .. text)
+        -- Chỉ log chat liên quan đến crate
+        if string.find(text, "lost equipment crate") then
+            print("💬 Crate Chat: " .. text)
+        end
         
         -- Kiểm tra thông báo spawn crate
         if string.find(text, "lost equipment crate") and string.find(text, "has been reported!") then
@@ -136,14 +138,14 @@ local function setupChatMonitoring()
         
         -- Theo dõi TextLabel mới được thêm
         container.DescendantAdded:Connect(function(desc)
-            if desc:IsA("TextLabel") and desc.Text and #desc.Text > 0 then
+            if desc:IsA("TextLabel") and desc.Text and #desc.Text > 0 and string.find(desc.Text, "lost equipment crate") then
                 logChat("[GUI Chat] " .. desc.Text)
             end
         end)
         
-        -- Kiểm tra TextLabel hiện có
+        -- Kiểm tra TextLabel hiện có (chỉ crate-related)
         for _, desc in pairs(container:GetDescendants()) do
-            if desc:IsA("TextLabel") and desc.Text and #desc.Text > 0 then
+            if desc:IsA("TextLabel") and desc.Text and #desc.Text > 0 and string.find(desc.Text, "lost equipment crate") then
                 logChat("[GUI Chat] " .. desc.Text)
             end
         end
