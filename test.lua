@@ -233,4 +233,3 @@ while true do
     pcall(mainLoop)
     task.wait(0.1)
 end
-
