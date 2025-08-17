@@ -10,7 +10,7 @@ local checkDelay = 0.05
 local crateRoot = workspace.ItemSpawns.LabCrate
 local lastChat = ""
 local chatHistory = {}
-local proximityMethod = 2 -- 1 = Distance, 2 = Invisible Part
+local proximityMethod = 1 -- 1 = Distance, 2 = Invisible Part
 local invisiblePart = nil
 
 -- ========== THEO DÕI CHAT ==========
