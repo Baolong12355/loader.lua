@@ -10,6 +10,8 @@ local checkDelay = 0.05
 local crateRoot = workspace.ItemSpawns.LabCrate
 local lastChat = ""
 local chatHistory = {}
+local proximityMethod = 2 -- 1 = Distance, 2 = Invisible Part
+local invisiblePart = nil
 
 -- ========== THEO DÕI CHAT ==========
 local function monitorChat()
@@ -80,6 +82,77 @@ local function teleportTo(pos)
     end
 end
 
+-- ========== METHOD 1: DISTANCE & RAYCAST ==========
+local function modifyProximityDistance(prox)
+    pcall(function()
+        prox.MaxActivationDistance = 9999999
+        prox.RequiresLineOfSight = false
+    end)
+    
+    pcall(function()
+        if prox:FindFirstChild("ProximityPrompt") then
+            prox.ProximityPrompt.MaxActivationDistance = 50
+            prox.ProximityPrompt.RequiresLineOfSight = false
+        end
+    end)
+end
+
+local function lookAtCrate(cratePos)
+    pcall(function()
+        local camera = workspace.CurrentCamera
+        camera.CFrame = CFrame.lookAt(camera.CFrame.Position, cratePos)
+    end)
+end
+
+-- ========== METHOD 2: INVISIBLE PART ==========
+local function createInvisiblePart()
+    if invisiblePart then
+        pcall(function() invisiblePart:Destroy() end)
+    end
+    
+    invisiblePart = Instance.new("Part")
+    invisiblePart.Name = "ProximityCarrier"
+    invisiblePart.Size = Vector3.new(0.001, 0.001, 0.001)
+    invisiblePart.Material = Enum.Material.ForceField
+    invisiblePart.Transparency = 1
+    invisiblePart.CanCollide = false
+    invisiblePart.Anchored = true
+    invisiblePart.Parent = workspace
+    
+    return invisiblePart
+end
+
+local function movePartToCamera()
+    if invisiblePart and invisiblePart.Parent then
+        pcall(function()
+            local camera = workspace.CurrentCamera
+            invisiblePart.CFrame = camera.CFrame * CFrame.new(0, 0, -2)
+        end)
+    end
+end
+
+local function hijackProximity(originalProx)
+    local carrier = invisiblePart or createInvisiblePart()
+    
+    local newProx = originalProx:Clone()
+    newProx.Parent = carrier
+    
+    pcall(function()
+        newProx.MaxActivationDistance = 50
+        newProx.RequiresLineOfSight = false
+        if newProx:FindFirstChild("ProximityPrompt") then
+            newProx.ProximityPrompt.MaxActivationDistance = 50
+            newProx.ProximityPrompt.RequiresLineOfSight = false
+        end
+    end)
+    
+    originalProx.Enabled = false
+    
+    game:GetService("RunService").Heartbeat:Connect(movePartToCamera)
+    
+    return newProx
+end
+
 -- ========== KIỂM TRA CRATE ==========
 local function getValidCrate()
     for i, spawn in ipairs(crateRoot:GetChildren()) do
@@ -129,65 +202,84 @@ local function hasDespawned()
            (#chatHistory > 0 and chatHistory[#chatHistory]:find(despawnKeyword:lower()))
 end
 
--- ========== AGGRESSIVE LOOP TELEPORT ==========
-local function aggressiveLoopToCrate(cratePos, prox)
-    -- Loop vô hạn cho đến khi thành công hoặc despawn
-    while true do
-        -- Teleport liên tục không ngừng để cạnh tranh
-        aggressiveTeleport(cratePos)
-        
-        -- Check enabled ngay lập tức
-        if prox.Enabled then
-            -- Collect ngay lập tức
-            fireproximityprompt(prox, 1, true)
-            
-            -- Chờ disable với loop teleport tiếp tục
-            local collected = false
-            for i = 1, 100 do -- Check 100 lần
-                aggressiveTeleport(cratePos) -- Tiếp tục teleport trong khi chờ
-                if not prox.Enabled then
-                    collected = true
-                    break
-                end
-            end
-            
-            if collected then
-                turnInCrate()
+-- ========== ENHANCED COLLECTION ==========
+local function collectCrateMethod1(cratePos, prox)
+    modifyProximityDistance(prox)
+    aggressiveTeleport(cratePos)
+    lookAtCrate(cratePos)
+    
+    if prox.Enabled then
+        fireproximityprompt(prox, 1, true)
+        for i = 1, 100 do
+            if not prox.Enabled then
                 return true
             end
+            task.wait(0.01)
+        end
+    end
+    return false
+end
+
+local function collectCrateMethod2(cratePos, prox)
+    local hijackedProx = hijackProximity(prox)
+    task.wait(0.1)
+    
+    if hijackedProx and hijackedProx.Enabled then
+        fireproximityprompt(hijackedProx, 1, true)
+        for i = 1, 100 do
+            if not hijackedProx.Enabled then
+                return true
+            end
+            task.wait(0.01)
+        end
+    end
+    return false
+end
+
+-- ========== AGGRESSIVE LOOP ==========
+local function aggressiveLoopToCrate(cratePos, prox)
+    while true do
+        local success = false
+        
+        if proximityMethod == 1 then
+            success = collectCrateMethod1(cratePos, prox)
+        else
+            success = collectCrateMethod2(cratePos, prox)
         end
         
-        -- Check nếu crate bị despawn
+        if success then
+            turnInCrate()
+            return true
+        end
+        
         if hasDespawned() then
             return false
         end
+        
+        task.wait(0.01)
     end
 end
 
 -- ========== MAIN LOOP ==========
 local function mainLoop()
-    -- Teleport ban đầu
+    if proximityMethod == 2 then
+        createInvisiblePart()
+    end
+    
     teleportTo(positionsToCheck[1])
 
-    -- Kiểm tra crates có sẵn
     for i, pos in ipairs(positionsToCheck) do
         teleportTo(pos)
         task.wait(checkDelay)
 
         local cratePos, prox = getValidCrate()
         if prox then
-            if prox.Enabled then
-                aggressiveTeleport(cratePos)
-                fireproximityprompt(prox, 1, true)
-                repeat 
-                    aggressiveTeleport(cratePos)
-                    task.wait(0.01)
-                until not prox.Enabled
-                turnInCrate()
-                waitForChatKeyword("equipment crate+has despawned or been turned in!")
-                return
+            if prox.Enabled or proximityMethod == 2 then
+                if aggressiveLoopToCrate(cratePos, prox) then
+                    waitForChatKeyword("equipment crate+has despawned or been turned in!")
+                    return
+                end
             else
-                -- Crate tồn tại nhưng chưa enabled - bắt đầu aggressive loop
                 if aggressiveLoopToCrate(cratePos, prox) then
                     waitForChatKeyword("equipment crate+has despawned or been turned in!")
                     return
@@ -196,12 +288,10 @@ local function mainLoop()
         end
     end
 
-    -- Reset và chờ spawn notification
     lastChat = ""
     chatHistory = {}
     waitForChatKeyword("equipment crate+has been reported!")
 
-    -- Main search loop
     while true do
         for i, pos in ipairs(positionsToCheck) do
             teleportTo(pos)
@@ -209,14 +299,12 @@ local function mainLoop()
 
             local cratePos, prox = getValidCrate()
             if prox then
-                -- Bắt đầu aggressive loop ngay khi tìm thấy crate
                 if aggressiveLoopToCrate(cratePos, prox) then
                     waitForChatKeyword("equipment crate+has despawned or been turned in!")
                     return
                 end
             end
             
-            -- Check despawn
             if hasDespawned() then
                 return
             end
