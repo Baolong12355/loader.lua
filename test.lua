@@ -6,7 +6,7 @@ local positionsToCheck = {
     Vector3.new(-353.05078125, 132.3436279296875, 50.36767578125),
     Vector3.new(-70.82891845703125, 81.39054107666016, 834.0664672851562)
 }
-local checkDelay = 0.05
+local checkDelay = 0.5
 local crateRoot = workspace.ItemSpawns.LabCrate
 local lastChat = ""
 local chatHistory = {}
