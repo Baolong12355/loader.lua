@@ -234,5 +234,3 @@ while true do
     task.wait(0.1)
 end
 
-không sửa logic 
-thêm cơ chế thay gì dịch chuyển hải cắt humanoids vào prompt rồi ấn
