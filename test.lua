@@ -6,7 +6,8 @@ local positionsToCheck = {
     Vector3.new(-353.05078125, 132.3436279296875, 50.36767578125),
     Vector3.new(-70.82891845703125, 81.39054107666016, 834.0664672851562)
 }
-local checkDelay = 0.25
+local checkDelay = 0.1 -- Giảm delay cho phản ứng nhanh hơn
+local fastTeleportDelay = 0 -- Delay cho loop teleport nhanh
 local crateRoot = workspace.ItemSpawns.LabCrate
 local logFile = "ChatDump.txt"
 local debugFile = "DebugLog.txt"
@@ -95,32 +96,38 @@ local function monitorChat()
     debugLog("Chat monitoring setup complete")
 end
 
--- ========== TELEPORT ==========
+-- ========== TELEPORT NHANH ==========
+local function fastTeleport(pos)
+    local char = game:GetService("Players").LocalPlayer.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        char.HumanoidRootPart.CFrame = CFrame.new(pos)
+        task.wait(fastTeleportDelay)
+    end
+end
+
 local function teleportTo(pos)
     local char = game:GetService("Players").LocalPlayer.Character
     if char and char:FindFirstChild("HumanoidRootPart") then
         char.HumanoidRootPart.CFrame = CFrame.new(pos)
-        task.wait(0.1)
+        task.wait(0.05) -- Delay ngắn cho teleport thường
         debugLog("Teleported to: " .. tostring(pos))
     else
         debugLog("ERROR: Cannot teleport - no character/HRP")
     end
 end
 
--- ========== KIỂM TRA CRATE ==========
+-- ========== KIỂM TRA CRATE NHANH ==========
 local function getValidCrate()
     for i, spawn in ipairs(crateRoot:GetChildren()) do
         if spawn:FindFirstChild("Crate") then
             local crate = spawn.Crate
             local prox = crate:FindFirstChild("ProximityAttachment") and crate.ProximityAttachment:FindFirstChild("Interaction")
             if prox then
-                debugLog("Found crate at " .. tostring(crate.Position) .. " | Enabled: " .. tostring(prox.Enabled))
-                return crate.Position, prox
+                return crate.Position, prox, i
             end
         end
     end
-    debugLog("No valid crates found")
-    return nil, nil
+    return nil, nil, nil
 end
 
 -- ========== GỬI TURN IN ==========
@@ -160,7 +167,7 @@ local function waitForChatKeyword(keyword, timeout)
             return false
         end
         
-        task.wait(0.25)
+        task.wait(0.1) -- Giảm delay check chat
     end
 end
 
@@ -174,6 +181,67 @@ local function hasDespawned()
     return result
 end
 
+-- ========== LOOP TELEPORT TỚI CRATE ==========
+local function loopTeleportToCrate(cratePos, prox, duration)
+    duration = duration or 2 -- 2 giây mặc định
+    local startTime = tick()
+    debugLog("Starting loop teleport to crate for " .. duration .. "s")
+    
+    while (tick() - startTime) < duration do
+        fastTeleport(cratePos)
+        
+        -- Check xem crate có enabled không
+        if prox.Enabled then
+            debugLog("Crate enabled during loop teleport!")
+            return true
+        end
+        
+        -- Check xem crate có bị despawn không
+        if hasDespawned() then
+            debugLog("Crate despawned during loop teleport")
+            return false
+        end
+    end
+    
+    debugLog("Loop teleport completed")
+    return prox.Enabled
+end
+
+-- ========== COLLECT CRATE VỚI LOOP TP ==========
+local function collectCrateWithLoop(cratePos, prox)
+    debugLog("Collecting crate with loop teleport...")
+    
+    -- Loop teleport đến khi enabled hoặc timeout
+    if not prox.Enabled then
+        local enabled = loopTeleportToCrate(cratePos, prox, 3) -- Loop 3 giây
+        if not enabled then
+            debugLog("Crate not enabled after loop teleport")
+            return false
+        end
+    end
+    
+    -- Collect crate
+    fastTeleport(cratePos)
+    task.wait(0.1)
+    fireproximityprompt(prox, 1, true)
+    
+    -- Chờ disable
+    local timeout = 0
+    repeat 
+        task.wait(0.05)
+        timeout = timeout + 0.05
+    until not prox.Enabled or timeout > 5
+    
+    if not prox.Enabled then
+        debugLog("Crate collected successfully")
+        turnInCrate()
+        return true
+    else
+        debugLog("Failed to collect crate - timeout")
+        return false
+    end
+end
+
 -- ========== MAIN LOOP ==========
 local function mainLoop()
     debugLog("=== STARTING MAIN LOOP ===")
@@ -181,116 +249,66 @@ local function mainLoop()
     -- Teleport ban đầu
     teleportTo(positionsToCheck[1])
 
-    -- Kiểm tra crates có sẵn
-    debugLog("Checking for existing enabled crates...")
+    -- Kiểm tra crates có sẵn với loop teleport
+    debugLog("Checking for existing crates...")
     for i, pos in ipairs(positionsToCheck) do
         debugLog("Checking position " .. i .. ": " .. tostring(pos))
         teleportTo(pos)
-        task.wait(checkDelay * 2)
-
-        local cratePos, prox = getValidCrate()
-        if prox and prox.Enabled then
-            debugLog("Found enabled crate! Collecting...")
-            teleportTo(cratePos)
-            task.wait(0.3)
-            fireproximityprompt(prox, 1, true)
-            repeat task.wait(0.1) until not prox.Enabled
-            debugLog("Crate collected, turning in...")
-            turnInCrate()
-            waitForChatKeyword("equipment crate+has despawned or been turned in!", 10)
-            debugLog("=== MAIN LOOP COMPLETE ===")
-            return
+        
+        local cratePos, prox, crateIndex = getValidCrate()
+        if prox then
+            debugLog("Found crate at position " .. i .. " | Enabled: " .. tostring(prox.Enabled))
+            
+            if collectCrateWithLoop(cratePos, prox) then
+                waitForChatKeyword("equipment crate+has despawned or been turned in!", 10)
+                debugLog("=== MAIN LOOP COMPLETE ===")
+                return
+            end
         end
     end
 
     -- Reset và chờ spawn notification
     lastChat = ""
     chatHistory = {}
-    debugLog("No enabled crates found. Waiting for spawn notification...")
+    debugLog("No crates found. Waiting for spawn notification...")
     
     if not waitForChatKeyword("equipment crate+has been reported!", 60) then
         debugLog("No spawn notification - restarting loop")
         return
     end
 
-    debugLog("Crate spawned! Starting search loop...")
+    debugLog("Crate spawned! Starting fast search...")
     
-    -- Main search loop
-    local maxAttempts = 100
+    -- Fast search loop
+    local maxAttempts = 200 -- Tăng số lần thử
     local attempts = 0
-    local lastFoundPosition = nil
     
     while attempts < maxAttempts do
         attempts = attempts + 1
-        debugLog("=== ATTEMPT " .. attempts .. " ===")
         
-        local crateFound = false
-        local enabledCrateFound = false
-
+        if attempts % 20 == 0 then -- Log mỗi 20 attempts
+            debugLog("Fast search attempt: " .. attempts)
+        end
+        
         for i, pos in ipairs(positionsToCheck) do
-            debugLog("Checking position " .. i .. ": " .. tostring(pos))
             teleportTo(pos)
-            task.wait(checkDelay * 2)
-
-            local cratePos, prox = getValidCrate()
+            
+            local cratePos, prox, crateIndex = getValidCrate()
             if prox then
-                crateFound = true
-                lastFoundPosition = i
+                debugLog("Found crate at position " .. i .. "! Starting loop collection...")
                 
-                if prox.Enabled then
-                    debugLog("ENABLED CRATE FOUND! Collecting...")
-                    enabledCrateFound = true
-                    teleportTo(cratePos)
-                    task.wait(0.3)
-                    fireproximityprompt(prox, 1, true)
-                    repeat task.wait(0.1) until not prox.Enabled
-                    debugLog("Crate collected, turning in...")
-                    turnInCrate()
-                    waitForChatKeyword("equipment crate+has despawned or been turned in!", 10)
-                    debugLog("=== MAIN LOOP COMPLETE ===")
-                    return
-                else
-                    debugLog("Crate found but not enabled yet at position " .. i)
-                end
-            end
-        end
-
-        -- Nếu tìm thấy crate nhưng chưa enabled, camp ở đó
-        if crateFound and not enabledCrateFound and lastFoundPosition then
-            debugLog("Camping at position " .. lastFoundPosition .. " where crate exists...")
-            for campAttempt = 1, 20 do -- Camp 20 lần
-                teleportTo(positionsToCheck[lastFoundPosition])
-                task.wait(checkDelay)
-                
-                local cratePos, prox = getValidCrate()
-                if prox and prox.Enabled then
-                    debugLog("Crate enabled while camping! Collecting...")
-                    teleportTo(cratePos)
-                    task.wait(0.3)
-                    fireproximityprompt(prox, 1, true)
-                    repeat task.wait(0.1) until not prox.Enabled
-                    debugLog("Crate collected, turning in...")
-                    turnInCrate()
+                if collectCrateWithLoop(cratePos, prox) then
                     waitForChatKeyword("equipment crate+has despawned or been turned in!", 10)
                     debugLog("=== MAIN LOOP COMPLETE ===")
                     return
                 end
-                
-                if hasDespawned() then
-                    debugLog("Crate despawned while camping")
-                    return
-                end
             end
-        end
-
-        -- Check nếu crate đã despawn
-        if not crateFound and hasDespawned() then
-            debugLog("No crate found and despawn detected - ending loop")
-            return
-        end
-        
-        if not crateFound then
-            debugLog("No crates found in any position")
+            
+            -- Check despawn giữa các vị trí
+            if hasDespawned() then
+                debugLog("Crate despawned during search")
+                return
+            end
         end
 
         task.wait(checkDelay)
@@ -300,14 +318,14 @@ local function mainLoop()
 end
 
 -- ========== KHỞI ĐỘNG ==========
-debugLog("Script starting...")
+debugLog("Script starting with fast reaction settings...")
 monitorChat()
 
 while true do
     local success, err = pcall(mainLoop)
     if not success then
         debugLog("ERROR in mainLoop: " .. tostring(err))
-        task.wait(5) -- Chờ 5s trước khi thử lại
+        task.wait(2) -- Giảm thời gian chờ khi lỗi
     end
-    task.wait(1)
+    task.wait(0.5) -- Giảm delay giữa các loop chính
 end
