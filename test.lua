@@ -1,135 +1,62 @@
--- Kiểm tra writefile
-assert(writefile and getconnections, "⚠️ Cần exploit hỗ trợ writefile và getconnections!")
-
-local LogFile = "CrateChatLog.txt"
-local TimestampFile = "ProcessedTimestamps.txt"
+-- Equipment Crate Auto Collector
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
--- Vị trí spawn crates
+-- Danh sách vị trí spawn
 local spawnPositions = {
     Vector3.new(-746.103271484375, 86.75001525878906, -620.12060546875),
     Vector3.new(-353.05078125, 132.3436279296875, 50.36767578125),
     Vector3.new(-70.82891845703125, 81.39054107666016, 834.0664672851562)
 }
 
--- Reset log file
-writefile(LogFile, "")
+local currentPositionIndex = 1
 
--- Tạo file timestamp nếu chưa có
-if not isfile(TimestampFile) then
-    writefile(TimestampFile, "")
-end
-
--- Hàm ghi log
-local function logToFile(text)
-    appendfile(LogFile, text .. "\n")
-end
-
--- Hàm lưu timestamp đã xử lý
-local function saveProcessedTimestamp(timestamp)
-    processedTimestamps[timestamp] = true
-    appendfile(TimestampFile, tostring(timestamp) .. "\n")
-end
-
--- Biến theo dõi chat
-local waitingForCrate = false
-local processedTimestamps = {}
-local lastCrateMessage = ""
-
--- Đọc timestamps đã xử lý (nếu có)
-if isfile(TimestampFile) then
-    local content = readfile(TimestampFile)
-    for timestamp in string.gmatch(content, "[^\n]+") do
-        processedTimestamps[tonumber(timestamp)] = true
+-- Hàm teleport tức thì
+local function teleportTo(position)
+    if humanoidRootPart then
+        humanoidRootPart.CFrame = CFrame.new(position)
     end
 end
 
--- Theo dõi chat (chỉ crate-related với timestamp)
-local function scanForChatLabels(container)
-    container.DescendantAdded:Connect(function(desc)
-        if desc:IsA("TextLabel") and desc.Text and #desc.Text > 0 then
-            local chatText = desc.Text
-            local messageTime = tick()
-            
-            -- Chỉ xử lý chat liên quan đến crate và chưa được xử lý
-            if string.find(chatText, "lost equipment crate") and not processedTimestamps[messageTime] then
-                local timestamp = os.date("[%H:%M:%S]", messageTime)
-                logToFile(timestamp .. " [GUI Chat] " .. chatText)
-                
-                -- Lưu timestamp đã xử lý
-                saveProcessedTimestamp(messageTime)
-                
-                -- Cập nhật tin nhắn crate cuối cùng
-                lastCrateMessage = chatText
-                
-                -- Kiểm tra spawn crate
-                if string.find(chatText, "has been reported!") then
-                    waitingForCrate = false
-                end
-            end
-        end
-    end)
-end
-
--- Theo dõi GUI
-local guiTargets = {
-    player:WaitForChild("PlayerGui"),
-    game:GetService("CoreGui")
-}
-
-for _, gui in ipairs(guiTargets) do
-    scanForChatLabels(gui)
-    gui.ChildAdded:Connect(function(child)
-        scanForChatLabels(child)
-    end)
-end
-
--- Hàm teleport với loop
-local function teleportLoop(position)
-    local connection
-    connection = RunService.Heartbeat:Connect(function()
-        if humanoidRootPart and humanoidRootPart.Parent then
-            humanoidRootPart.CFrame = CFrame.new(position)
-        end
-    end)
+-- Hàm kiểm tra crate và thu thập
+local function checkAndCollectCrate()
+    local itemSpawns = workspace:FindFirstChild("ItemSpawns")
+    if not itemSpawns then return false end
     
-    wait(0.1)
-    connection:Disconnect()
-end
-
--- Hàm kiểm tra và thu thập crate
-local function checkAndCollectCrates()
-    local labCrate = workspace.ItemSpawns:FindFirstChild("LabCrate")
+    local labCrate = itemSpawns:FindFirstChild("LabCrate")
     if not labCrate then return false end
     
-    for _, child in pairs(labCrate:GetChildren()) do
-        local crate = child:FindFirstChild("Crate")
+    for _, crateSpawn in pairs(labCrate:GetChildren()) do
+        local crate = crateSpawn:FindFirstChild("Crate")
         if crate then
             local proximityAttachment = crate:FindFirstChild("ProximityAttachment")
             if proximityAttachment then
                 local interaction = proximityAttachment:FindFirstChild("Interaction")
                 if interaction and interaction.Enabled then
                     -- Teleport đến crate
-                    teleportLoop(crate.Position)
+                    teleportTo(crate.Position)
                     
-                    -- Kích hoạt proximity cho đến khi disabled
+                    -- Kích proximity cho đến khi disabled
                     while interaction.Enabled do
                         fireproximityprompt(interaction)
                         wait(0.1)
                     end
                     
-                    -- Chạy remote
-                    local args = {
-                        [1] = "TurnInCrate"
-                    }
-                    
-                    ReplicatedStorage:WaitForChild("ReplicatedModules"):WaitForChild("KnitPackage"):WaitForChild("Knit"):WaitForChild("Services"):WaitForChild("DialogueService"):WaitForChild("RF"):WaitForChild("CheckRequirement"):InvokeServer(unpack(args))
+                    -- Gọi remote
+                    local args = {[1] = "TurnInCrate"}
+                    ReplicatedStorage:WaitForChild("ReplicatedModules")
+                        :WaitForChild("KnitPackage")
+                        :WaitForChild("Knit")
+                        :WaitForChild("Services")
+                        :WaitForChild("DialogueService")
+                        :WaitForChild("RF")
+                        :WaitForChild("CheckRequirement")
+                        :InvokeServer(unpack(args))
                     
                     return true
                 end
@@ -139,38 +66,60 @@ local function checkAndCollectCrates()
     return false
 end
 
--- Main loop
-while true do
-    -- Reset log mỗi lần bắt đầu vòng lập mới (giữ nguyên timestamp file)
-    writefile(LogFile, "")
+-- Hàm kiểm tra spawn location có tồn tại tại vị trí cụ thể
+local function checkSpawnLocationAtPosition(position)
+    local itemSpawns = workspace:FindFirstChild("ItemSpawns")
+    if not itemSpawns then return false end
     
-    -- Chỉ teleport nếu tin nhắn crate cuối cùng là spawn
-    if string.find(lastCrateMessage, "has been reported!") then
-        -- Teleport và kiểm tra các vị trí spawn
-        for _, position in ipairs(spawnPositions) do
-            teleportLoop(position)
-            wait(0.1)
-        end
-        
-        -- Kiểm tra và thu thập crates
-        if checkAndCollectCrates() then
-            -- Đã thu thập được crate, đợi chat thông báo crate mới
-            waitingForCrate = true
-            while waitingForCrate do
-                wait(1)
+    local labCrate = itemSpawns:FindFirstChild("LabCrate")
+    if not labCrate then return false end
+    
+    -- Kiểm tra có spawn location nào gần vị trí này không
+    for _, spawnLocation in pairs(labCrate:GetChildren()) do
+        if spawnLocation.Name == "SpawnLocation" and spawnLocation.Position then
+            local distance = (spawnLocation.Position - position).Magnitude
+            if distance < 5 then -- Trong phạm vi 50 studs
+                return true
             end
-        else
-            -- Không có crate, đợi chat thông báo spawn
-            waitingForCrate = true
-            while waitingForCrate do
-                wait(1)
-            end
-        end
-    else
-        -- Tin nhắn cuối không phải spawn, chỉ đợi
-        waitingForCrate = true
-        while waitingForCrate do
-            wait(1)
         end
     end
+    
+    return false
 end
+
+-- Hàm chính chạy liên tục  
+local function mainLoop()
+    local heartbeatConnection
+    
+    heartbeatConnection = RunService.Heartbeat:Connect(function()
+        -- Teleport đến vị trí hiện tại
+        teleportTo(spawnPositions[currentPositionIndex])
+        
+        -- Đợi spawn location tại vị trí này load
+        if not checkSpawnLocationAtPosition(spawnPositions[currentPositionIndex]) then
+            return -- Chờ load spawn location tại vị trí này
+        end
+        
+        -- Kiểm tra và thu thập crate
+        if checkAndCollectCrate() then
+            -- Đã thu thập thành công, reset về vị trí đầu
+            currentPositionIndex = 1
+        else
+            -- Không có crate, chuyển vị trí tiếp theo
+            currentPositionIndex = currentPositionIndex + 1
+            if currentPositionIndex > #spawnPositions then
+                currentPositionIndex = 1
+            end
+        end
+        
+        wait(0.1)
+    end)
+end
+
+-- Bắt đầu sau 10 giây và lặp lại mỗi 10 giây
+spawn(function()
+    while true do
+        wait(10)
+        mainLoop()
+    end
+end)
