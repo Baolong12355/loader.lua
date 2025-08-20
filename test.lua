@@ -1,135 +1,107 @@
--- Auto Feed Shards Script (Skip Max Level Abilities)
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- Simple Auto Target Script - Chỉ hoạt động khi có DamagePoint
+-- Tự động target humanoid gần nhất khi sử dụng skill
 
--- Remotes
-local GetAllAbilityShards = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Services.CraftingService.RF.GetAllAbilityShards
-local ConsumeShardsForXP = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Services.LevelService.RF.ConsumeShardsForXP
-local GetAbilityPVEInfo = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Services.LevelService.RF.GetAbilityPVEInfo
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
-local function feedAllShards()
-    print("[DEBUG] Bắt đầu feedAllShards")
-    
-    -- Lấy tất cả shards hiện có
-    local success, allShards = pcall(function()
-        return GetAllAbilityShards:InvokeServer()
-    end)
+local LocalPlayer = Players.LocalPlayer
 
-    if not success then
-        print("[DEBUG] Lỗi khi lấy shards:", allShards)
-        return
+-- Cài đặt đơn giản
+local MAX_RANGE = 50 -- Khoảng cách tối đa
+local DAMAGE_POINT_NAME = "DmgPoint" -- Tên damage point
+
+-- Tìm humanoid gần nhất (không tính bản thân)
+local function FindNearestHumanoid()
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        return nil
     end
     
-    if not allShards then 
-        print("[DEBUG] allShards = nil")
-        return 
-    end
+    local myPosition = character.HumanoidRootPart.Position
+    local nearestHumanoid = nil
+    local nearestDistance = math.huge
     
-    print("[DEBUG] Đã lấy được shards")
-    
-    -- Đếm tổng số abilities có shards
-    local totalAbilitiesWithShards = 0
-    for abilityId, shardInfo in pairs(allShards) do
-        if shardInfo.Shards and shardInfo.Shards > 0 then
-            totalAbilitiesWithShards = totalAbilitiesWithShards + 1
-        end
-    end
-    print("[DEBUG] Tổng abilities có shards:", totalAbilitiesWithShards)
-      
-    -- Tạo bảng feed chỉ những abilities chưa max level  
-    local shardsToFeed = {}
-    local processedCount = 0
-    local addedToFeed = 0
-    local skippedMaxLevel = 0
-    local skippedNoShards = 0
-    local errorCount = 0
-      
-    for abilityId, shardInfo in pairs(allShards) do
-        processedCount = processedCount + 1
-        print("[DEBUG] Xử lý ability", processedCount .. "/" .. totalAbilitiesWithShards, "- ID:", abilityId, "- Shards:", shardInfo.Shards or "nil")
-        
-        if shardInfo.Shards and shardInfo.Shards > 0 then  
-            -- Kiểm tra level của ability  
-            local abilitySuccess, abilityInfo = pcall(function()  
-                return GetAbilityPVEInfo:InvokeServer(abilityId)  
-            end)
+    -- Duyệt tất cả humanoids trong workspace
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if obj:IsA("Humanoid") and obj.Health > 0 then
+            local targetChar = obj.Parent
+            local rootPart = targetChar:FindFirstChild("HumanoidRootPart")
             
-            if not abilitySuccess then
-                errorCount = errorCount + 1
-                print("[DEBUG] ❌ Lỗi khi lấy info ability", abilityId, ":", abilityInfo)
-            elseif not abilityInfo then
-                errorCount = errorCount + 1
-                print("[DEBUG] ❌ abilityInfo = nil cho ability", abilityId)
-            else
-                print("[DEBUG] Raw abilityInfo:", game:GetService("HttpService"):JSONEncode(abilityInfo))
+            -- Bỏ qua bản thân
+            if rootPart and targetChar ~= character then
+                local distance = (rootPart.Position - myPosition).Magnitude
                 
-                -- Thử các cách khác nhau để lấy level
-                local currentLevel = nil
-                if abilityInfo.CurrentLevel then
-                    currentLevel = abilityInfo.CurrentLevel
-                elseif abilityInfo[1] and abilityInfo[1].CurrentLevel then
-                    currentLevel = abilityInfo[1].CurrentLevel
-                elseif abilityInfo.Level then
-                    currentLevel = abilityInfo.Level
-                end
-                
-                print("[DEBUG] Current Level tìm được:", currentLevel)
-                
-                if currentLevel and currentLevel < 200 then  
-                    shardsToFeed[abilityId] = shardInfo.Shards
-                    addedToFeed = addedToFeed + 1
-                    print("[DEBUG] ✅ Thêm vào feed - Ability ID:", abilityId, "Level:", currentLevel, "Shards:", shardInfo.Shards)
-                else
-                    skippedMaxLevel = skippedMaxLevel + 1
-                    print("[DEBUG] ❌ Bỏ qua (max level hoặc không có level) - Ability ID:", abilityId, "Level:", currentLevel or "nil")
+                if distance <= MAX_RANGE and distance < nearestDistance then
+                    nearestDistance = distance
+                    nearestHumanoid = {
+                        humanoid = obj,
+                        character = targetChar,
+                        position = rootPart.Position,
+                        distance = distance
+                    }
                 end
             end
-        else
-            skippedNoShards = skippedNoShards + 1
-            print("[DEBUG] Bỏ qua (không có shards) - Ability ID:", abilityId)
-        end  
+        end
     end
     
-    print("[DEBUG] === TỔNG KẾT ===")
-    print("[DEBUG] Đã xử lý:", processedCount, "abilities")
-    print("[DEBUG] Có shards:", totalAbilitiesWithShards)
-    print("[DEBUG] Không có shards:", skippedNoShards)
-    print("[DEBUG] Lỗi khi lấy info:", errorCount)
-    print("[DEBUG] Bỏ qua (max level):", skippedMaxLevel)
-    print("[DEBUG] Thêm vào feed:", addedToFeed)
-      
-    -- Nếu không có shard nào để feed thì return  
-    if next(shardsToFeed) == nil then
-        print("[DEBUG] Không có shard nào để feed")
-        return 
+    return nearestHumanoid
+end
+
+-- Chuyển damage point đến target
+local function RedirectDamagePoint(damagePoint, targetPosition)
+    local parent = damagePoint.Parent
+    if not parent or not parent:IsA("BasePart") then return end
+    
+    -- Tính toán vector từ parent đến target
+    local parentPosition = parent.Position
+    local direction = (targetPosition - parentPosition)
+    
+    -- Chuyển đổi sang local space của parent
+    local localDirection = parent.CFrame:VectorToObjectSpace(direction)
+    
+    -- Set position của damage point
+    damagePoint.Position = localDirection
+end
+
+-- Main function - Chỉ chạy khi có damage points
+local function CheckAndRedirect()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    -- Tìm tất cả damage points hiện tại
+    local damagePoints = {}
+    for _, obj in pairs(character:GetDescendants()) do
+        if obj:IsA("Attachment") and obj.Name == DAMAGE_POINT_NAME then
+            table.insert(damagePoints, obj)
+        end
     end
     
-    print("[DEBUG] Danh sách sẽ feed:")
-    for abilityId, shards in pairs(shardsToFeed) do
-        print("[DEBUG] - Ability ID:", abilityId, "Shards:", shards)
-    end
-      
-    print("[DEBUG] Bắt đầu feed shards...")
-    -- Feed các shards của abilities chưa max level  
-    local feedSuccess, feedError = pcall(function()  
-        ConsumeShardsForXP:InvokeServer(shardsToFeed)  
-    end)
-    
-    if feedSuccess then
-        print("[DEBUG] ✅ Feed thành công!")
-    else
-        print("[DEBUG] ❌ Lỗi khi feed:", feedError)
+    -- Chỉ hoạt động khi có damage points (đang dùng skill)
+    if #damagePoints > 0 then
+        local target = FindNearestHumanoid()
+        
+        if target then
+            print("Targeting:", target.character.Name, "Distance:", math.floor(target.distance))
+            
+            -- Redirect tất cả damage points đến target
+            for _, damagePoint in pairs(damagePoints) do
+                RedirectDamagePoint(damagePoint, target.position)
+            end
+        end
     end
 end
 
--- Auto run
-spawn(function()
-    wait(3)
-    feedAllShards()
+-- Chạy mỗi frame
+local connection = RunService.Heartbeat:Connect(CheckAndRedirect)
 
-    while true do  
-        wait(8)  
-        feedAllShards()  
+-- Cleanup khi character respawn
+LocalPlayer.CharacterAdded:Connect(function()
+    if connection then
+        connection:Disconnect()
     end
+    wait(1) -- Đợi character load
+    connection = RunService.Heartbeat:Connect(CheckAndRedirect)
 end)
 
-_G.FeedAllShards = feedAllShards
+print("Auto Target loaded - Chỉ hoạt động khi có DamagePoint")
