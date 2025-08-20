@@ -1,214 +1,184 @@
--- Real-time DamagePoint Monitor - Chỉ clone khi có DamagePoint MỚI xuất hiện
--- Chạy liên tục để theo dõi và clone ngay khi dùng skill
-
+-- Hitbox Hook with Nearest NPC Targeting
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local RunService = game:GetService("RunService")
-
 local LocalPlayer = Players.LocalPlayer
 
--- Tạo folder để chứa clones
-local cloneFolder = Workspace:FindFirstChild("NewDamagePoints")
-if cloneFolder then
-    cloneFolder:Destroy()
+-- Configuration
+local NPC_SEARCH_DISTANCE = 100 -- Maximum distance to search for NPCs
+
+-- Function to check if entity is a player
+local function isPlayer(entity)
+    return Players:GetPlayerFromCharacter(entity) ~= nil
 end
-cloneFolder = Instance.new("Folder")
-cloneFolder.Name = "NewDamagePoints"
-cloneFolder.Parent = Workspace
 
-print("=== Real-time DamagePoint Monitor Started ===")
-print("Chờ bạn dùng skill để phát hiện DamagePoints...")
+-- Function to find nearest NPC
+local function findNearestNPC()
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        return nil
+    end
+    
+    local playerPosition = character.HumanoidRootPart.Position
+    local nearestNPC = nil
+    local nearestDistance = math.huge
+    
+    -- Search in workspace.Living folder
+    local livingFolder = Workspace:FindFirstChild("Living")
+    if livingFolder then
+        for _, entity in ipairs(livingFolder:GetChildren()) do
+            if entity:FindFirstChild("Humanoid") and not isPlayer(entity) then
+                local rootPart = entity:FindFirstChild("HumanoidRootPart") or entity:FindFirstChild("Torso") or entity:FindFirstChild("Head")
+                if rootPart then
+                    local distance = (rootPart.Position - playerPosition).Magnitude
+                    if distance < nearestDistance and distance <= NPC_SEARCH_DISTANCE then
+                        nearestDistance = distance
+                        nearestNPC = entity
+                    end
+                end
+            end
+        end
+    end
+    
+    return nearestNPC
+end
 
-local cloneCount = 0
-local connections = {}
+-- Hitbox Function Hook with Nearest NPC Targeting
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
 
--- Function clone nhanh
-local function QuickClone(obj, reason)
-    cloneCount = cloneCount + 1
-    local timestamp = os.date("%H:%M:%S")
+-- Configuration
+local NPC_SEARCH_DISTANCE = 100 -- Maximum distance to search for NPCs
+
+-- Function to check if entity is a player
+local function isPlayer(entity)
+    return Players:GetPlayerFromCharacter(entity) ~= nil
+end
+
+-- Function to find nearest NPC
+local function findNearestNPC()
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        return nil
+    end
     
-    print(string.format("[%s] #%d - Found: %s in %s (%s)", 
-        timestamp, cloneCount, obj.Name, obj.Parent.Name, reason))
+    local playerPosition = character.HumanoidRootPart.Position
+    local nearestNPC = nil
+    local nearestDistance = math.huge
     
-    local success, clone = pcall(function()
-        return obj.Parent:Clone()
-    end)
+    -- Search in workspace.Living folder
+    local livingFolder = Workspace:FindFirstChild("Living")
+    if livingFolder then
+        for _, entity in ipairs(livingFolder:GetChildren()) do
+            if entity:FindFirstChild("Humanoid") and not isPlayer(entity) then
+                local rootPart = entity:FindFirstChild("HumanoidRootPart") or entity:FindFirstChild("Torso") or entity:FindFirstChild("Head")
+                if rootPart then
+                    local distance = (rootPart.Position - playerPosition).Magnitude
+                    if distance < nearestDistance and distance <= NPC_SEARCH_DISTANCE then
+                        nearestDistance = distance
+                        nearestNPC = entity
+                    end
+                end
+            end
+        end
+    end
     
-    if success and clone then
-        clone.Name = string.format("%s_Clone_%d_%s", 
-            obj.Parent.Name, cloneCount, timestamp:gsub(":", "-"))
-        clone.Parent = cloneFolder
+    return nearestNPC
+end
+
+-- Find and hook the hitbox module
+local function hookHitboxModule()
+    -- Direct path to the Cast module
+    local castModule = game:GetService("ReplicatedStorage").ReplicatedRoot.Services.CombatService.Core.Hitbox.Types.Cast
+    
+    local success, hitboxModule = pcall(require, castModule)
+    if success and hitboxModule.Cast then
+        print("Found Cast module at:", castModule:GetFullName())
         
-        -- Thêm info
-        local info = Instance.new("StringValue")
-        info.Name = "INFO"
-        info.Value = string.format("DamagePoint: %s | Time: %s | Reason: %s | Original: %s", 
-            obj.Name, timestamp, reason, obj.Parent.Name)
-        info.Parent = clone
+        -- Store original function
+        local originalCast = hitboxModule.Cast
         
-        print(string.format("  → Cloned: %s", clone.Name))
+        -- Hook the function
+        hitboxModule.Cast = function(arg1)
+            -- Find nearest NPC
+            local nearestNPC = findNearestNPC()
+            
+            if nearestNPC then
+                local rootPart = nearestNPC:FindFirstChild("HumanoidRootPart") or nearestNPC:FindFirstChild("Torso") or nearestNPC:FindFirstChild("Head")
+                if rootPart then
+                    -- Modify the Origin to target the nearest NPC
+                    if typeof(arg1.Origin) == "CFrame" then
+                        arg1.Origin = rootPart.CFrame
+                    elseif typeof(arg1.Origin) == "Vector3" then
+                        arg1.Origin = rootPart.Position
+                    end
+                    
+                    print("Hooked Cast function - Targeting:", nearestNPC.Name)
+                end
+            end
+            
+            -- Call original function with modified parameters
+            return originalCast(arg1)
+        end
+        
+        print("Successfully hooked Cast function!")
         return true
     else
-        print("  → Clone failed!")
+        print("Failed to require Cast module or Cast function not found")
         return false
     end
 end
 
--- Monitor character descendants
-local function MonitorCharacter(character)
-    if not character then return end
-    
-    print("Monitoring character:", character.Name)
-    
-    -- Monitor khi có object MỚI được thêm vào
-    local connection = character.DescendantAdded:Connect(function(obj)
-        if obj:IsA("Attachment") then
-            local name = obj.Name:lower()
-            -- Kiểm tra tên có phải DamagePoint không
-            if name:find("damage") or name:find("dmg") or name:find("hit") or 
-               name:find("point") or name:find("attack") then
+-- Alternative method: Hook by scanning all modules
+local function scanAndHookModules()
+    local function checkModule(moduleScript)
+        local success, module = pcall(require, moduleScript)
+        if success and type(module) == "table" and module.Cast then
+            print("Found Cast function in:", moduleScript:GetFullName())
+            
+            -- Store original function
+            local originalCast = module.Cast
+            
+            -- Hook the function
+            module.Cast = function(arg1)
+                local nearestNPC = findNearestNPC()
                 
-                wait(0.1) -- Đợi object setup xong
-                QuickClone(obj, "NEW_ATTACHMENT")
-            end
-        elseif obj:IsA("Part") or obj:IsA("MeshPart") then
-            -- Kiểm tra part mới có chứa attachments không
-            wait(0.2) -- Đợi attachments được add vào part
-            for _, child in pairs(obj:GetChildren()) do
-                if child:IsA("Attachment") then
-                    local name = child.Name:lower()
-                    if name:find("damage") or name:find("dmg") or name:find("hit") or 
-                       name:find("point") or name:find("attack") then
-                        QuickClone(child, "NEW_PART_WITH_ATTACHMENT")
+                if nearestNPC then
+                    local rootPart = nearestNPC:FindFirstChild("HumanoidRootPart") or nearestNPC:FindFirstChild("Torso") or nearestNPC:FindFirstChild("Head")
+                    if rootPart then
+                        if typeof(arg1.Origin) == "CFrame" then
+                            arg1.Origin = rootPart.CFrame
+                        elseif typeof(arg1.Origin) == "Vector3" then
+                            arg1.Origin = rootPart.Position
+                        end
+                        
+                        print("Auto-targeting NPC:", nearestNPC.Name)
                     end
                 end
+                
+                return originalCast(arg1)
             end
+            
+            return true
         end
-    end)
-    
-    table.insert(connections, connection)
-end
-
--- Monitor backpack (tools)
-local function MonitorBackpack()
-    if not LocalPlayer.Backpack then return end
-    
-    LocalPlayer.Backpack.ChildAdded:Connect(function(tool)
-        if tool:IsA("Tool") then
-            -- Monitor tool descendants
-            tool.DescendantAdded:Connect(function(obj)
-                if obj:IsA("Attachment") then
-                    local name = obj.Name:lower()
-                    if name:find("damage") or name:find("dmg") or name:find("hit") or 
-                       name:find("point") or name:find("attack") then
-                        wait(0.1)
-                        QuickClone(obj, "TOOL_ATTACHMENT")
-                    end
-                end
-            end)
-        end
-    end)
-end
-
--- Monitor workspace (rơi xuống)
-local function MonitorWorkspace()
-    Workspace.DescendantAdded:Connect(function(obj)
-        if obj:IsA("Attachment") and obj.Parent ~= cloneFolder then
-            local name = obj.Name:lower()
-            if name:find("damage") or name:find("dmg") or name:find("hit") or 
-               name:find("point") or name:find("attack") then
-                wait(0.1)
-                QuickClone(obj, "WORKSPACE_ATTACHMENT")
-            end
-        end
-    end)
-end
-
--- Khởi tạo monitoring
-local function StartMonitoring()
-    -- Monitor character hiện tại
-    if LocalPlayer.Character then
-        MonitorCharacter(LocalPlayer.Character)
+        return false
     end
     
-    -- Monitor khi respawn
-    LocalPlayer.CharacterAdded:Connect(function(character)
-        print("Character respawned, monitoring new character...")
-        MonitorCharacter(character)
-    end)
-    
-    -- Monitor backpack
-    MonitorBackpack()
-    
-    -- Monitor workspace
-    MonitorWorkspace()
-    
-    print("✅ All monitors active!")
-    print("🎯 Dùng skill để test - script sẽ tự động clone DamagePoints mới!")
-end
-
--- Status display
-local function ShowStatus()
-    spawn(function()
-        while true do
-            wait(10) -- Update mỗi 10 giây
-            if cloneCount > 0 then
-                print(string.format("📊 Status: %d DamagePoints cloned | Folder: %s", 
-                    cloneCount, cloneFolder:GetFullName()))
+    -- Scan ReplicatedStorage
+    for _, child in ipairs(game.ReplicatedStorage:GetDescendants()) do
+        if child:IsA("ModuleScript") then
+            if checkModule(child) then
+                print("Successfully hooked Cast function from scan!")
+                return true
             end
         end
-    end)
-end
-
--- Cleanup function
-local function Cleanup()
-    for _, connection in pairs(connections) do
-        if connection then
-            connection:Disconnect()
-        end
     end
-    connections = {}
+    
+    return false
 end
 
--- Commands
-local function AddCommands()
-    -- Command để clear clones
-    game.Players.LocalPlayer.Chatted:Connect(function(msg)
-        if msg:lower() == "/clear" then
-            cloneFolder:ClearAllChildren()
-            cloneCount = 0
-            print("🗑️ Cleared all clones")
-        elseif msg:lower() == "/stop" then
-            Cleanup()
-            print("⏹️ Stopped monitoring")
-        elseif msg:lower() == "/status" then
-            print(string.format("📊 Found: %d clones | Monitoring: %s", 
-                cloneCount, #connections > 0 and "ON" or "OFF"))
-        end
-    end)
+-- Try to hook the function
+print("Attempting to hook Cast function...")
+if not hookHitboxModule() then
+    print("Failed to hook Cast function from direct path")
 end
-
--- Start everything
-StartMonitoring()
-ShowStatus()
-AddCommands()
-
-print("\n=== HƯỚNG DẪN SỬ DỤNG ===")
-print("1. Script đang chạy liên tục, theo dõi DamagePoints MỚI")
-print("2. Dùng skill bất kỳ → sẽ tự động clone DamagePoints")
-print("3. Kiểm tra folder 'NewDamagePoints' trong Workspace")
-print("4. Chat '/clear' để xóa clones")
-print("5. Chat '/stop' để dừng monitor")
-print("6. Chat '/status' để xem trạng thái")
-print("\n⏳ Đang chờ bạn dùng skill...")
-
--- Keep script running indicator
-spawn(function()
-    local dots = 0
-    while true do
-        wait()
-        dots = (dots + 1) % 4
-        local dotString = string.rep(".", dots)
-        print(string.format("🔄 Monitoring%s (Cloned: %d)", dotString, cloneCount))
-    end
-end)
