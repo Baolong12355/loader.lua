@@ -117,10 +117,18 @@ local function findNearestEnemy()
         local folder = workspace.Living:FindFirstChild(folderName)
         if folder then
             for _, enemy in pairs(folder:GetChildren()) do
-                if enemy:FindFirstChild("HumanoidRootPart") and enemy:FindFirstChild("Humanoid") then
-                    local enemyHumanoid = enemy.Humanoid
-                    if enemyHumanoid.Health > 0 then
-                        local distance = (RootPart.Position - enemy.HumanoidRootPart.Position).Magnitude
+                -- Check if it's a model
+                if enemy:IsA("Model") then
+                    -- Check if enemy is alive (has Humanoid with health > 0, or just exists if no Humanoid)
+                    local humanoid = enemy:FindFirstChild("Humanoid")
+                    local isAlive = true
+                    
+                    if humanoid then
+                        isAlive = humanoid.Health > 0
+                    end
+                    
+                    if isAlive then
+                        local distance = (RootPart.Position - enemy:GetModelCFrame().Position).Magnitude
                         if distance < shortestDistance then
                             shortestDistance = distance
                             nearestEnemy = enemy
@@ -178,7 +186,13 @@ local function useM2()
 end
 
 local function attackTarget(target)
-    if not target or not target:FindFirstChild("HumanoidRootPart") then
+    if not target or not target:IsA("Model") then
+        return false
+    end
+    
+    -- Find the root part of the target
+    local targetRootPart = target.PrimaryPart or target:FindFirstChild("HumanoidRootPart") or target:FindFirstChild("Torso") or target:FindFirstChild("UpperTorso")
+    if not targetRootPart then
         return false
     end
     
@@ -187,7 +201,7 @@ local function attackTarget(target)
         return false
     end
     
-    local targetPos = target.HumanoidRootPart.Position
+    local targetPos = targetRootPart.Position
     local attackPos = targetPos + Vector3.new(0, 1, 0) -- 1 stud above target
     
     -- Move to attack position
@@ -288,8 +302,21 @@ local function combatLoop()
         -- Attack the target (returns true if any skill was used)
         local skillUsed = attackTarget(target)
         
-        -- If target is dead, escape
-        if target.Humanoid.Health <= 0 then
+        -- Check if target is dead/destroyed
+        local targetStillExists = target and target.Parent
+        local targetDead = false
+        
+        if targetStillExists then
+            local humanoid = target:FindFirstChild("Humanoid")
+            if humanoid then
+                targetDead = humanoid.Health <= 0
+            end
+        else
+            targetDead = true -- Target was destroyed/removed
+        end
+        
+        -- If target is dead or doesn't exist, escape
+        if targetDead or not targetStillExists then
             escapeToSafety()
         end
         -- If no skills were used (all on cooldown), escape temporarily
