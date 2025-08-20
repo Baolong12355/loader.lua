@@ -17,20 +17,10 @@ local RootPart = Character:WaitForChild("HumanoidRootPart")
 local FireInput = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Services.MoveInputService.RF.FireInput
 
 -- Game Services - Using the actual game modules
-local PathShortcuts = require(game.ReplicatedStorage.ReplicatedModules.PathShortcuts)
-local Core = require(game.ReplicatedStorage.ReplicatedRoot.Core)
-
--- Initialize game services
-local CooldownService = nil
-local RagdollService = nil  
-local StunService = nil
-
--- Try to get the services from the game
-pcall(function()
-    CooldownService = require(game.ReplicatedStorage.ReplicatedModules:WaitForChild("Independent"):WaitForChild("CooldownService"))
-    RagdollService = require(game.ReplicatedStorage.ReplicatedModules:WaitForChild("Independent"):WaitForChild("RagdollService"))
-    StunService = require(game.ReplicatedStorage.ReplicatedModules:WaitForChild("Independent"):WaitForChild("StunService"))
-end)
+local CombatService = game:GetService("ReplicatedStorage").ReplicatedRoot.Services.CombatService.Client
+local ClientCooldown = require(CombatService.ClientCooldown)
+local ClientRagdoll = require(CombatService.ClientRagdoll)
+local ClientStun = require(CombatService.ClientStun)
 
 -- Loading Rayfield Library
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
@@ -43,6 +33,7 @@ local CombatSystem = {
     waitPositionCursed = Vector3.new(-543.8663330078125, 118.04730224609375, -278.4595031738281),
     targetFolders = {"Assailant", "Conjurer", "Roppongi Curse", "Mantis Curse", "Jujutsu Sorcerer", "Flyhead"},
     selectedSkills = {},
+    selectedPlusSkills = {}, -- For skills with +
     farmMode = "Cultists", -- "Cultists" or "Cursed"
     isInCombat = false,
     lastM1Time = 0,
@@ -52,47 +43,57 @@ local CombatSystem = {
 }
 
 -- Status Check Functions using game modules
-local function getCooldownFolder(character)
+local function getCooldown(character, skillName)
     if not character then return nil end
     
-    local player = Players:GetPlayerFromCharacter(character)
-    local folder = nil
+    -- Try using ClientCooldown service
+    local success, result = pcall(function()
+        return ClientCooldown.GetCooldown(character, skillName)
+    end)
     
-    if player then
-        folder = player:FindFirstChild("Cooldowns")
+    if success and result then
+        return result
     end
     
-    if not folder and character then
-        folder = character:FindFirstChild("Cooldowns")
+    -- Fallback method
+    local cooldownFolder = character:FindFirstChild("Cooldowns")
+    if cooldownFolder then
+        return cooldownFolder:FindFirstChild(skillName)
     end
     
-    return folder
-end
-
-local function getCooldown(character, skillName)
-    local folder = getCooldownFolder(character)
-    if not folder then return nil end
-    return folder:FindFirstChild(skillName)
+    return nil
 end
 
 local function isRagdolled(character)
     if not character then return false end
+    
+    -- Try using ClientRagdoll service
+    local success, result = pcall(function()
+        return ClientRagdoll.IsRagdolled(character)
+    end)
+    
+    if success and result ~= nil then
+        return result
+    end
+    
+    -- Fallback
     return character:GetAttribute("Ragdolled") == true
 end
 
 local function isStunned(character)
     if not character then return false end
     
-    -- Check if StunService exists and use it
-    if StunService and StunService.IsStunned then
-        local success, result = pcall(function()
-            return StunService.IsStunned(character)
-        end)
-        if success then return result end
+    -- Try using ClientStun service
+    local success, result = pcall(function()
+        return ClientStun.IsStunned(character)
+    end)
+    
+    if success and result ~= nil then
+        return result
     end
     
     -- Fallback: check cooldown folder for stun effects
-    local cooldownFolder = getCooldownFolder(character)
+    local cooldownFolder = character:FindFirstChild("Cooldowns")
     if not cooldownFolder then return false end
     
     for _, child in pairs(cooldownFolder:GetChildren()) do
@@ -211,31 +212,34 @@ local function attackTarget(target)
         end
     end
     
-    -- Priority 2: Use M2 once if not on cooldown
-    if not isOnCooldown(currentChar, "MOUSEBUTTON2") and not isRagdolled(currentChar) and not isStunned(currentChar) then
-        useM2()
-        actionTaken = true
-        
-        -- Check M1 again after M2 (in case M1 cooldown finished)
-        if not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) then
-            while not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) do
-                local m1Success = useM1()
-                if m1Success then
-                    wait(0.1)
-                else
-                    break
-                end
-            end
-        end
-    end
-    
-    -- Priority 3: Use selected skills one by one, checking M1 after each
+    -- Priority 2: Use selected skills one by one, checking M1 after each
     for _, skill in pairs(CombatSystem.selectedSkills) do
         if not isOnCooldown(currentChar, skill) and not isRagdolled(currentChar) and not isStunned(currentChar) then
             useSkill(skill)
             actionTaken = true
             
             -- Check M1 again after each skill (since M1 recovers fast)
+            if not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) then
+                while not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) do
+                    local m1Success = useM1()
+                    if m1Success then
+                        wait(0.1)
+                    else
+                        break
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Priority 3: Use selected plus skills one by one, checking M1 after each
+    for _, skill in pairs(CombatSystem.selectedPlusSkills) do
+        local plusSkill = skill .. "+"
+        if not isOnCooldown(currentChar, plusSkill) and not isRagdolled(currentChar) and not isStunned(currentChar) then
+            useSkill(plusSkill)
+            actionTaken = true
+            
+            -- Check M1 again after each plus skill (since M1 recovers fast)
             if not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) then
                 while not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) do
                     local m1Success = useM1()
@@ -388,11 +392,12 @@ local TargetButton = MainTab:CreateButton({
 -- Skill Selection
 local SkillSection = SkillTab:CreateSection("Select Skills to Use")
 
-local availableSkills = {"Q", "E", "R", "F", "Z", "X", "C", "V", "B", "N", "M", "T", "G", "H", "Y", "U", "I", "O", "P"}
+local availableSkills = {"MOUSEBUTTON2", "Q", "E", "R", "F", "Z", "X", "C", "V", "B", "N", "M", "T", "G", "H", "Y", "U", "I", "O", "P"}
 
 for _, skill in pairs(availableSkills) do
+    local displayName = skill == "MOUSEBUTTON2" and "M2" or skill
     SkillTab:CreateToggle({
-        Name = "Use " .. skill .. " Skill",
+        Name = "Use " .. displayName .. " Skill",
         CurrentValue = false,
         Flag = "Skill" .. skill,
         Callback = function(Value)
@@ -404,6 +409,30 @@ for _, skill in pairs(availableSkills) do
                 local index = table.find(CombatSystem.selectedSkills, skill)
                 if index then
                     table.remove(CombatSystem.selectedSkills, index)
+                end
+            end
+        end
+    })
+end
+
+local PlusSkillSection = SkillTab:CreateSection("Select Plus Skills to Use")
+
+local availablePlusSkills = {"Q", "E", "R", "F", "Z", "X", "C", "V", "B", "N", "M", "T", "G", "H", "Y", "U", "I", "O", "P"}
+
+for _, skill in pairs(availablePlusSkills) do
+    SkillTab:CreateToggle({
+        Name = "Use " .. skill .. "+ Skill",
+        CurrentValue = false,
+        Flag = "PlusSkill" .. skill,
+        Callback = function(Value)
+            if Value then
+                if not table.find(CombatSystem.selectedPlusSkills, skill) then
+                    table.insert(CombatSystem.selectedPlusSkills, skill)
+                end
+            else
+                local index = table.find(CombatSystem.selectedPlusSkills, skill)
+                if index then
+                    table.remove(CombatSystem.selectedPlusSkills, index)
                 end
             end
         end
@@ -446,7 +475,7 @@ RunService.Heartbeat:Connect(function()
         
         -- Update cooldowns
         local cooldowns = {}
-        local cooldownFolder = getCooldownFolder(Character)
+        local cooldownFolder = Character:FindFirstChild("Cooldowns")
         if cooldownFolder then
             for _, cooldown in pairs(cooldownFolder:GetChildren()) do
                 table.insert(cooldowns, cooldown.Name)
