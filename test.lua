@@ -88,43 +88,75 @@ end
 
 -- Find and hook the hitbox module
 local function hookHitboxModule()
+    -- Wait for module to be loaded by game first
+    wait(2)
+    
     -- Direct path to the Cast module
     local castModule = game:GetService("ReplicatedStorage").ReplicatedRoot.Services.CombatService.Core.Hitbox.Types.Cast
     
     local success, hitboxModule = pcall(require, castModule)
-    if success and hitboxModule.Cast then
-        print("Found Cast module at:", castModule:GetFullName())
+    if success then
+        print("Module loaded successfully")
+        print("Module contents:", hitboxModule)
         
-        -- Store original function
-        local originalCast = hitboxModule.Cast
-        
-        -- Hook the function
-        hitboxModule.Cast = function(arg1)
-            -- Find nearest NPC
-            local nearestNPC = findNearestNPC()
-            
-            if nearestNPC then
-                local rootPart = nearestNPC:FindFirstChild("HumanoidRootPart") or nearestNPC:FindFirstChild("Torso") or nearestNPC:FindFirstChild("Head")
-                if rootPart then
-                    -- Modify the Origin to target the nearest NPC
-                    if typeof(arg1.Origin) == "CFrame" then
-                        arg1.Origin = rootPart.CFrame
-                    elseif typeof(arg1.Origin) == "Vector3" then
-                        arg1.Origin = rootPart.Position
-                    end
-                    
-                    print("Hooked Cast function - Targeting:", nearestNPC.Name)
-                end
-            end
-            
-            -- Call original function with modified parameters
-            return originalCast(arg1)
+        -- Check what functions are available
+        for key, value in pairs(hitboxModule) do
+            print("Found key:", key, "Type:", type(value))
         end
         
-        print("Successfully hooked Cast function!")
-        return true
+        if hitboxModule.Cast then
+            print("Found Cast function at:", castModule:GetFullName())
+            
+            -- Store original function
+            local originalCast = hitboxModule.Cast
+            
+            -- Hook the function
+            hitboxModule.Cast = function(arg1)
+                print("=== CAST FUNCTION CALLED ===")
+                print("Original Origin:", arg1.Origin)
+                
+                -- Find nearest NPC
+                local nearestNPC = findNearestNPC()
+                
+                if nearestNPC then
+                    local rootPart = nearestNPC:FindFirstChild("HumanoidRootPart") or nearestNPC:FindFirstChild("Torso") or nearestNPC:FindFirstChild("Head")
+                    if rootPart then
+                        print("Found NPC:", nearestNPC.Name, "at position:", rootPart.Position)
+                        
+                        -- Store original for comparison
+                        local originalOrigin = arg1.Origin
+                        
+                        -- Modify the Origin to target the nearest NPC
+                        if typeof(arg1.Origin) == "CFrame" then
+                            arg1.Origin = rootPart.CFrame
+                            print("Modified Origin (CFrame):", arg1.Origin)
+                        elseif typeof(arg1.Origin) == "Vector3" then
+                            arg1.Origin = rootPart.Position
+                            print("Modified Origin (Vector3):", arg1.Origin)
+                        end
+                        
+                        print("Successfully modified Origin from", originalOrigin, "to", arg1.Origin)
+                    else
+                        print("NPC found but no valid root part")
+                    end
+                else
+                    print("No NPC found nearby")
+                end
+                
+                -- Call original function with modified parameters
+                local result = originalCast(arg1)
+                print("Cast function completed")
+                return result
+            end
+            
+            print("Successfully hooked Cast function!")
+            return true
+        else
+            print("Cast function not found in module")
+            return false
+        end
     else
-        print("Failed to require Cast module or Cast function not found")
+        print("Failed to require Cast module:", hitboxModule)
         return false
     end
 end
