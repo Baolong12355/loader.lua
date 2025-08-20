@@ -113,12 +113,14 @@ local function findNearestEnemy()
     local nearestEnemy = nil
     local shortestDistance = math.huge
     
+    if not RootPart then return nil end
+    
     for _, folderName in pairs(CombatSystem.targetFolders) do
         local folder = workspace.Living:FindFirstChild(folderName)
         if folder then
             for _, enemy in pairs(folder:GetChildren()) do
                 -- Check if it's a model
-                if enemy:IsA("Model") then
+                if enemy:IsA("Model") and enemy.Parent then
                     -- Check if enemy is alive (has Humanoid with health > 0, or just exists if no Humanoid)
                     local humanoid = enemy:FindFirstChild("Humanoid")
                     local isAlive = true
@@ -128,10 +130,16 @@ local function findNearestEnemy()
                     end
                     
                     if isAlive then
-                        local distance = (RootPart.Position - enemy:GetModelCFrame().Position).Magnitude
-                        if distance < shortestDistance then
-                            shortestDistance = distance
-                            nearestEnemy = enemy
+                        local success, modelCFrame = pcall(function()
+                            return enemy:GetModelCFrame()
+                        end)
+                        
+                        if success and modelCFrame then
+                            local distance = (RootPart.Position - modelCFrame.Position).Magnitude
+                            if distance < shortestDistance then
+                                shortestDistance = distance
+                                nearestEnemy = enemy
+                            end
                         end
                     end
                 end
@@ -150,15 +158,7 @@ local function instantTP(position)
 end
 
 local function moveToPosition(targetPos, instant)
-    if instant then
-        instantTP(targetPos)
-    else
-        if RootPart then
-            local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-            local tween = TweenService:Create(RootPart, tweenInfo, {CFrame = CFrame.new(targetPos)})
-            tween:Play()
-        end
-    end
+    instantTP(targetPos) -- Always use instant TP
 end
 
 -- Combat Functions
@@ -328,7 +328,7 @@ local function combatLoop()
         CombatSystem.isInCombat = false
         CombatSystem.currentTarget = nil
         local waitPos = CombatSystem.farmMode == "Cultists" and CombatSystem.waitPositionCultists or CombatSystem.waitPositionCursed
-        moveToPosition(waitPos, true)
+        instantTP(waitPos)
     end
 end
 
