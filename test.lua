@@ -150,15 +150,41 @@ local function findNearestEnemy()
     return nearestEnemy
 end
 
--- Movement Functions
-local function instantTP(position)
-    if RootPart then
-        RootPart.CFrame = CFrame.new(position)
+-- Movement Functions with Heartbeat Loop
+local teleportQueue = {}
+local teleportConnection = nil
+
+local function startTeleportLoop()
+    if teleportConnection then return end
+    
+    teleportConnection = RunService.Heartbeat:Connect(function()
+        if #teleportQueue > 0 then
+            local targetPosition = teleportQueue[#teleportQueue]
+            teleportQueue = {} -- Clear queue after getting latest position
+            
+            local currentChar = Player.Character
+            if currentChar and currentChar:FindFirstChild("HumanoidRootPart") then
+                currentChar.HumanoidRootPart.CFrame = CFrame.new(targetPosition)
+            end
+        end
+    end)
+end
+
+local function stopTeleportLoop()
+    if teleportConnection then
+        teleportConnection:Disconnect()
+        teleportConnection = nil
     end
+    teleportQueue = {}
+end
+
+local function instantTP(position)
+    table.insert(teleportQueue, position)
+    startTeleportLoop()
 end
 
 local function moveToPosition(targetPos, instant)
-    instantTP(targetPos) -- Always use instant TP
+    instantTP(targetPos) -- Always use instant TP with heartbeat loop
 end
 
 -- Combat Functions
@@ -388,12 +414,14 @@ local EnableToggle = MainTab:CreateToggle({
         if Value then
             -- Start combat system
             CombatSystem.heartbeatConnection = RunService.Heartbeat:Connect(combatLoop)
+            startTeleportLoop()
         else
             -- Stop combat system
             if CombatSystem.heartbeatConnection then
                 CombatSystem.heartbeatConnection:Disconnect()
                 CombatSystem.heartbeatConnection = nil
             end
+            stopTeleportLoop()
         end
     end
 })
@@ -522,6 +550,7 @@ MainTab:CreateButton({
             CombatSystem.heartbeatConnection:Disconnect()
             CombatSystem.heartbeatConnection = nil
         end
+        stopTeleportLoop()
         EnableToggle:Set(false)
     end
 })
