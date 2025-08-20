@@ -1,178 +1,214 @@
--- Script tìm và clone tất cả objects có DamagePoint để nghiên cứu
--- Sẽ tạo một folder chứa tất cả clones trong Workspace
+-- Real-time DamagePoint Monitor - Chỉ clone khi có DamagePoint MỚI xuất hiện
+-- Chạy liên tục để theo dõi và clone ngay khi dùng skill
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local ServerStorage = game:GetService("ServerStorage")
+local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
 -- Tạo folder để chứa clones
-local cloneFolder = Workspace:FindFirstChild("DamagePointClones")
+local cloneFolder = Workspace:FindFirstChild("NewDamagePoints")
 if cloneFolder then
     cloneFolder:Destroy()
 end
 cloneFolder = Instance.new("Folder")
-cloneFolder.Name = "DamagePointClones"
+cloneFolder.Name = "NewDamagePoints"
 cloneFolder.Parent = Workspace
 
-print("=== Bắt đầu tìm DamagePoints ===")
+print("=== Real-time DamagePoint Monitor Started ===")
+print("Chờ bạn dùng skill để phát hiện DamagePoints...")
 
-local foundCount = 0
-local clonedCount = 0
+local cloneCount = 0
+local connections = {}
 
--- Function để clone object và tất cả properties
-local function DeepClone(obj)
+-- Function clone nhanh
+local function QuickClone(obj, reason)
+    cloneCount = cloneCount + 1
+    local timestamp = os.date("%H:%M:%S")
+    
+    print(string.format("[%s] #%d - Found: %s in %s (%s)", 
+        timestamp, cloneCount, obj.Name, obj.Parent.Name, reason))
+    
     local success, clone = pcall(function()
-        return obj:Clone()
+        return obj.Parent:Clone()
     end)
     
-    if success then
-        return clone
-    else
-        -- Nếu không clone được, tạo thông tin text
+    if success and clone then
+        clone.Name = string.format("%s_Clone_%d_%s", 
+            obj.Parent.Name, cloneCount, timestamp:gsub(":", "-"))
+        clone.Parent = cloneFolder
+        
+        -- Thêm info
         local info = Instance.new("StringValue")
-        info.Name = obj.Name .. "_Info"
-        info.Value = string.format("ClassName: %s, Parent: %s, Position: %s", 
-            obj.ClassName, 
-            obj.Parent and obj.Parent.Name or "nil",
-            obj:IsA("BasePart") and tostring(obj.Position) or "N/A")
-        return info
+        info.Name = "INFO"
+        info.Value = string.format("DamagePoint: %s | Time: %s | Reason: %s | Original: %s", 
+            obj.Name, timestamp, reason, obj.Parent.Name)
+        info.Parent = clone
+        
+        print(string.format("  → Cloned: %s", clone.Name))
+        return true
+    else
+        print("  → Clone failed!")
+        return false
     end
 end
 
--- Function để tìm DamagePoints
-local function FindDamagePoints(parent, parentName)
-    for _, obj in pairs(parent:GetDescendants()) do
+-- Monitor character descendants
+local function MonitorCharacter(character)
+    if not character then return end
+    
+    print("Monitoring character:", character.Name)
+    
+    -- Monitor khi có object MỚI được thêm vào
+    local connection = character.DescendantAdded:Connect(function(obj)
         if obj:IsA("Attachment") then
-            -- Kiểm tra tên có chứa "damage", "dmg", "hit" (không phân biệt hoa thường)
             local name = obj.Name:lower()
-            if name:find("damage") or name:find("dmg") or name:find("hit") then
-                foundCount = foundCount + 1
-                print(string.format("[%d] Found: %s in %s", foundCount, obj.Name, parentName))
+            -- Kiểm tra tên có phải DamagePoint không
+            if name:find("damage") or name:find("dmg") or name:find("hit") or 
+               name:find("point") or name:find("attack") then
                 
-                -- Clone parent object của attachment
-                local parentObj = obj.Parent
-                if parentObj then
-                    local clonedParent = DeepClone(parentObj)
-                    if clonedParent then
-                        clonedParent.Name = parentObj.Name .. "_Clone_" .. foundCount
-                        clonedParent.Parent = cloneFolder
-                        clonedCount = clonedCount + 1
-                        
-                        -- Thêm thông tin debug
-                        local info = Instance.new("StringValue")
-                        info.Name = "DEBUG_INFO"
-                        info.Value = string.format("Original: %s, DamagePoint: %s, Found in: %s", 
-                            parentObj.Name, obj.Name, parentName)
-                        info.Parent = clonedParent
-                        
-                        print(string.format("  → Cloned parent: %s", clonedParent.Name))
+                wait(0.1) -- Đợi object setup xong
+                QuickClone(obj, "NEW_ATTACHMENT")
+            end
+        elseif obj:IsA("Part") or obj:IsA("MeshPart") then
+            -- Kiểm tra part mới có chứa attachments không
+            wait(0.2) -- Đợi attachments được add vào part
+            for _, child in pairs(obj:GetChildren()) do
+                if child:IsA("Attachment") then
+                    local name = child.Name:lower()
+                    if name:find("damage") or name:find("dmg") or name:find("hit") or 
+                       name:find("point") or name:find("attack") then
+                        QuickClone(child, "NEW_PART_WITH_ATTACHMENT")
                     end
                 end
             end
         end
-    end
-end
-
--- Tìm trong character của player
-if LocalPlayer.Character then
-    print("\n--- Tìm trong Character ---")
-    FindDamagePoints(LocalPlayer.Character, "LocalPlayer.Character")
-end
-
--- Tìm trong backpack
-if LocalPlayer.Backpack then
-    print("\n--- Tìm trong Backpack ---")
-    FindDamagePoints(LocalPlayer.Backpack, "LocalPlayer.Backpack")
-end
-
--- Tìm trong StarterPack
-local StarterPack = game:GetService("StarterPack")
-print("\n--- Tìm trong StarterPack ---")
-FindDamagePoints(StarterPack, "StarterPack")
-
--- Tìm trong ReplicatedStorage
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-print("\n--- Tìm trong ReplicatedStorage ---")
-FindDamagePoints(ReplicatedStorage, "ReplicatedStorage")
-
--- Tìm trong ServerStorage (nếu có quyền truy cập)
-pcall(function()
-    print("\n--- Tìm trong ServerStorage ---")
-    FindDamagePoints(ServerStorage, "ServerStorage")
-end)
-
--- Tìm trong các characters khác
-print("\n--- Tìm trong Characters khác ---")
-for _, player in pairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer and player.Character then
-        FindDamagePoints(player.Character, player.Name .. ".Character")
-    end
-end
-
--- Tìm trong Workspace (tools rơi xuống đất, etc.)
-print("\n--- Tìm trong Workspace ---")
-for _, obj in pairs(Workspace:GetChildren()) do
-    if obj:IsA("Tool") or obj:IsA("Model") and obj ~= cloneFolder then
-        FindDamagePoints(obj, "Workspace." .. obj.Name)
-    end
-end
-
--- Kết quả
-print("\n=== KẾT QUẢ ===")
-print(string.format("Tìm thấy: %d DamagePoints", foundCount))
-print(string.format("Clone thành công: %d objects", clonedCount))
-print(string.format("Tất cả clones đã được lưu trong: %s", cloneFolder:GetFullName()))
-
-if clonedCount > 0 then
-    print("\n=== HƯỚNG DẪN ===")
-    print("1. Vào Workspace → DamagePointClones")
-    print("2. Mở từng clone để xem cấu trúc")
-    print("3. Kiểm tra attachment có tên chứa 'damage', 'dmg', 'hit'")
-    print("4. Xem DEBUG_INFO để biết thông tin gốc")
+    end)
     
-    -- Tạo thông tin tổng hợp
-    local summary = Instance.new("StringValue")
-    summary.Name = "SUMMARY"
-    summary.Value = string.format("Found %d DamagePoints, Cloned %d objects. Check each clone for structure analysis.", foundCount, clonedCount)
-    summary.Parent = cloneFolder
-else
-    print("Không tìm thấy DamagePoints nào!")
-    print("Có thể:")
-    print("- Game không sử dụng attachment tên 'DamagePoint'")
-    print("- DamagePoints chỉ xuất hiện khi dùng skill")
-    print("- Tên khác: thử tìm 'HitPoint', 'AttackPoint', etc.")
+    table.insert(connections, connection)
 end
 
--- Function để monitor DamagePoints real-time (optional)
-print("\n--- Monitoring real-time DamagePoints ---")
-local function MonitorCharacter()
-    if LocalPlayer.Character then
-        LocalPlayer.Character.DescendantAdded:Connect(function(obj)
-            if obj:IsA("Attachment") then
-                local name = obj.Name:lower()
-                if name:find("damage") or name:find("dmg") or name:find("hit") then
-                    print(string.format("NEW DamagePoint detected: %s in %s", obj.Name, obj.Parent.Name))
-                    
-                    -- Auto clone khi có DamagePoint mới
-                    wait(0.1) -- Đợi setup xong
-                    local parent = obj.Parent
-                    if parent then
-                        local clone = DeepClone(parent)
-                        if clone then
-                            clone.Name = parent.Name .. "_RealTime_" .. tick()
-                            clone.Parent = cloneFolder
-                            print("  → Auto cloned:", clone.Name)
-                        end
+-- Monitor backpack (tools)
+local function MonitorBackpack()
+    if not LocalPlayer.Backpack then return end
+    
+    LocalPlayer.Backpack.ChildAdded:Connect(function(tool)
+        if tool:IsA("Tool") then
+            -- Monitor tool descendants
+            tool.DescendantAdded:Connect(function(obj)
+                if obj:IsA("Attachment") then
+                    local name = obj.Name:lower()
+                    if name:find("damage") or name:find("dmg") or name:find("hit") or 
+                       name:find("point") or name:find("attack") then
+                        wait(0.1)
+                        QuickClone(obj, "TOOL_ATTACHMENT")
                     end
                 end
-            end
-        end)
-    end
+            end)
+        end
+    end)
 end
 
-MonitorCharacter()
-LocalPlayer.CharacterAdded:Connect(MonitorCharacter)
+-- Monitor workspace (rơi xuống)
+local function MonitorWorkspace()
+    Workspace.DescendantAdded:Connect(function(obj)
+        if obj:IsA("Attachment") and obj.Parent ~= cloneFolder then
+            local name = obj.Name:lower()
+            if name:find("damage") or name:find("dmg") or name:find("hit") or 
+               name:find("point") or name:find("attack") then
+                wait(0.1)
+                QuickClone(obj, "WORKSPACE_ATTACHMENT")
+            end
+        end
+    end)
+end
 
-print("Real-time monitoring active - sẽ tự động clone khi có DamagePoint mới!")
+-- Khởi tạo monitoring
+local function StartMonitoring()
+    -- Monitor character hiện tại
+    if LocalPlayer.Character then
+        MonitorCharacter(LocalPlayer.Character)
+    end
+    
+    -- Monitor khi respawn
+    LocalPlayer.CharacterAdded:Connect(function(character)
+        print("Character respawned, monitoring new character...")
+        MonitorCharacter(character)
+    end)
+    
+    -- Monitor backpack
+    MonitorBackpack()
+    
+    -- Monitor workspace
+    MonitorWorkspace()
+    
+    print("✅ All monitors active!")
+    print("🎯 Dùng skill để test - script sẽ tự động clone DamagePoints mới!")
+end
+
+-- Status display
+local function ShowStatus()
+    spawn(function()
+        while true do
+            wait(10) -- Update mỗi 10 giây
+            if cloneCount > 0 then
+                print(string.format("📊 Status: %d DamagePoints cloned | Folder: %s", 
+                    cloneCount, cloneFolder:GetFullName()))
+            end
+        end
+    end)
+end
+
+-- Cleanup function
+local function Cleanup()
+    for _, connection in pairs(connections) do
+        if connection then
+            connection:Disconnect()
+        end
+    end
+    connections = {}
+end
+
+-- Commands
+local function AddCommands()
+    -- Command để clear clones
+    game.Players.LocalPlayer.Chatted:Connect(function(msg)
+        if msg:lower() == "/clear" then
+            cloneFolder:ClearAllChildren()
+            cloneCount = 0
+            print("🗑️ Cleared all clones")
+        elseif msg:lower() == "/stop" then
+            Cleanup()
+            print("⏹️ Stopped monitoring")
+        elseif msg:lower() == "/status" then
+            print(string.format("📊 Found: %d clones | Monitoring: %s", 
+                cloneCount, #connections > 0 and "ON" or "OFF"))
+        end
+    end)
+end
+
+-- Start everything
+StartMonitoring()
+ShowStatus()
+AddCommands()
+
+print("\n=== HƯỚNG DẪN SỬ DỤNG ===")
+print("1. Script đang chạy liên tục, theo dõi DamagePoints MỚI")
+print("2. Dùng skill bất kỳ → sẽ tự động clone DamagePoints")
+print("3. Kiểm tra folder 'NewDamagePoints' trong Workspace")
+print("4. Chat '/clear' để xóa clones")
+print("5. Chat '/stop' để dừng monitor")
+print("6. Chat '/status' để xem trạng thái")
+print("\n⏳ Đang chờ bạn dùng skill...")
+
+-- Keep script running indicator
+spawn(function()
+    local dots = 0
+    while true do
+        wait()
+        dots = (dots + 1) % 4
+        local dotString = string.rep(".", dots)
+        print(string.format("🔄 Monitoring%s (Cloned: %d)", dotString, cloneCount))
+    end
+end)
