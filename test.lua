@@ -1,216 +1,183 @@
--- Hitbox Hook with Nearest NPC Targeting
+-- Auto Aim Hitbox Script
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-local LocalPlayer = Players.LocalPlayer
 
--- Configuration
-local NPC_SEARCH_DISTANCE = 100 -- Maximum distance to search for NPCs
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
 
--- Function to check if entity is a player
-local function isPlayer(entity)
-    return Players:GetPlayerFromCharacter(entity) ~= nil
-end
+-- Lấy CombatService từ ReplicatedRoot
+local ReplicatedRoot = ReplicatedStorage.ReplicatedRoot
+local CombatService = ReplicatedRoot.Services.CombatService.Core
 
--- Function to find nearest NPC
-local function findNearestNPC()
-    local character = LocalPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then
+local function getNearestHumanoid()
+    local myCharacter = player.Character
+    if not myCharacter or not myCharacter:FindFirstChild("HumanoidRootPart") then
         return nil
     end
     
-    local playerPosition = character.HumanoidRootPart.Position
-    local nearestNPC = nil
+    local myPosition = myCharacter.HumanoidRootPart.Position
+    local nearestHumanoid = nil
     local nearestDistance = math.huge
     
-    -- Search in workspace.Living folder
-    local livingFolder = Workspace:FindFirstChild("Living")
-    if livingFolder then
-        for _, entity in ipairs(livingFolder:GetChildren()) do
-            if entity:FindFirstChild("Humanoid") and not isPlayer(entity) then
-                local rootPart = entity:FindFirstChild("HumanoidRootPart") or entity:FindFirstChild("Torso") or entity:FindFirstChild("Head")
-                if rootPart then
-                    local distance = (rootPart.Position - playerPosition).Magnitude
-                    if distance < nearestDistance and distance <= NPC_SEARCH_DISTANCE then
+    -- Tìm trong Living folder (từ code decompile)
+    local living = Workspace:FindFirstChild("Living")
+    if living then
+        for _, obj in pairs(living:GetChildren()) do
+            if obj:IsA("Model") and obj ~= myCharacter then
+                local humanoid = obj:FindFirstChildOfClass("Humanoid")
+                local rootPart = obj:FindFirstChild("HumanoidRootPart")
+                
+                if humanoid and rootPart and humanoid.Health > 0 then
+                    local distance = (rootPart.Position - myPosition).Magnitude
+                    if distance < nearestDistance then
                         nearestDistance = distance
-                        nearestNPC = entity
+                        nearestHumanoid = obj
                     end
                 end
             end
         end
     end
     
-    return nearestNPC
-end
-
--- Hitbox Function Hook with Nearest NPC Targeting
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local LocalPlayer = Players.LocalPlayer
-
--- Configuration
-local NPC_SEARCH_DISTANCE = 100 -- Maximum distance to search for NPCs
-
--- Function to check if entity is a player
-local function isPlayer(entity)
-    return Players:GetPlayerFromCharacter(entity) ~= nil
-end
-
--- Function to find nearest NPC
-local function findNearestNPC()
-    local character = LocalPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then
-        return nil
-    end
-    
-    local playerPosition = character.HumanoidRootPart.Position
-    local nearestNPC = nil
-    local nearestDistance = math.huge
-    
-    -- Search in workspace.Living folder
-    local livingFolder = Workspace:FindFirstChild("Living")
-    if livingFolder then
-        for _, entity in ipairs(livingFolder:GetChildren()) do
-            if entity:FindFirstChild("Humanoid") and not isPlayer(entity) then
-                local rootPart = entity:FindFirstChild("HumanoidRootPart") or entity:FindFirstChild("Torso") or entity:FindFirstChild("Head")
-                if rootPart then
-                    local distance = (rootPart.Position - playerPosition).Magnitude
-                    if distance < nearestDistance and distance <= NPC_SEARCH_DISTANCE then
+    -- Fallback: tìm trong workspace
+    if not nearestHumanoid then
+        for _, obj in pairs(Workspace:GetChildren()) do
+            if obj:IsA("Model") and obj ~= myCharacter then
+                local humanoid = obj:FindFirstChildOfClass("Humanoid")
+                local rootPart = obj:FindFirstChild("HumanoidRootPart")
+                
+                if humanoid and rootPart and humanoid.Health > 0 then
+                    local distance = (rootPart.Position - myPosition).Magnitude
+                    if distance < nearestDistance and distance < 50 then -- Giới hạn 50 studs
                         nearestDistance = distance
-                        nearestNPC = entity
+                        nearestHumanoid = obj
                     end
                 end
             end
         end
     end
     
-    return nearestNPC
+    return nearestHumanoid
 end
 
--- Find and hook the hitbox module
-local function hookHitboxModule()
-    -- Wait for module to be loaded by game first
+-- Hook vào hitbox system
+local function hookHitbox()
+    -- Tìm CombatService instance
+    local combatServiceInstance = nil
+    for _, service in pairs(ReplicatedRoot.Services:GetChildren()) do
+        if service.Name == "CombatService" then
+            combatServiceInstance = require(service)
+            break
+        end
+    end
+    
+    if not combatServiceInstance then return end
+    
+    -- Hook vào _Hitbox function
+    local originalHitbox = combatServiceInstance._Hitbox
+    if originalHitbox then
+        combatServiceInstance._Hitbox = function(hitboxData)
+            -- Tìm target gần nhất
+            local nearestTarget = getNearestHumanoid()
+            
+            if nearestTarget and nearestTarget:FindFirstChild("HumanoidRootPart") then
+                local targetPosition = nearestTarget.HumanoidRootPart.Position
+                local myCharacter = player.Character
+                
+                if myCharacter and myCharacter:FindFirstChild("HumanoidRootPart") then
+                    local myPosition = myCharacter.HumanoidRootPart.Position
+                    
+                    -- Tính vector từ vị trí hiện tại đến target
+                    local direction = (targetPosition - myPosition).Unit
+                    local distance = (targetPosition - myPosition).Magnitude
+                    
+                    -- Điều chỉnh hitbox về phía target
+                    if hitboxData and hitboxData.Origin then
+                        -- Dịch chuyển Origin của hitbox về phía target
+                        local offsetDistance = math.min(distance * 0.8, 20) -- Tối đa 20 studs
+                        hitboxData.Origin = hitboxData.Origin + (direction * offsetDistance)
+                    end
+                    
+                    -- Điều chỉnh CFrame nếu có
+                    if hitboxData and hitboxData.CFrame then
+                        hitboxData.CFrame = CFrame.lookAt(myPosition, targetPosition)
+                    end
+                end
+            end
+            
+            -- Gọi function gốc với data đã được modify
+            return originalHitbox(hitboxData)
+        end
+    end
+end
+
+-- Hook vào Hitbox function chính
+local function hookMainHitbox()
+    pcall(function()
+        local replicatedRoot = ReplicatedStorage.ReplicatedRoot
+        local combatCore = replicatedRoot.Services.CombatService.Core
+        local hitboxModule = require(combatCore.Hitbox)
+        
+        -- Backup function gốc
+        if not _G.OriginalHitboxFunction then
+            _G.OriginalHitboxFunction = hitboxModule.Hitbox
+        end
+        
+        -- Override Hitbox function
+        hitboxModule.Hitbox = function(self, hitboxData)
+            -- Auto aim logic
+            local nearestTarget = getNearestHumanoid()
+            
+            if nearestTarget and nearestTarget:FindFirstChild("HumanoidRootPart") then
+                local targetPos = nearestTarget.HumanoidRootPart.Position
+                local myChar = player.Character
+                
+                if myChar and myChar:FindFirstChild("HumanoidRootPart") then
+                    local myPos = myChar.HumanoidRootPart.Position
+                    local direction = (targetPos - myPos).Unit
+                    local distance = (targetPos - myPos).Magnitude
+                    
+                    -- Modify hitbox data
+                    if hitboxData then
+                        -- Điều chỉnh vị trí hitbox
+                        if distance < 30 then -- Chỉ aim nếu trong phạm vi 30 studs
+                            local offset = direction * math.min(distance * 0.7, 15)
+                            
+                            if hitboxData.Origin then
+                                hitboxData.Origin = hitboxData.Origin + offset
+                            end
+                            
+                            if hitboxData.CFrame then
+                                hitboxData.CFrame = CFrame.lookAt(myPos, targetPos)
+                            end
+                        end
+                    end
+                end
+            end
+            
+            -- Gọi function gốc
+            return _G.OriginalHitboxFunction(self, hitboxData)
+        end
+    end)
+end
+
+-- Khởi tạo auto aim
+spawn(function()
+    wait(3) -- Đợi game load
+    hookMainHitbox()
+end)
+
+-- Player character respawn handling
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
     wait(2)
-    
-    -- Direct path to the Cast module
-    local castModule = game:GetService("ReplicatedStorage").ReplicatedRoot.Services.CombatService.Core.Hitbox.Types.Cast
-    
-    local success, hitboxModule = pcall(require, castModule)
-    if success then
-        print("Module loaded successfully")
-        print("Module contents:", hitboxModule)
-        
-        -- Check what functions are available
-        for key, value in pairs(hitboxModule) do
-            print("Found key:", key, "Type:", type(value))
-        end
-        
-        if hitboxModule.Cast then
-            print("Found Cast function at:", castModule:GetFullName())
-            
-            -- Store original function
-            local originalCast = hitboxModule.Cast
-            
-            -- Hook the function
-            hitboxModule.Cast = function(arg1)
-                print("=== CAST FUNCTION CALLED ===")
-                print("Original Origin:", arg1.Origin)
-                
-                -- Find nearest NPC
-                local nearestNPC = findNearestNPC()
-                
-                if nearestNPC then
-                    local rootPart = nearestNPC:FindFirstChild("HumanoidRootPart") or nearestNPC:FindFirstChild("Torso") or nearestNPC:FindFirstChild("Head")
-                    if rootPart then
-                        print("Found NPC:", nearestNPC.Name, "at position:", rootPart.Position)
-                        
-                        -- Store original for comparison
-                        local originalOrigin = arg1.Origin
-                        
-                        -- Modify the Origin to target the nearest NPC
-                        if typeof(arg1.Origin) == "CFrame" then
-                            arg1.Origin = rootPart.CFrame
-                            print("Modified Origin (CFrame):", arg1.Origin)
-                        elseif typeof(arg1.Origin) == "Vector3" then
-                            arg1.Origin = rootPart.Position
-                            print("Modified Origin (Vector3):", arg1.Origin)
-                        end
-                        
-                        print("Successfully modified Origin from", originalOrigin, "to", arg1.Origin)
-                    else
-                        print("NPC found but no valid root part")
-                    end
-                else
-                    print("No NPC found nearby")
-                end
-                
-                -- Call original function with modified parameters
-                local result = originalCast(arg1)
-                print("Cast function completed")
-                return result
-            end
-            
-            print("Successfully hooked Cast function!")
-            return true
-        else
-            print("Cast function not found in module")
-            return false
-        end
-    else
-        print("Failed to require Cast module:", hitboxModule)
-        return false
-    end
+    hookMainHitbox()
+end)
+
+_G.ToggleAutoAim = function()
+    if _G.AutoAimEnabled == nil then _G.AutoAimEnabled = true end
+    _G.AutoAimEnabled = not _G.AutoAimEnabled
+    print("Auto Aim:", _G.AutoAimEnabled and "ON" or "OFF")
 end
 
--- Alternative method: Hook by scanning all modules
-local function scanAndHookModules()
-    local function checkModule(moduleScript)
-        local success, module = pcall(require, moduleScript)
-        if success and type(module) == "table" and module.Cast then
-            print("Found Cast function in:", moduleScript:GetFullName())
-            
-            -- Store original function
-            local originalCast = module.Cast
-            
-            -- Hook the function
-            module.Cast = function(arg1)
-                local nearestNPC = findNearestNPC()
-                
-                if nearestNPC then
-                    local rootPart = nearestNPC:FindFirstChild("HumanoidRootPart") or nearestNPC:FindFirstChild("Torso") or nearestNPC:FindFirstChild("Head")
-                    if rootPart then
-                        if typeof(arg1.Origin) == "CFrame" then
-                            arg1.Origin = rootPart.CFrame
-                        elseif typeof(arg1.Origin) == "Vector3" then
-                            arg1.Origin = rootPart.Position
-                        end
-                        
-                        print("Auto-targeting NPC:", nearestNPC.Name)
-                    end
-                end
-                
-                return originalCast(arg1)
-            end
-            
-            return true
-        end
-        return false
-    end
-    
-    -- Scan ReplicatedStorage
-    for _, child in ipairs(game.ReplicatedStorage:GetDescendants()) do
-        if child:IsA("ModuleScript") then
-            if checkModule(child) then
-                print("Successfully hooked Cast function from scan!")
-                return true
-            end
-        end
-    end
-    
-    return false
-end
-
--- Try to hook the function
-print("Attempting to hook Cast function...")
-if not hookHitboxModule() then
-    print("Failed to hook Cast function from direct path")
-end
+print("Auto Aim Hitbox loaded! Use _G.ToggleAutoAim() to toggle")
