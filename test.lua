@@ -39,7 +39,8 @@ local CombatSystem = {
     lastM1Time = 0,
     lastM2Time = 0,
     skillCooldowns = {},
-    heartbeatConnection = nil
+    heartbeatConnection = nil,
+    antiFlingEnabled = true
 }
 
 -- Status Check Functions using game modules
@@ -164,7 +165,19 @@ local function startTeleportLoop()
             
             local currentChar = Player.Character
             if currentChar and currentChar:FindFirstChild("HumanoidRootPart") then
+                -- Anti-fling before teleport
+                setAntiVelocity(currentChar)
+                
+                -- Teleport
                 currentChar.HumanoidRootPart.CFrame = CFrame.new(targetPosition)
+                
+                -- Anti-fling after teleport
+                setAntiVelocity(currentChar)
+                
+                -- Anchor briefly to prevent physics issues
+                currentChar.HumanoidRootPart.Anchored = true
+                wait() -- Very brief anchor
+                currentChar.HumanoidRootPart.Anchored = false
             end
         end
     end)
@@ -209,6 +222,25 @@ end
 
 local function useM2()
     return useSkill("MOUSEBUTTON2")
+end
+
+-- Anti-fling function
+local function setAntiVelocity(character)
+    if not character then return end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return end
+    
+    -- Set velocity to zero to prevent fling
+    if humanoidRootPart.Velocity.Magnitude > 0 then -- Only if moving too fast
+        humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+        humanoidRootPart.AngularVelocity = Vector3.new(0, 0, 0)
+    end
+    
+    -- Set network ownership to prevent desync
+    pcall(function()
+        humanoidRootPart:SetNetworkOwner(Player)
+    end)
 end
 
 local function attackTarget(target)
@@ -312,6 +344,9 @@ local function combatLoop()
     RootPart = Character:FindFirstChild("HumanoidRootPart")
     if not RootPart then return end
     
+    -- Apply anti-fling every frame
+    setAntiVelocity(Character)
+    
     -- Check for escape conditions
     if isRagdolled(Character) or isStunned(Character) then
         escapeToSafety()
@@ -403,7 +438,7 @@ local MainTab = Window:CreateTab("Main Controls", "zap")
 local SkillTab = Window:CreateTab("Skill Selection", "settings")
 local StatusTab = Window:CreateTab("Status Monitor", "activity")
 
--- Main Controls
+        -- Main Controls
 local FarmModeDropdown = MainTab:CreateDropdown({
     Name = "Farm Mode",
     Options = {"Cultists","Cursed"},
@@ -412,6 +447,15 @@ local FarmModeDropdown = MainTab:CreateDropdown({
     Flag = "FarmMode",
     Callback = function(Options)
         CombatSystem.farmMode = Options[1]
+    end
+})
+
+local AntiFlingToggle = MainTab:CreateToggle({
+    Name = "Anti-Fling Protection",
+    CurrentValue = true,
+    Flag = "AntiFling",
+    Callback = function(Value)
+        CombatSystem.antiFlingEnabled = Value
     end
 })
 
