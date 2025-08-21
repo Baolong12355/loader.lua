@@ -41,6 +41,7 @@ local combatConnection = nil
 local lastSkillTime = {}
 local currentSkillIndex = 1
 local lastSkillUse = 0
+local isM1Turn = false -- Track nếu đang lượt M1
 
 -- Helper Functions
 local function getTargetFromPath(path)
@@ -71,28 +72,22 @@ local function isTargetAlive(target)
     return humanoid and humanoid.Health > 0
 end
 
-local function findNearestTarget()
-    local character = localPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return nil end
-    
-    local myPos = character.HumanoidRootPart.Position
-    local nearest = nil
-    local shortestDist = math.huge
-    
+local function findRandomTarget()
+    local validTargets = {}
     local targetPaths = targetLists[combatSettings.targetType]
     
     for _, path in ipairs(targetPaths) do
         local target = getTargetFromPath(path)
         if isTargetAlive(target) then
-            local dist = (target.HumanoidRootPart.Position - myPos).Magnitude
-            if dist < shortestDist then
-                shortestDist = dist
-                nearest = target
-            end
+            table.insert(validTargets, target)
         end
     end
     
-    return nearest
+    if #validTargets > 0 then
+        return validTargets[math.random(1, #validTargets)]
+    end
+    
+    return nil
 end
 
 local function isStunned()
@@ -174,7 +169,7 @@ local function startHeartbeatLoop()
         if not character or not character:FindFirstChild("HumanoidRootPart") then return end
         
         -- Tìm target mỗi frame
-        local target = findNearestTarget()
+        local target = findRandomTarget()
         
         if not target then
             -- Không có target, về vị trí đợi
@@ -187,8 +182,25 @@ local function startHeartbeatLoop()
         currentTarget = target
         isInCombat = true
         
-        -- Check nếu bị stun hoặc ragdoll thì escape
+        -- Check escape conditions mỗi frame
         local needEscape = isStunned() or isRagdolled()
+        
+        -- Check nếu tất cả skills on cooldown
+        local allSkillsOnCooldown = true
+        for _, skill in ipairs(combatSettings.selectedSkills) do
+            if not hasCooldown(skill) then
+                allSkillsOnCooldown = false
+                break
+            end
+        end
+        
+        if combatSettings.useM1 and not hasCooldown("MOUSEBUTTON1") then
+            allSkillsOnCooldown = false
+        end
+        
+        if allSkillsOnCooldown then
+            needEscape = true
+        end
         
         -- Teleport logic mỗi frame
         if needEscape then
@@ -213,24 +225,32 @@ local function startCombatLoop()
         -- Chỉ dùng skill khi đã đủ delay (tránh spam)
         if tick() - lastSkillUse < 0.5 then return end
         
-        -- Dùng 1 skill theo thứ tự
-        if #combatSettings.selectedSkills > 0 then
-            local skill = combatSettings.selectedSkills[combatSettings.currentSkillIndex]
-            useSkill(skill)
-            
-            -- Chuyển sang skill tiếp theo
-            combatSettings.currentSkillIndex = combatSettings.currentSkillIndex + 1
-            if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
-                combatSettings.currentSkillIndex = 1
+        -- Nếu đang lượt M1
+        if isM1Turn then
+            if not hasCooldown("MOUSEBUTTON1") then
+                useSkill("MOUSEBUTTON1")
+                wait(0.05)
+            else
+                -- M1 đã cooldown, chuyển sang skill tiếp theo
+                isM1Turn = false
+                combatSettings.currentSkillIndex = combatSettings.currentSkillIndex + 1
+                if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
+                    combatSettings.currentSkillIndex = 1
+                end
             end
-            
-            wait(0.1)
-        end
-        
-        -- Sau đó đánh M1 đến khi cooldown
-        while not hasCooldown("MOUSEBUTTON1") and not shouldEscape do
-            useSkill("MOUSEBUTTON1")
-            wait(0.05) -- Delay nhỏ giữa các M1
+        else
+            -- Lượt skill
+            if #combatSettings.selectedSkills > 0 then
+                local skill = combatSettings.selectedSkills[combatSettings.currentSkillIndex]
+                useSkill(skill)
+                wait(0.1)
+                
+                -- Chuyển sang lượt M1
+                isM1Turn = true
+            else
+                -- Không có skill nào, chỉ dùng M1
+                isM1Turn = true
+            end
         end
     end)
 end
@@ -290,11 +310,20 @@ local function createGUI()
     })
     
     local M1Toggle = MainTab:CreateToggle({
-        Name = "Use M1", 
+        Name = "Use M1",
         CurrentValue = true,
         Flag = "UseM1",
         Callback = function(Value)
-            -- M1 luôn được dùng, chỉ để hiển thị
+            combatSettings.useM1 = Value
+        end,
+    })
+    
+    local M2Toggle = MainTab:CreateToggle({
+        Name = "Use M2",
+        CurrentValue = false,
+        Flag = "UseM2",
+        Callback = function(Value)
+            combatSettings.useM2 = Value
         end,
     })
     
@@ -314,24 +343,13 @@ local function createGUI()
     local SkillsTab = Window:CreateTab("Skills", "zap")
     local Section2 = SkillsTab:CreateSection("Skill Selection")
     
-    -- Tạo skills từ A+ đến Z+ và thêm MOUSEBUTTON2
-    local skillKeys = {"MOUSEBUTTON2"}
-    local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    for i = 1, #alphabet do
-        local letter = alphabet:sub(i, i)
-        table.insert(skillKeys, letter .. "+")
-        table.insert(skillKeys, letter) -- Thêm cả phím thường
-    end
+    local skillKeys = {"Q", "E", "R", "T", "Y", "U", "F", "G", "H", "Z", "X", "C", "V", "B", "N", "M"}
     
     for _, key in ipairs(skillKeys) do
-        local isDefault = key == "B"
-        local displayName = key == "MOUSEBUTTON2" and "M2" or "Skill " .. key
-        local flagName = key:gsub("%+", "Plus"):gsub("MOUSEBUTTON2", "M2")
-        
         SkillsTab:CreateToggle({
-            Name = displayName,
-            CurrentValue = isDefault,
-            Flag = "Skill" .. flagName,
+            Name = "Skill " .. key,
+            CurrentValue = key == "B",
+            Flag = "Skill" .. key,
             Callback = function(Value)
                 if Value then
                     if not table.find(combatSettings.selectedSkills, key) then
@@ -341,10 +359,6 @@ local function createGUI()
                     local index = table.find(combatSettings.selectedSkills, key)
                     if index then
                         table.remove(combatSettings.selectedSkills, index)
-                        -- Reset skill index nếu cần
-                        if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
-                            combatSettings.currentSkillIndex = 1
-                        end
                     end
                 end
             end,
@@ -415,4 +429,19 @@ localPlayer.CharacterAdded:Connect(function(character)
     end
 end)
 
+-- Stop function for console
+getgenv().stopCombat = function()
+    combatSettings.enabled = false
+    if heartbeatConnection then
+        heartbeatConnection:Disconnect()
+        heartbeatConnection = nil
+    end
+    if combatConnection then
+        combatConnection:Disconnect()
+        combatConnection = nil
+    end
+    print("Combat system stopped from console!")
+end
+
 print("Auto Combat System loaded with Heartbeat Loop!")
+print("Use getgenv().stopCombat() to stop from console")
