@@ -21,12 +21,13 @@ local combatSettings = {
 local targetLists = {
     cultists = {
         "workspace.Living.Assailant",
-        "workspace.Living.Conjurer"
+        "workspace.Living.Conjurer",
+        "workspace.Living.Assailant"
     },
     cursed = {
-        "workspace.Living['Roppongi Curse']",
-        "workspace.Living['Mantis Curse']", 
-        "workspace.Living['Jujutsu Sorcerer']",
+        "workspace.Living.Roppongi Curse",
+        "workspace.Living.Mantis Curse", 
+        "workspace.Living.Jujutsu Sorcerer",
         "workspace.Living.Flyhead"
     }
 }
