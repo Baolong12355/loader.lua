@@ -182,25 +182,8 @@ local function startHeartbeatLoop()
         currentTarget = target
         isInCombat = true
         
-        -- Check escape conditions mỗi frame
+        -- Check nếu bị stun hoặc ragdoll thì escape
         local needEscape = isStunned() or isRagdolled()
-        
-        -- Check nếu tất cả skills on cooldown
-        local allSkillsOnCooldown = true
-        for _, skill in ipairs(combatSettings.selectedSkills) do
-            if not hasCooldown(skill) then
-                allSkillsOnCooldown = false
-                break
-            end
-        end
-        
-        if combatSettings.useM1 and not hasCooldown("MOUSEBUTTON1") then
-            allSkillsOnCooldown = false
-        end
-        
-        if allSkillsOnCooldown then
-            needEscape = true
-        end
         
         -- Teleport logic mỗi frame
         if needEscape then
@@ -310,20 +293,11 @@ local function createGUI()
     })
     
     local M1Toggle = MainTab:CreateToggle({
-        Name = "Use M1",
+        Name = "Use M1", 
         CurrentValue = true,
         Flag = "UseM1",
         Callback = function(Value)
-            combatSettings.useM1 = Value
-        end,
-    })
-    
-    local M2Toggle = MainTab:CreateToggle({
-        Name = "Use M2",
-        CurrentValue = false,
-        Flag = "UseM2",
-        Callback = function(Value)
-            combatSettings.useM2 = Value
+            -- M1 luôn được dùng, chỉ để hiển thị
         end,
     })
     
@@ -343,13 +317,24 @@ local function createGUI()
     local SkillsTab = Window:CreateTab("Skills", "zap")
     local Section2 = SkillsTab:CreateSection("Skill Selection")
     
-    local skillKeys = {"Q", "E", "R", "T", "Y", "U", "F", "G", "H", "Z", "X", "C", "V", "B", "N", "M"}
+    -- Tạo skills từ A+ đến Z+ và thêm MOUSEBUTTON2
+    local skillKeys = {"MOUSEBUTTON2"}
+    local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    for i = 1, #alphabet do
+        local letter = alphabet:sub(i, i)
+        table.insert(skillKeys, letter .. "+")
+        table.insert(skillKeys, letter) -- Thêm cả phím thường
+    end
     
     for _, key in ipairs(skillKeys) do
+        local isDefault = key == "B"
+        local displayName = key == "MOUSEBUTTON2" and "M2" or "Skill " .. key
+        local flagName = key:gsub("%+", "Plus"):gsub("MOUSEBUTTON2", "M2")
+        
         SkillsTab:CreateToggle({
-            Name = "Skill " .. key,
-            CurrentValue = key == "B",
-            Flag = "Skill" .. key,
+            Name = displayName,
+            CurrentValue = isDefault,
+            Flag = "Skill" .. flagName,
             Callback = function(Value)
                 if Value then
                     if not table.find(combatSettings.selectedSkills, key) then
@@ -359,6 +344,10 @@ local function createGUI()
                     local index = table.find(combatSettings.selectedSkills, key)
                     if index then
                         table.remove(combatSettings.selectedSkills, index)
+                        -- Reset skill index nếu cần
+                        if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
+                            combatSettings.currentSkillIndex = 1
+                        end
                     end
                 end
             end,
@@ -429,19 +418,4 @@ localPlayer.CharacterAdded:Connect(function(character)
     end
 end)
 
--- Stop function for console
-getgenv().stopCombat = function()
-    combatSettings.enabled = false
-    if heartbeatConnection then
-        heartbeatConnection:Disconnect()
-        heartbeatConnection = nil
-    end
-    if combatConnection then
-        combatConnection:Disconnect()
-        combatConnection = nil
-    end
-    print("Combat system stopped from console!")
-end
-
 print("Auto Combat System loaded with Heartbeat Loop!")
-print("Use getgenv().stopCombat() to stop from console")
