@@ -5,7 +5,6 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 
 -- Player and Character
 local Player = Players.LocalPlayer
@@ -16,15 +15,6 @@ local RootPart = Character:WaitForChild("HumanoidRootPart")
 -- Remote Function
 local FireInput = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Services.MoveInputService.RF.FireInput
 
--- Game Services - Using the actual game modules
-local CombatService = game:GetService("ReplicatedStorage").ReplicatedRoot.Services.CombatService.Client
-local ClientCooldown = require(CombatService.ClientCooldown)
-local ClientRagdoll = require(CombatService.ClientRagdoll)
-local ClientStun = require(CombatService.ClientStun)
-
--- Loading Rayfield Library
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
 -- Combat System Variables
 local CombatSystem = {
     enabled = false,
@@ -33,32 +23,24 @@ local CombatSystem = {
     waitPositionCursed = Vector3.new(-240.7166290283203, 233.30340576171875, 417.1275939941406),
     targetFolders = {"Assailant", "Conjurer", "Roppongi Curse", "Mantis Curse", "Jujutsu Sorcerer", "Flyhead"},
     selectedSkills = {},
-    selectedPlusSkills = {}, -- For skills with +
-    farmMode = "Cultists", -- "Cultists" or "Cursed"
+    selectedPlusSkills = {},
+    farmMode = "Cultists",
     isInCombat = false,
-    lastM1Time = 0,
-    lastM2Time = 0,
-    skillCooldowns = {},
-    heartbeatConnection = nil
+    heartbeatConnection = nil,
+    teleportConnection = nil
 }
 
--- ==================== TELEPORT FUNCTIONS (GIỐNG NHƯ CỦA TÔI) ====================
-local teleportConnection = nil
-local lastTeleportTime = 0
-local teleportDelay = 0 -- Delay 0 giây
-
--- Function để kiểm tra target có tồn tại và valid không
+-- ==================== TELEPORT FUNCTIONS ====================
 local function isValidTarget(target)
     return target and target:FindFirstChild("HumanoidRootPart") and target:FindFirstChild("Humanoid")
 end
 
--- Function để kiểm tra target đã chết chưa
 local function isTargetDead(target)
     local humanoid = target:FindFirstChild("Humanoid")
     return humanoid and humanoid.Health <= 0
 end
 
--- Function để teleport ra sau lưng target (GIỐNG CỦA TÔI)
+-- Teleport ra sau lưng target (KHÔNG DÙNG TWEEN)
 local function teleportBehindTarget(target)
     if not CombatSystem.enabled or not isValidTarget(target) or isTargetDead(target) then return end
     
@@ -66,12 +48,13 @@ local function teleportBehindTarget(target)
     if not currentChar or not currentChar:FindFirstChild("HumanoidRootPart") then return end
     
     local targetHRP = target.HumanoidRootPart
-    local behindPosition = targetHRP.CFrame * CFrame.new(0, 0, 3) -- 3 studs phía sau
+    local behindPosition = targetHRP.CFrame * CFrame.new(0, 0, 3)
     
+    -- TELEPORT TRỰC TIẾP - KHÔNG TWEEN
     currentChar.HumanoidRootPart.CFrame = behindPosition
 end
 
--- Function để teleport đến vị trí (GIỐNG CỦA TÔI)
+-- Teleport đến vị trí (KHÔNG DÙNG TWEEN)
 local function instantTP(position)
     local currentChar = Player.Character
     if currentChar and currentChar:FindFirstChild("HumanoidRootPart") then
@@ -79,11 +62,10 @@ local function instantTP(position)
     end
 end
 
--- Start/Stop teleport loop (GIỐNG CỦA TÔI)
 local function startTeleportLoop()
-    if teleportConnection then return end
+    if CombatSystem.teleportConnection then return end
     
-    teleportConnection = RunService.Heartbeat:Connect(function()
+    CombatSystem.teleportConnection = RunService.Heartbeat:Connect(function()
         if CombatSystem.enabled and CombatSystem.currentTarget then
             teleportBehindTarget(CombatSystem.currentTarget)
         end
@@ -91,64 +73,30 @@ local function startTeleportLoop()
 end
 
 local function stopTeleportLoop()
-    if teleportConnection then
-        teleportConnection:Disconnect()
-        teleportConnection = nil
+    if CombatSystem.teleportConnection then
+        CombatSystem.teleportConnection:Disconnect()
+        CombatSystem.teleportConnection = nil
     end
 end
 -- ==================== END TELEPORT FUNCTIONS ====================
 
--- Status Check Functions using game modules
+-- Status Check Functions
 local function getCooldown(character, skillName)
     if not character then return nil end
-    
-    -- Try using ClientCooldown service
-    local success, result = pcall(function()
-        return ClientCooldown.GetCooldown(character, skillName)
-    end)
-    
-    if success and result then
-        return result
-    end
-    
-    -- Fallback method
     local cooldownFolder = character:FindFirstChild("Cooldowns")
     if cooldownFolder then
         return cooldownFolder:FindFirstChild(skillName)
     end
-    
     return nil
 end
 
 local function isRagdolled(character)
     if not character then return false end
-    
-    -- Try using ClientRagdoll service
-    local success, result = pcall(function()
-        return ClientRagdoll.IsRagdolled(character)
-    end)
-    
-    if success and result ~= nil then
-        return result
-    end
-    
-    -- Fallback
     return character:GetAttribute("Ragdolled") == true
 end
 
 local function isStunned(character)
     if not character then return false end
-    
-    -- Try using ClientStun service
-    local success, result = pcall(function()
-        return ClientStun.IsStunned(character)
-    end)
-    
-    if success and result ~= nil then
-        return result
-    end
-    
-    -- Fallback: check cooldown folder for stun effects
     local cooldownFolder = character:FindFirstChild("Cooldowns")
     if not cooldownFolder then return false end
     
@@ -175,9 +123,7 @@ local function findNearestEnemy()
         local folder = workspace.Living:FindFirstChild(folderName)
         if folder then
             for _, enemy in pairs(folder:GetChildren()) do
-                -- Check if it's a model
                 if enemy:IsA("Model") and enemy.Parent then
-                    -- Check if enemy is alive (has Humanoid with health > 0, or just exists if no Humanoid)
                     local humanoid = enemy:FindFirstChild("Humanoid")
                     local isAlive = true
                     
@@ -186,12 +132,9 @@ local function findNearestEnemy()
                     end
                     
                     if isAlive then
-                        local success, modelCFrame = pcall(function()
-                            return enemy:GetModelCFrame()
-                        end)
-                        
-                        if success and modelCFrame then
-                            local distance = (RootPart.Position - modelCFrame.Position).Magnitude
+                        local hrp = enemy:FindFirstChild("HumanoidRootPart")
+                        if hrp then
+                            local distance = (RootPart.Position - hrp.Position).Magnitude
                             if distance < shortestDistance then
                                 shortestDistance = distance
                                 nearestEnemy = enemy
@@ -231,72 +174,37 @@ local function useM2()
 end
 
 local function attackTarget(target)
-    if not target or not target:IsA("Model") then
-        return false
-    end
+    if not target or not target:IsA("Model") then return false end
     
     local currentChar = Player.Character
-    if not currentChar or not currentChar:FindFirstChild("HumanoidRootPart") then
-        return false
-    end
-    
-    -- Face downward for hitbox optimization
-    local lookDirection = Vector3.new(0, -1, 0)
-    currentChar.HumanoidRootPart.CFrame = CFrame.lookAt(currentChar.HumanoidRootPart.Position, currentChar.HumanoidRootPart.Position + lookDirection)
+    if not currentChar or not currentChar:FindFirstChild("HumanoidRootPart") then return false end
     
     local actionTaken = false
     
-    -- Priority 1: Always check M1 first (since it recovers fast)
+    -- Priority 1: M1 spam
     if not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) then
-        while not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) do
-            local m1Success = useM1()
-            if m1Success then
-                wait(0.1) -- Small delay between M1 attacks
-                actionTaken = true
-            else
-                break
-            end
+        local m1Success = useM1()
+        if m1Success then
+            actionTaken = true
         end
     end
     
-    -- Priority 2: Use selected skills one by one, checking M1 after each
+    -- Priority 2: Selected skills
     for _, skill in pairs(CombatSystem.selectedSkills) do
         if not isOnCooldown(currentChar, skill) and not isRagdolled(currentChar) and not isStunned(currentChar) then
             useSkill(skill)
             actionTaken = true
-            
-            -- Check M1 again after each skill (since M1 recovers fast)
-            if not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) then
-                while not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) do
-                    local m1Success = useM1()
-                    if m1Success then
-                        wait(0.1)
-                    else
-                        break
-                    end
-                end
-            end
+            break -- Chỉ dùng 1 skill mỗi frame
         end
     end
     
-    -- Priority 3: Use selected plus skills one by one, checking M1 after each
+    -- Priority 3: Plus skills
     for _, skill in pairs(CombatSystem.selectedPlusSkills) do
         local plusSkill = skill .. "+"
         if not isOnCooldown(currentChar, plusSkill) and not isRagdolled(currentChar) and not isStunned(currentChar) then
             useSkill(plusSkill)
             actionTaken = true
-            
-            -- Check M1 again after each plus skill (since M1 recovers fast)
-            if not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) then
-                while not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) do
-                    local m1Success = useM1()
-                    if m1Success then
-                        wait(0.1)
-                    else
-                        break
-                    end
-                end
-            end
+            break -- Chỉ dùng 1 skill mỗi frame
         end
     end
     
@@ -312,7 +220,6 @@ end
 local function combatLoop()
     if not CombatSystem.enabled then return end
     
-    -- Update character references
     Character = Player.Character
     if not Character then return end
     
@@ -332,33 +239,24 @@ local function combatLoop()
         CombatSystem.currentTarget = target
         CombatSystem.isInCombat = true
         
-        -- Attack the target (returns true if any skill was used)
+        -- Attack the target
         local skillUsed = attackTarget(target)
         
-        -- Check if target is dead/destroyed
-        local targetStillExists = target and target.Parent
+        -- Check if target is dead
         local targetDead = false
-        
-        if targetStillExists then
+        if target and target.Parent then
             local humanoid = target:FindFirstChild("Humanoid")
             if humanoid then
                 targetDead = humanoid.Health <= 0
             end
         else
-            targetDead = true -- Target was destroyed/removed
+            targetDead = true
         end
         
-        -- If target is dead or doesn't exist, escape
-        if targetDead or not targetStillExists then
-            escapeToSafety()
+        if targetDead then
             CombatSystem.currentTarget = nil
         end
-        -- If no skills were used (all on cooldown), escape temporarily
-        if not skillUsed then
-            escapeToSafety()
-        end
     else
-        -- No target found, return to wait position
         CombatSystem.isInCombat = false
         CombatSystem.currentTarget = nil
         local waitPos = CombatSystem.farmMode == "Cultists" and CombatSystem.waitPositionCultists or CombatSystem.waitPositionCursed
@@ -369,36 +267,20 @@ end
 -- Create Rayfield Window
 local Window = Rayfield:CreateWindow({
     Name = "Advanced Combat System",
-    Icon = 0,
     LoadingTitle = "Combat System Interface",
     LoadingSubtitle = "by Advanced Scripts",
-    ShowText = "Combat System",
     Theme = "DarkBlue",
-    
     ToggleUIKeybind = "K",
-    
-    DisableRayfieldPrompts = false,
-    DisableBuildWarnings = false,
-    
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "CombatSystem",
         FileName = "CombatConfig"
-    },
-    
-    Discord = {
-        Enabled = false,
-        Invite = "noinvitelink",
-        RememberJoins = true
-    },
-    
-    KeySystem = false
+    }
 })
 
 -- Create Tabs
 local MainTab = Window:CreateTab("Main Controls", "zap")
 local SkillTab = Window:CreateTab("Skill Selection", "settings")
-local StatusTab = Window:CreateTab("Status Monitor", "activity")
 
 -- Main Controls
 local FarmModeDropdown = MainTab:CreateDropdown({
@@ -420,11 +302,9 @@ local EnableToggle = MainTab:CreateToggle({
         CombatSystem.enabled = Value
         
         if Value then
-            -- Start combat system
             CombatSystem.heartbeatConnection = RunService.Heartbeat:Connect(combatLoop)
             startTeleportLoop()
         else
-            -- Stop combat system
             if CombatSystem.heartbeatConnection then
                 CombatSystem.heartbeatConnection:Disconnect()
                 CombatSystem.heartbeatConnection = nil
@@ -439,16 +319,6 @@ local WaitPosButton = MainTab:CreateButton({
     Callback = function()
         local waitPos = CombatSystem.farmMode == "Cultists" and CombatSystem.waitPositionCultists or CombatSystem.waitPositionCursed
         instantTP(waitPos)
-    end
-})
-
-local TargetButton = MainTab:CreateButton({
-    Name = "Find and Target Enemy",
-    Callback = function()
-        local target = findNearestEnemy()
-        if target then
-            CombatSystem.currentTarget = target
-        end
     end
 })
 
@@ -502,53 +372,6 @@ for _, skill in pairs(availablePlusSkills) do
     })
 end
 
--- Status Monitor
-local StatusSection = StatusTab:CreateSection("System Status")
-
-local StatusLabel = StatusTab:CreateLabel("Status: Idle", "info")
-local TargetLabel = StatusTab:CreateLabel("Target: None", "crosshair")
-local HealthLabel = StatusTab:CreateLabel("Health: 100%", "heart")
-local CooldownLabel = StatusTab:CreateLabel("Cooldowns: None", "clock")
-
--- Status Update Loop
-RunService.Heartbeat:Connect(function()
-    if Character and Character:FindFirstChild("Humanoid") then
-        -- Update status
-        local status = "Idle"
-        if CombatSystem.enabled then
-            if isRagdolled(Character) then
-                status = "Ragdolled"
-            elseif isStunned(Character) then
-                status = "Stunned"
-            elseif CombatSystem.isInCombat then
-                status = "In Combat"
-            else
-                status = "Active"
-            end
-        end
-        StatusLabel:Set("Status: " .. status, "info")
-        
-        -- Update target
-        local targetName = CombatSystem.currentTarget and CombatSystem.currentTarget.Name or "None"
-        TargetLabel:Set("Target: " .. targetName, "crosshair")
-        
-        -- Update health
-        local health = math.floor((Character.Humanoid.Health / Character.Humanoid.MaxHealth) * 100)
-        HealthLabel:Set("Health: " .. health .. "%", "heart")
-        
-        -- Update cooldowns
-        local cooldowns = {}
-        local cooldownFolder = Character:FindFirstChild("Cooldowns")
-        if cooldownFolder then
-            for _, cooldown in pairs(cooldownFolder:GetChildren()) do
-                table.insert(cooldowns, cooldown.Name)
-            end
-        end
-        local cooldownText = #cooldowns > 0 and table.concat(cooldowns, ", ") or "None"
-        CooldownLabel:Set("Cooldowns: " .. cooldownText, "clock")
-    end
-end)
-
 -- Emergency Stop
 MainTab:CreateButton({
     Name = "Emergency Stop",
@@ -565,3 +388,5 @@ MainTab:CreateButton({
 
 -- Load Configuration
 Rayfield:LoadConfiguration()
+
+print("Combat System Loaded! - No Tween, Better Performance")
