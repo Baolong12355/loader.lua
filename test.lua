@@ -1,4 +1,3 @@
--- Auto Combat System với Heartbeat Loop
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -21,8 +20,7 @@ local combatSettings = {
 local targetLists = {
     cultists = {
         "workspace.Living.Assailant",
-        "workspace.Living.Conjurer",
-        "workspace.Living.Assailant"
+        "workspace.Living.Conjurer"
     },
     cursed = {
         "workspace.Living.Roppongi Curse",
@@ -46,6 +44,8 @@ local combatConnection = nil
 local lastSkillTime = {}
 local currentSkillIndex = 1
 local lastSkillUse = 0
+local targetLocked = false -- Khóa target hiện tại
+local lastTargetCheck = 0
 
 -- Helper Functions
 local function getTargetFromPath(path)
@@ -79,24 +79,49 @@ end
 local function findRandomTarget()
     local validTargets = {}
     local targetPaths = targetLists[combatSettings.targetType]
-    
+
     for _, path in ipairs(targetPaths) do
         local target = getTargetFromPath(path)
         if isTargetAlive(target) then
             table.insert(validTargets, target)
         end
     end
-    
+
     if #validTargets > 0 then
         return validTargets[math.random(1, #validTargets)]
     end
-    
+
     return nil
 end
 
 local function getNextTarget()
-    -- Luôn tìm target mới để đánh hết (không giữ target cũ)
-    return findRandomTarget()
+    -- Chỉ tìm target mới khi target hiện tại chết hoặc không hợp lệ
+    if currentTarget and isTargetAlive(currentTarget) then
+        return currentTarget -- Giữ target hiện tại
+    end
+    
+    -- Target hiện tại đã chết hoặc không hợp lệ, tìm target mới
+    targetLocked = false
+    local newTarget = findRandomTarget()
+    
+    if newTarget then
+        targetLocked = true
+    end
+    
+    return newTarget
+end
+
+local function waitForEnemyRespawn()
+    -- Đợi cho đến khi có ít nhất 1 enemy spawn
+    while combatSettings.enabled do
+        local target = findRandomTarget()
+        if target then
+            return target
+        end
+        wait(0.1) -- Check mỗi 0.1 giây
+    end
+    
+    return nil
 end
 
 local function isStunned()
@@ -114,10 +139,10 @@ end
 local function hasCooldown(skillKey)
     local character = localPlayer.Character
     if not character then return true end
-    
+
     local cooldownFolder = character:FindFirstChild("Cooldowns")
     if not cooldownFolder then return false end
-    
+
     return cooldownFolder:FindFirstChild(skillKey) ~= nil
 end
 
@@ -130,24 +155,24 @@ end
 local function teleportBehindTarget(target)
     local character = localPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") or not isValidTarget(target) then return end
-    
+
     local targetCFrame = target.HumanoidRootPart.CFrame
     local behindPos = targetCFrame * CFrame.new(0, 0, 5) -- Ra sau lưng 5 studs
-    
+
     character.HumanoidRootPart.CFrame = behindPos
 end
 
 local function escapeToHeight(target)
     local character = localPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-    
+
     local escapePos
     if isValidTarget(target) then
         escapePos = target.HumanoidRootPart.Position + Vector3.new(0, combatSettings.escapeHeight, 0)
     else
         escapePos = character.HumanoidRootPart.Position + Vector3.new(0, combatSettings.escapeHeight, 0)
     end
-    
+
     character.HumanoidRootPart.CFrame = CFrame.new(escapePos)
 end
 
@@ -155,47 +180,58 @@ local function useSkill(skillKey)
     local success = pcall(function()
         FireInput:InvokeServer(skillKey)
     end)
-    
+
     if success then
         lastSkillTime[skillKey] = tick()
         lastSkillUse = tick()
         return true
     end
-    
+
     return false
 end
 
--- Main Heartbeat Loop (giống script ví dụ của bạn)
+-- Main Heartbeat Loop với logic đợi enemy respawn
 local function startHeartbeatLoop()
     if heartbeatConnection then
         heartbeatConnection:Disconnect()
     end
-    
+
     heartbeatConnection = RunService.Heartbeat:Connect(function()
         if not combatSettings.enabled then return end
-        
+
         local character = localPlayer.Character
         if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-        
-        -- Tìm target mỗi frame (chỉ đổi khi target hiện tại chết)
+
+        -- Lấy target với logic mới
         local target = getNextTarget()
-        
+
         if not target then
-            -- Không có target, về vị trí đợi
-            local waitPos = waitPositions[combatSettings.targetType]
-            teleportToPosition(waitPos)
+            -- Không có target, đợi enemy respawn
             isInCombat = false
             shouldEscape = false
+            
+            -- Về vị trí đợi
+            local waitPos = waitPositions[combatSettings.targetType]
+            teleportToPosition(waitPos)
+            
+            -- Đợi enemy respawn (non-blocking)
+            if tick() - lastTargetCheck > 0.1 then -- Check mỗi 0.1 giây
+                lastTargetCheck = tick()
+                spawn(function()
+                    waitForEnemyRespawn()
+                end)
+            end
             return
         end
-        
+
+        -- Có target, bắt đầu combat
         currentTarget = target
         isInCombat = true
-        
+
         -- Check nếu bị stun hoặc ragdoll thì escape
         local needEscape = isStunned() or isRagdolled()
-        
-        -- Teleport logic mỗi frame
+
+        -- Teleport logic
         if needEscape then
             shouldEscape = true
             escapeToHeight(target)
@@ -206,32 +242,30 @@ local function startHeartbeatLoop()
     end)
 end
 
--- Combat Skills Loop (riêng biệt để không lag heartbeat)
+-- Combat Skills Loop (không thay đổi)
 local function startCombatLoop()
     if combatConnection then
         combatConnection:Disconnect()
     end
-    
+
     combatConnection = RunService.Heartbeat:Connect(function()
         if not combatSettings.enabled or not isInCombat or shouldEscape then return end
-        
-        -- Chỉ dùng skill khi đã đủ delay (tránh spam)
+
+        -- Chỉ dùng skill khi đã đủ delay
         if tick() - lastSkillUse < 0.3 then return end
-        
-        -- Logic đơn giản: Dùng 1 skill rồi dùng M1 cho đến cooldown
+
+        -- Logic skill
         if #combatSettings.selectedSkills > 0 then
-            -- Dùng skill hiện tại
             local skill = combatSettings.selectedSkills[combatSettings.currentSkillIndex]
             useSkill(skill)
-            
-            -- Chuyển sang skill tiếp theo
+
             combatSettings.currentSkillIndex = combatSettings.currentSkillIndex + 1
             if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
                 combatSettings.currentSkillIndex = 1
             end
         end
-        
-        -- Dùng M1 cho đến khi cooldown
+
+        -- M1 spam
         spawn(function()
             while not hasCooldown("MOUSEBUTTON1") and combatSettings.enabled and isInCombat and not shouldEscape do
                 useSkill("MOUSEBUTTON1")
@@ -241,14 +275,14 @@ local function startCombatLoop()
     end)
 end
 
--- GUI Creation
+-- GUI Creation (không thay đổi)
 local function createGUI()
     local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-    
+
     local Window = Rayfield:CreateWindow({
         Name = "Auto Combat System",
         LoadingTitle = "Combat System Loading...",
-        LoadingSubtitle = "Heartbeat Loop System",
+        LoadingSubtitle = "Smart Target Tracking System",
         Theme = "DarkBlue",
         ConfigurationSaving = {
             Enabled = true,
@@ -256,11 +290,11 @@ local function createGUI()
             FileName = "Config"
         }
     })
-    
+
     -- Main Tab
     local MainTab = Window:CreateTab("Main", "sword")
     local Section1 = MainTab:CreateSection("Combat Settings")
-    
+
     local EnableToggle = MainTab:CreateToggle({
         Name = "Enable Combat",
         CurrentValue = false,
@@ -270,7 +304,6 @@ local function createGUI()
             if Value then
                 startHeartbeatLoop()
                 startCombatLoop()
-                print("Combat system started with heartbeat loop!")
             else
                 if heartbeatConnection then
                     heartbeatConnection:Disconnect()
@@ -280,11 +313,13 @@ local function createGUI()
                     combatConnection:Disconnect()
                     combatConnection = nil
                 end
-                print("Combat system stopped!")
+                -- Reset target state
+                currentTarget = nil
+                targetLocked = false
             end
         end,
     })
-    
+
     local TargetDropdown = MainTab:CreateDropdown({
         Name = "Target Type",
         Options = {"cultists", "cursed"},
@@ -292,18 +327,21 @@ local function createGUI()
         Flag = "TargetType",
         Callback = function(Options)
             combatSettings.targetType = Options[1]
+            -- Reset target khi đổi loại
+            currentTarget = nil
+            targetLocked = false
         end,
     })
-    
+
     local M1Toggle = MainTab:CreateToggle({
         Name = "Use M1", 
         CurrentValue = true,
         Flag = "UseM1",
         Callback = function(Value)
-            -- M1 luôn được dùng, chỉ để hiển thị
+            -- M1 luôn được dùng
         end,
     })
-    
+
     local EscapeSlider = MainTab:CreateSlider({
         Name = "Escape Height",
         Range = {10, 50},
@@ -315,25 +353,24 @@ local function createGUI()
             combatSettings.escapeHeight = Value
         end,
     })
-    
+
     -- Skills Tab
     local SkillsTab = Window:CreateTab("Skills", "zap")
     local Section2 = SkillsTab:CreateSection("Skill Selection")
-    
-    -- Tạo skills từ A+ đến Z+ và thêm MOUSEBUTTON2
+
     local skillKeys = {"MOUSEBUTTON2"}
     local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     for i = 1, #alphabet do
         local letter = alphabet:sub(i, i)
         table.insert(skillKeys, letter .. "+")
-        table.insert(skillKeys, letter) -- Thêm cả phím thường
+        table.insert(skillKeys, letter)
     end
-    
+
     for _, key in ipairs(skillKeys) do
         local isDefault = key == "B"
         local displayName = key == "MOUSEBUTTON2" and "M2" or "Skill " .. key
         local flagName = key:gsub("%+", "Plus"):gsub("MOUSEBUTTON2", "M2")
-        
+
         SkillsTab:CreateToggle({
             Name = displayName,
             CurrentValue = isDefault,
@@ -347,7 +384,6 @@ local function createGUI()
                     local index = table.find(combatSettings.selectedSkills, key)
                     if index then
                         table.remove(combatSettings.selectedSkills, index)
-                        -- Reset skill index nếu cần
                         if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
                             combatSettings.currentSkillIndex = 1
                         end
@@ -356,25 +392,26 @@ local function createGUI()
             end,
         })
     end
-    
+
     -- Info Tab
     local InfoTab = Window:CreateTab("Info", "info")
-    local Section3 = InfoTab:CreateSection("Current Target")
-    
+    local Section3 = InfoTab:CreateSection("Current Status")
+
     local TargetLabel = InfoTab:CreateLabel("Target: None")
-    
-    -- Status update (chỉ target)
+
+    -- Status update
     spawn(function()
         while wait(0.5) do
             if combatSettings.enabled then
-                TargetLabel:Set("Target: " .. (currentTarget and currentTarget.Name or "None"))
+                local targetName = currentTarget and currentTarget.Name or "None"
+                TargetLabel:Set("Target: " .. targetName)
             else
                 TargetLabel:Set("Target: None")
             end
         end
     end)
-    
-    -- Emergency stop button
+
+    -- Emergency stop
     MainTab:CreateButton({
         Name = "Emergency Stop",
         Callback = function()
@@ -387,7 +424,17 @@ local function createGUI()
                 combatConnection:Disconnect()
                 combatConnection = nil
             end
-            print("Emergency stop activated!")
+            currentTarget = nil
+            targetLocked = false
+        end,
+    })
+
+    -- Reset Target button
+    MainTab:CreateButton({
+        Name = "Reset Target",
+        Callback = function()
+            currentTarget = nil
+            targetLocked = false
         end,
     })
 end
@@ -405,4 +452,4 @@ localPlayer.CharacterAdded:Connect(function(character)
     end
 end)
 
-print("Auto Combat System loaded with Heartbeat Loop!")
+print("Auto Combat System loaded!")
