@@ -1,5 +1,5 @@
 -- Advanced Combat System with Rayfield GUI
--- Updated with improved teleportation mechanism
+-- Generated with enhanced combat mechanics
 
 -- Services
 local Players = game:GetService("Players")
@@ -41,6 +41,62 @@ local CombatSystem = {
     skillCooldowns = {},
     heartbeatConnection = nil
 }
+
+-- ==================== TELEPORT FUNCTIONS (GIỐNG NHƯ CỦA TÔI) ====================
+local teleportConnection = nil
+local lastTeleportTime = 0
+local teleportDelay = 0 -- Delay 0 giây
+
+-- Function để kiểm tra target có tồn tại và valid không
+local function isValidTarget(target)
+    return target and target:FindFirstChild("HumanoidRootPart") and target:FindFirstChild("Humanoid")
+end
+
+-- Function để kiểm tra target đã chết chưa
+local function isTargetDead(target)
+    local humanoid = target:FindFirstChild("Humanoid")
+    return humanoid and humanoid.Health <= 0
+end
+
+-- Function để teleport ra sau lưng target (GIỐNG CỦA TÔI)
+local function teleportBehindTarget(target)
+    if not CombatSystem.enabled or not isValidTarget(target) or isTargetDead(target) then return end
+    
+    local currentChar = Player.Character
+    if not currentChar or not currentChar:FindFirstChild("HumanoidRootPart") then return end
+    
+    local targetHRP = target.HumanoidRootPart
+    local behindPosition = targetHRP.CFrame * CFrame.new(0, 0, 3) -- 3 studs phía sau
+    
+    currentChar.HumanoidRootPart.CFrame = behindPosition
+end
+
+-- Function để teleport đến vị trí (GIỐNG CỦA TÔI)
+local function instantTP(position)
+    local currentChar = Player.Character
+    if currentChar and currentChar:FindFirstChild("HumanoidRootPart") then
+        currentChar.HumanoidRootPart.CFrame = CFrame.new(position)
+    end
+end
+
+-- Start/Stop teleport loop (GIỐNG CỦA TÔI)
+local function startTeleportLoop()
+    if teleportConnection then return end
+    
+    teleportConnection = RunService.Heartbeat:Connect(function()
+        if CombatSystem.enabled and CombatSystem.currentTarget then
+            teleportBehindTarget(CombatSystem.currentTarget)
+        end
+    end)
+end
+
+local function stopTeleportLoop()
+    if teleportConnection then
+        teleportConnection:Disconnect()
+        teleportConnection = nil
+    end
+end
+-- ==================== END TELEPORT FUNCTIONS ====================
 
 -- Status Check Functions using game modules
 local function getCooldown(character, skillName)
@@ -108,27 +164,6 @@ local function isOnCooldown(character, skillName)
     return getCooldown(character, skillName) ~= nil
 end
 
--- Improved Target Validation Functions (from second script)
-local function isValidTarget(target)
-    if not target or not target:IsA("Model") or not target.Parent then
-        return false
-    end
-    
-    local humanoidRootPart = target:FindFirstChild("HumanoidRootPart")
-    local humanoid = target:FindFirstChild("Humanoid")
-    
-    return humanoidRootPart and humanoid
-end
-
-local function isTargetDead(target)
-    if not isValidTarget(target) then
-        return true
-    end
-    
-    local humanoid = target:FindFirstChild("Humanoid")
-    return humanoid and humanoid.Health <= 0
-end
-
 -- Target Management
 local function findNearestEnemy()
     local nearestEnemy = nil
@@ -140,12 +175,28 @@ local function findNearestEnemy()
         local folder = workspace.Living:FindFirstChild(folderName)
         if folder then
             for _, enemy in pairs(folder:GetChildren()) do
-                -- Use improved validation
-                if isValidTarget(enemy) and not isTargetDead(enemy) then
-                    local distance = (RootPart.Position - enemy.HumanoidRootPart.Position).Magnitude
-                    if distance < shortestDistance then
-                        shortestDistance = distance
-                        nearestEnemy = enemy
+                -- Check if it's a model
+                if enemy:IsA("Model") and enemy.Parent then
+                    -- Check if enemy is alive (has Humanoid with health > 0, or just exists if no Humanoid)
+                    local humanoid = enemy:FindFirstChild("Humanoid")
+                    local isAlive = true
+                    
+                    if humanoid then
+                        isAlive = humanoid.Health > 0
+                    end
+                    
+                    if isAlive then
+                        local success, modelCFrame = pcall(function()
+                            return enemy:GetModelCFrame()
+                        end)
+                        
+                        if success and modelCFrame then
+                            local distance = (RootPart.Position - modelCFrame.Position).Magnitude
+                            if distance < shortestDistance then
+                                shortestDistance = distance
+                                nearestEnemy = enemy
+                            end
+                        end
                     end
                 end
             end
@@ -153,34 +204,6 @@ local function findNearestEnemy()
     end
     
     return nearestEnemy
-end
-
--- Improved Movement Functions (from second script approach)
-local function instantTP(position)
-    local currentChar = Player.Character
-    if currentChar and currentChar:FindFirstChild("HumanoidRootPart") then
-        currentChar.HumanoidRootPart.CFrame = CFrame.new(position)
-    end
-end
-
-local function teleportBehindTarget(target)
-    if not isValidTarget(target) or isTargetDead(target) then 
-        return false
-    end
-    
-    local targetHRP = target.HumanoidRootPart
-    local behindPosition = targetHRP.CFrame * CFrame.new(0, 1, 3) -- 3 studs behind, 1 stud up
-    
-    local currentChar = Player.Character
-    if currentChar and currentChar:FindFirstChild("HumanoidRootPart") then
-        currentChar.HumanoidRootPart.CFrame = behindPosition
-        return true
-    end
-    return false
-end
-
-local function moveToPosition(targetPos, instant)
-    instantTP(targetPos)
 end
 
 -- Combat Functions
@@ -208,7 +231,7 @@ local function useM2()
 end
 
 local function attackTarget(target)
-    if not isValidTarget(target) or isTargetDead(target) then
+    if not target or not target:IsA("Model") then
         return false
     end
     
@@ -217,15 +240,9 @@ local function attackTarget(target)
         return false
     end
     
-    -- Use improved teleportation - teleport behind target
-    if not teleportBehindTarget(target) then
-        return false
-    end
-    
-    -- Face the target
-    local targetPos = target.HumanoidRootPart.Position
-    local lookDirection = (targetPos - currentChar.HumanoidRootPart.Position).Unit
-    currentChar.HumanoidRootPart.CFrame = CFrame.lookAt(currentChar.HumanoidRootPart.Position, targetPos)
+    -- Face downward for hitbox optimization
+    local lookDirection = Vector3.new(0, -1, 0)
+    currentChar.HumanoidRootPart.CFrame = CFrame.lookAt(currentChar.HumanoidRootPart.Position, currentChar.HumanoidRootPart.Position + lookDirection)
     
     local actionTaken = false
     
@@ -291,7 +308,7 @@ local function escapeToSafety()
     instantTP(escapePos)
 end
 
--- Main Combat Loop - Improved with continuous teleportation
+-- Main Combat Loop
 local function combatLoop()
     if not CombatSystem.enabled then return end
     
@@ -315,18 +332,30 @@ local function combatLoop()
         CombatSystem.currentTarget = target
         CombatSystem.isInCombat = true
         
-        -- Continuously teleport behind target (like second script)
-        teleportBehindTarget(target)
-        
         -- Attack the target (returns true if any skill was used)
         local skillUsed = attackTarget(target)
         
-        -- Check if target is dead/destroyed using improved validation
-        if isTargetDead(target) then
+        -- Check if target is dead/destroyed
+        local targetStillExists = target and target.Parent
+        local targetDead = false
+        
+        if targetStillExists then
+            local humanoid = target:FindFirstChild("Humanoid")
+            if humanoid then
+                targetDead = humanoid.Health <= 0
+            end
+        else
+            targetDead = true -- Target was destroyed/removed
+        end
+        
+        -- If target is dead or doesn't exist, escape
+        if targetDead or not targetStillExists then
             escapeToSafety()
-        elseif not skillUsed then
-            -- If no skills were used (all on cooldown), just stay behind target
-            -- Don't escape, keep following the target
+            CombatSystem.currentTarget = nil
+        end
+        -- If no skills were used (all on cooldown), escape temporarily
+        if not skillUsed then
+            escapeToSafety()
         end
     else
         -- No target found, return to wait position
@@ -336,21 +365,6 @@ local function combatLoop()
         instantTP(waitPos)
     end
 end
-
--- Auto reconnect when character respawns (from second script)
-local function onCharacterAdded(newCharacter)
-    Character = newCharacter
-    RootPart = Character:WaitForChild("HumanoidRootPart")
-    Humanoid = Character:WaitForChild("Humanoid")
-    
-    -- Reconnect combat loop if it was running
-    if CombatSystem.enabled and not CombatSystem.heartbeatConnection then
-        CombatSystem.heartbeatConnection = RunService.Heartbeat:Connect(combatLoop)
-        print("Reconnected combat loop after character respawn")
-    end
-end
-
-Player.CharacterAdded:Connect(onCharacterAdded)
 
 -- Create Rayfield Window
 local Window = Rayfield:CreateWindow({
@@ -406,16 +420,16 @@ local EnableToggle = MainTab:CreateToggle({
         CombatSystem.enabled = Value
         
         if Value then
-            -- Start combat system with continuous heartbeat
+            -- Start combat system
             CombatSystem.heartbeatConnection = RunService.Heartbeat:Connect(combatLoop)
-            print("Combat system started with improved teleportation")
+            startTeleportLoop()
         else
             -- Stop combat system
             if CombatSystem.heartbeatConnection then
                 CombatSystem.heartbeatConnection:Disconnect()
                 CombatSystem.heartbeatConnection = nil
             end
-            print("Combat system stopped")
+            stopTeleportLoop()
         end
     end
 })
@@ -544,23 +558,10 @@ MainTab:CreateButton({
             CombatSystem.heartbeatConnection:Disconnect()
             CombatSystem.heartbeatConnection = nil
         end
+        stopTeleportLoop()
         EnableToggle:Set(false)
-        print("Emergency stop activated")
     end
 })
 
 -- Load Configuration
 Rayfield:LoadConfiguration()
-
--- Global reference for stopping (from second script)
-getgenv().stopCombatScript = function()
-    CombatSystem.enabled = false
-    if CombatSystem.heartbeatConnection then
-        CombatSystem.heartbeatConnection:Disconnect()
-        CombatSystem.heartbeatConnection = nil
-    end
-    print("Combat script stopped from console")
-end
-
-print("Advanced Combat System loaded with improved teleportation!")
-print("Use getgenv().stopCombatScript() to stop from console if needed")
