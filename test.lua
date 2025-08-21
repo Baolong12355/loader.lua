@@ -45,7 +45,6 @@ local combatConnection = nil
 local lastSkillTime = {}
 local currentSkillIndex = 1
 local lastSkillUse = 0
-local isM1Turn = false -- Track nếu đang lượt M1
 
 -- Helper Functions
 local function getTargetFromPath(path)
@@ -95,12 +94,7 @@ local function findRandomTarget()
 end
 
 local function getNextTarget()
-    -- Nếu target hiện tại vẫn sống, giữ nguyên
-    if currentTarget and isTargetAlive(currentTarget) then
-        return currentTarget
-    end
-    
-    -- Target chết rồi, tìm target mới
+    -- Luôn tìm target mới để đánh hết (không giữ target cũ)
     return findRandomTarget()
 end
 
@@ -223,33 +217,26 @@ local function startCombatLoop()
         -- Chỉ dùng skill khi đã đủ delay (tránh spam)
         if tick() - lastSkillUse < 0.3 then return end
         
-        -- Nếu đang lượt M1
-        if isM1Turn then
-            if not hasCooldown("MOUSEBUTTON1") then
-                useSkill("MOUSEBUTTON1")
-            else
-                -- M1 đã cooldown, chuyển sang skill tiếp theo
-                isM1Turn = false
-                if #combatSettings.selectedSkills > 0 then
-                    combatSettings.currentSkillIndex = combatSettings.currentSkillIndex + 1
-                    if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
-                        combatSettings.currentSkillIndex = 1
-                    end
-                end
-            end
-        else
-            -- Lượt skill
-            if #combatSettings.selectedSkills > 0 then
-                local skill = combatSettings.selectedSkills[combatSettings.currentSkillIndex]
-                useSkill(skill)
-                
-                -- Chuyển sang lượt M1
-                isM1Turn = true
-            else
-                -- Không có skill nào, chỉ dùng M1
-                isM1Turn = true
+        -- Logic đơn giản: Dùng 1 skill rồi dùng M1 cho đến cooldown
+        if #combatSettings.selectedSkills > 0 then
+            -- Dùng skill hiện tại
+            local skill = combatSettings.selectedSkills[combatSettings.currentSkillIndex]
+            useSkill(skill)
+            
+            -- Chuyển sang skill tiếp theo
+            combatSettings.currentSkillIndex = combatSettings.currentSkillIndex + 1
+            if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
+                combatSettings.currentSkillIndex = 1
             end
         end
+        
+        -- Dùng M1 cho đến khi cooldown
+        spawn(function()
+            while not hasCooldown("MOUSEBUTTON1") and combatSettings.enabled and isInCombat and not shouldEscape do
+                useSkill("MOUSEBUTTON1")
+                wait(0.05)
+            end
+        end)
     end)
 end
 
