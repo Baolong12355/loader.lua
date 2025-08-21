@@ -12,7 +12,6 @@ local FireInput = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Services.
 local combatSettings = {
     enabled = false,
     selectedSkills = {"B"},
-    waitPosition = Vector3.new(10291.4921875, 6204.5986328125, -255.45745849609375),
     escapeHeight = 30,
     targetType = "cultists",
     currentSkillIndex = 1
@@ -30,6 +29,11 @@ local targetLists = {
         "workspace.Living['Jujutsu Sorcerer']",
         "workspace.Living.Flyhead"
     }
+}
+
+local waitPositions = {
+    cultists = Vector3.new(10291.4921875, 6204.5986328125, -255.45745849609375),
+    cursed = Vector3.new(-240.7166290283203, 233.30340576171875, 417.1275939941406)
 }
 
 -- State Variables
@@ -183,7 +187,8 @@ local function startHeartbeatLoop()
         
         if not target then
             -- Không có target, về vị trí đợi
-            teleportToPosition(combatSettings.waitPosition)
+            local waitPos = waitPositions[combatSettings.targetType]
+            teleportToPosition(waitPos)
             isInCombat = false
             shouldEscape = false
             return
@@ -192,8 +197,25 @@ local function startHeartbeatLoop()
         currentTarget = target
         isInCombat = true
         
-        -- Check nếu bị stun hoặc ragdoll thì escape
+        -- Check escape conditions mỗi frame
         local needEscape = isStunned() or isRagdolled()
+        
+        -- Check nếu tất cả skills on cooldown
+        local allSkillsOnCooldown = true
+        for _, skill in ipairs(combatSettings.selectedSkills) do
+            if not hasCooldown(skill) then
+                allSkillsOnCooldown = false
+                break
+            end
+        end
+        
+        if combatSettings.useM1 and not hasCooldown("MOUSEBUTTON1") then
+            allSkillsOnCooldown = false
+        end
+        
+        if allSkillsOnCooldown then
+            needEscape = true
+        end
         
         -- Teleport logic mỗi frame
         if needEscape then
@@ -216,19 +238,20 @@ local function startCombatLoop()
         if not combatSettings.enabled or not isInCombat or shouldEscape then return end
         
         -- Chỉ dùng skill khi đã đủ delay (tránh spam)
-        if tick() - lastSkillUse < 0.5 then return end
+        if tick() - lastSkillUse < 0.3 then return end
         
         -- Nếu đang lượt M1
         if isM1Turn then
             if not hasCooldown("MOUSEBUTTON1") then
                 useSkill("MOUSEBUTTON1")
-                wait(0.05)
             else
                 -- M1 đã cooldown, chuyển sang skill tiếp theo
                 isM1Turn = false
-                combatSettings.currentSkillIndex = combatSettings.currentSkillIndex + 1
-                if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
-                    combatSettings.currentSkillIndex = 1
+                if #combatSettings.selectedSkills > 0 then
+                    combatSettings.currentSkillIndex = combatSettings.currentSkillIndex + 1
+                    if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
+                        combatSettings.currentSkillIndex = 1
+                    end
                 end
             end
         else
@@ -236,7 +259,6 @@ local function startCombatLoop()
             if #combatSettings.selectedSkills > 0 then
                 local skill = combatSettings.selectedSkills[combatSettings.currentSkillIndex]
                 useSkill(skill)
-                wait(0.1)
                 
                 -- Chuyển sang lượt M1
                 isM1Turn = true
@@ -303,11 +325,20 @@ local function createGUI()
     })
     
     local M1Toggle = MainTab:CreateToggle({
-        Name = "Use M1", 
+        Name = "Use M1",
         CurrentValue = true,
         Flag = "UseM1",
         Callback = function(Value)
-            -- M1 luôn được dùng, chỉ để hiển thị
+            combatSettings.useM1 = Value
+        end,
+    })
+    
+    local M2Toggle = MainTab:CreateToggle({
+        Name = "Use M2",
+        CurrentValue = false,
+        Flag = "UseM2",
+        Callback = function(Value)
+            combatSettings.useM2 = Value
         end,
     })
     
@@ -327,24 +358,13 @@ local function createGUI()
     local SkillsTab = Window:CreateTab("Skills", "zap")
     local Section2 = SkillsTab:CreateSection("Skill Selection")
     
-    -- Tạo skills từ A+ đến Z+ và thêm MOUSEBUTTON2
-    local skillKeys = {"MOUSEBUTTON2"}
-    local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    for i = 1, #alphabet do
-        local letter = alphabet:sub(i, i)
-        table.insert(skillKeys, letter .. "+")
-        table.insert(skillKeys, letter) -- Thêm cả phím thường
-    end
+    local skillKeys = {"Q", "E", "R", "T", "Y", "U", "F", "G", "H", "Z", "X", "C", "V", "B", "N", "M"}
     
     for _, key in ipairs(skillKeys) do
-        local isDefault = key == "B"
-        local displayName = key == "MOUSEBUTTON2" and "M2" or "Skill " .. key
-        local flagName = key:gsub("%+", "Plus"):gsub("MOUSEBUTTON2", "M2")
-        
         SkillsTab:CreateToggle({
-            Name = displayName,
-            CurrentValue = isDefault,
-            Flag = "Skill" .. flagName,
+            Name = "Skill " .. key,
+            CurrentValue = key == "B",
+            Flag = "Skill" .. key,
             Callback = function(Value)
                 if Value then
                     if not table.find(combatSettings.selectedSkills, key) then
@@ -354,10 +374,6 @@ local function createGUI()
                     local index = table.find(combatSettings.selectedSkills, key)
                     if index then
                         table.remove(combatSettings.selectedSkills, index)
-                        -- Reset skill index nếu cần
-                        if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
-                            combatSettings.currentSkillIndex = 1
-                        end
                     end
                 end
             end,
@@ -412,4 +428,19 @@ localPlayer.CharacterAdded:Connect(function(character)
     end
 end)
 
+-- Stop function for console
+getgenv().stopCombat = function()
+    combatSettings.enabled = false
+    if heartbeatConnection then
+        heartbeatConnection:Disconnect()
+        heartbeatConnection = nil
+    end
+    if combatConnection then
+        combatConnection:Disconnect()
+        combatConnection = nil
+    end
+    print("Combat system stopped from console!")
+end
+
 print("Auto Combat System loaded with Heartbeat Loop!")
+print("Use getgenv().stopCombat() to stop from console")
