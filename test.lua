@@ -90,6 +90,16 @@ local function findRandomTarget()
     return nil
 end
 
+local function getNextTarget()
+    -- Nếu target hiện tại vẫn sống, giữ nguyên
+    if currentTarget and isTargetAlive(currentTarget) then
+        return currentTarget
+    end
+    
+    -- Target chết rồi, tìm target mới
+    return findRandomTarget()
+end
+
 local function isStunned()
     local character = localPlayer.Character
     if not character then return false end
@@ -168,8 +178,8 @@ local function startHeartbeatLoop()
         local character = localPlayer.Character
         if not character or not character:FindFirstChild("HumanoidRootPart") then return end
         
-        -- Tìm target mỗi frame
-        local target = findRandomTarget()
+        -- Tìm target mỗi frame (chỉ đổi khi target hiện tại chết)
+        local target = getNextTarget()
         
         if not target then
             -- Không có target, về vị trí đợi
@@ -356,33 +366,17 @@ local function createGUI()
     
     -- Info Tab
     local InfoTab = Window:CreateTab("Info", "info")
-    local Section3 = InfoTab:CreateSection("Current Status")
+    local Section3 = InfoTab:CreateSection("Current Target")
     
-    local StatusLabel = InfoTab:CreateLabel("Status: Disabled")
     local TargetLabel = InfoTab:CreateLabel("Target: None")
-    local StateLabel = InfoTab:CreateLabel("State: Idle")
     
-    -- Status update
+    -- Status update (chỉ target)
     spawn(function()
         while wait(0.5) do
             if combatSettings.enabled then
-                local status = isInCombat and "In Combat" or "Waiting"
-                StatusLabel:Set("Status: " .. status)
                 TargetLabel:Set("Target: " .. (currentTarget and currentTarget.Name or "None"))
-                
-                local state = "Normal"
-                if shouldEscape then
-                    state = "Escaping"
-                elseif isStunned() then
-                    state = "Stunned"
-                elseif isRagdolled() then
-                    state = "Ragdolled"
-                end
-                StateLabel:Set("State: " .. state)
             else
-                StatusLabel:Set("Status: Disabled")
                 TargetLabel:Set("Target: None")
-                StateLabel:Set("State: Idle")
             end
         end
     end)
