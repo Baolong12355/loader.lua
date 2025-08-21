@@ -252,7 +252,7 @@ local function startCombatLoop()
         if not combatSettings.enabled or not isInCombat or shouldEscape then return end
 
         -- Chỉ dùng skill khi đã đủ delay
-        if tick() - lastSkillUse < 0.3 then return end
+        if tick() - lastSkillUse < 0.1 then return end
 
         -- Logic skill
         if #combatSettings.selectedSkills > 0 then
