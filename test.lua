@@ -30,7 +30,7 @@ local CombatSystem = {
     enabled = false,
     currentTarget = nil,
     waitPositionCultists = Vector3.new(10291.4921875, 6204.5986328125, -255.45745849609375),
-    waitPositionCursed = Vector3.new(-543.8663330078125, 118.04730224609375, -278.4595031738281),
+    waitPositionCursed = Vector3.new(-240.7166290283203, 233.30340576171875, 417.1275939941406),
     targetFolders = {"Assailant", "Conjurer", "Roppongi Curse", "Mantis Curse", "Jujutsu Sorcerer", "Flyhead"},
     selectedSkills = {},
     selectedPlusSkills = {}, -- For skills with +
@@ -298,7 +298,7 @@ end
 
 local function escapeToSafety()
     local escapePos = RootPart.Position + Vector3.new(0, 10, 0)
-    moveToPosition(escapePos, true)
+    instantTP(escapePos)
 end
 
 -- Main Combat Loop
@@ -325,6 +325,17 @@ local function combatLoop()
         CombatSystem.currentTarget = target
         CombatSystem.isInCombat = true
         
+        -- ALWAYS ensure we're at the correct attack position
+        local success, modelCFrame = pcall(function()
+            return target:GetModelCFrame()
+        end)
+        
+        if success and modelCFrame then
+            local targetPos = modelCFrame.Position
+            local attackPos = targetPos + Vector3.new(0, 1, 0) -- 1 stud above target
+            instantTP(attackPos) -- Force position every loop
+        end
+        
         -- Attack the target (returns true if any skill was used)
         local skillUsed = attackTarget(target)
         
@@ -350,11 +361,11 @@ local function combatLoop()
             escapeToSafety()
         end
     else
-        -- No target found, return to wait position
+        -- No target found, ALWAYS return to exact wait position
         CombatSystem.isInCombat = false
         CombatSystem.currentTarget = nil
         local waitPos = CombatSystem.farmMode == "Cultists" and CombatSystem.waitPositionCultists or CombatSystem.waitPositionCursed
-        instantTP(waitPos)
+        instantTP(waitPos) -- Force position every loop when no target
     end
 end
 
