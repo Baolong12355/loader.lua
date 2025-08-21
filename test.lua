@@ -1,5 +1,5 @@
--- Advanced Combat System with Rayfield GUI
--- Generated with enhanced combat mechanics
+-- Advanced Combat System with Rayfield GUI and Enemy Anchoring
+-- Enhanced with target anchoring system
 
 -- Services
 local Players = game:GetService("Players")
@@ -40,7 +40,14 @@ local CombatSystem = {
     lastM2Time = 0,
     skillCooldowns = {},
     heartbeatConnection = nil,
-    antiFlingEnabled = true
+    
+    -- NEW: Anchoring System
+    anchorEnabled = false,
+    anchorConnection = nil,
+    anchorOffset = Vector3.new(0, 1, 0), -- Default: 1 stud above target
+    anchorDistance = 5, -- Maximum distance to maintain anchor
+    lockRotation = true, -- Lock rotation to face target
+    anchorMode = "above" -- "above", "behind", "side", "custom"
 }
 
 -- Status Check Functions using game modules
@@ -109,6 +116,76 @@ local function isOnCooldown(character, skillName)
     return getCooldown(character, skillName) ~= nil
 end
 
+-- NEW: Anchoring System Functions
+local function getAnchorOffset(mode, targetRootPart)
+    local offset = Vector3.new(0, 1, 0)
+    
+    if mode == "above" then
+        offset = Vector3.new(0, 3, 0)
+    elseif mode == "behind" then
+        local lookDirection = targetRootPart.CFrame.LookVector
+        offset = -lookDirection * 3 + Vector3.new(0, 1, 0)
+    elseif mode == "side" then
+        local rightDirection = targetRootPart.CFrame.RightVector
+        offset = rightDirection * 3 + Vector3.new(0, 1, 0)
+    elseif mode == "custom" then
+        offset = CombatSystem.anchorOffset
+    end
+    
+    return offset
+end
+
+local function startAnchoring(target)
+    if CombatSystem.anchorConnection then
+        CombatSystem.anchorConnection:Disconnect()
+    end
+    
+    CombatSystem.anchorConnection = RunService.Heartbeat:Connect(function()
+        if not target or not target.Parent then
+            stopAnchoring()
+            return
+        end
+        
+        local currentChar = Player.Character
+        if not currentChar or not currentChar:FindFirstChild("HumanoidRootPart") then
+            return
+        end
+        
+        local targetRootPart = target.PrimaryPart or target:FindFirstChild("HumanoidRootPart") or target:FindFirstChild("Torso") or target:FindFirstChild("UpperTorso")
+        if not targetRootPart then
+            return
+        end
+        
+        -- Calculate anchor position
+        local offset = getAnchorOffset(CombatSystem.anchorMode, targetRootPart)
+        local anchorPosition = targetRootPart.Position + offset
+        
+        -- Check if we need to reposition
+        local currentPosition = currentChar.HumanoidRootPart.Position
+        local distance = (currentPosition - anchorPosition).Magnitude
+        
+        if distance > CombatSystem.anchorDistance or distance < 1 then
+            currentChar.HumanoidRootPart.CFrame = CFrame.new(anchorPosition)
+        end
+        
+        -- Lock rotation to face target if enabled
+        if CombatSystem.lockRotation then
+            local lookDirection = (targetRootPart.Position - currentChar.HumanoidRootPart.Position).Unit
+            if CombatSystem.anchorMode == "above" then
+                lookDirection = Vector3.new(0, -1, 0) -- Look down when above
+            end
+            currentChar.HumanoidRootPart.CFrame = CFrame.lookAt(currentChar.HumanoidRootPart.Position, currentChar.HumanoidRootPart.Position + lookDirection)
+        end
+    end)
+end
+
+local function stopAnchoring()
+    if CombatSystem.anchorConnection then
+        CombatSystem.anchorConnection:Disconnect()
+        CombatSystem.anchorConnection = nil
+    end
+end
+
 -- Target Management
 local function findNearestEnemy()
     local nearestEnemy = nil
@@ -165,19 +242,7 @@ local function startTeleportLoop()
             
             local currentChar = Player.Character
             if currentChar and currentChar:FindFirstChild("HumanoidRootPart") then
-                -- Anti-fling before teleport
-                setAntiVelocity(currentChar)
-                
-                -- Teleport
                 currentChar.HumanoidRootPart.CFrame = CFrame.new(targetPosition)
-                
-                -- Anti-fling after teleport
-                setAntiVelocity(currentChar)
-                
-                -- Anchor briefly to prevent physics issues
-                currentChar.HumanoidRootPart.Anchored = true
-                wait() -- Very brief anchor
-                currentChar.HumanoidRootPart.Anchored = false
             end
         end
     end)
@@ -192,12 +257,17 @@ local function stopTeleportLoop()
 end
 
 local function instantTP(position)
-    table.insert(teleportQueue, position)
-    startTeleportLoop()
+    -- Don't queue teleport if anchoring is active
+    if not CombatSystem.anchorConnection then
+        table.insert(teleportQueue, position)
+        startTeleportLoop()
+    end
 end
 
 local function moveToPosition(targetPos, instant)
-    instantTP(targetPos) -- Always use instant TP with heartbeat loop
+    if not CombatSystem.anchorConnection then
+        instantTP(targetPos) -- Only move if not anchored
+    end
 end
 
 -- Combat Functions
@@ -224,25 +294,6 @@ local function useM2()
     return useSkill("MOUSEBUTTON2")
 end
 
--- Anti-fling function
-local function setAntiVelocity(character)
-    if not character then return end
-    
-    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-    if not humanoidRootPart then return end
-    
-    -- Set velocity to zero to prevent fling
-    if humanoidRootPart.Velocity.Magnitude > 0 then -- Only if moving too fast
-        humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
-        humanoidRootPart.AngularVelocity = Vector3.new(0, 0, 0)
-    end
-    
-    -- Set network ownership to prevent desync
-    pcall(function()
-        humanoidRootPart:SetNetworkOwner(Player)
-    end)
-end
-
 local function attackTarget(target)
     if not target or not target:IsA("Model") then
         return false
@@ -259,15 +310,23 @@ local function attackTarget(target)
         return false
     end
     
-    local targetPos = targetRootPart.Position
-    local attackPos = targetPos + Vector3.new(0, 1, 0) -- 1 stud above target
+    -- Start anchoring if enabled
+    if CombatSystem.anchorEnabled and not CombatSystem.anchorConnection then
+        startAnchoring(target)
+    end
     
-    -- Move to attack position
-    moveToPosition(attackPos, true)
-    
-    -- Face downward for hitbox optimization
-    local lookDirection = Vector3.new(0, -1, 0)
-    currentChar.HumanoidRootPart.CFrame = CFrame.lookAt(currentChar.HumanoidRootPart.Position, currentChar.HumanoidRootPart.Position + lookDirection)
+    -- If not anchored, move to attack position
+    if not CombatSystem.anchorConnection then
+        local targetPos = targetRootPart.Position
+        local attackPos = targetPos + Vector3.new(0, 1, 0) -- 1 stud above target
+        
+        -- Move to attack position
+        moveToPosition(attackPos, true)
+        
+        -- Face downward for hitbox optimization
+        local lookDirection = Vector3.new(0, -1, 0)
+        currentChar.HumanoidRootPart.CFrame = CFrame.lookAt(currentChar.HumanoidRootPart.Position, currentChar.HumanoidRootPart.Position + lookDirection)
+    end
     
     local actionTaken = false
     
@@ -329,6 +388,7 @@ local function attackTarget(target)
 end
 
 local function escapeToSafety()
+    stopAnchoring() -- Stop anchoring when escaping
     local escapePos = RootPart.Position + Vector3.new(0, 10, 0)
     instantTP(escapePos)
 end
@@ -344,9 +404,6 @@ local function combatLoop()
     RootPart = Character:FindFirstChild("HumanoidRootPart")
     if not RootPart then return end
     
-    -- Apply anti-fling every frame
-    setAntiVelocity(Character)
-    
     -- Check for escape conditions
     if isRagdolled(Character) or isStunned(Character) then
         escapeToSafety()
@@ -359,17 +416,6 @@ local function combatLoop()
     if target then
         CombatSystem.currentTarget = target
         CombatSystem.isInCombat = true
-        
-        -- ALWAYS ensure we're at the correct attack position
-        local success, modelCFrame = pcall(function()
-            return target:GetModelCFrame()
-        end)
-        
-        if success and modelCFrame then
-            local targetPos = modelCFrame.Position
-            local attackPos = targetPos + Vector3.new(0, 1, 0) -- 1 stud above target
-            instantTP(attackPos) -- Force position every loop
-        end
         
         -- Attack the target (returns true if any skill was used)
         local skillUsed = attackTarget(target)
@@ -391,12 +437,13 @@ local function combatLoop()
         if targetDead or not targetStillExists then
             escapeToSafety()
         end
-        -- If no skills were used (all on cooldown), escape temporarily
-        if not skillUsed then
+        -- If no skills were used (all on cooldown), escape temporarily only if not anchored
+        if not skillUsed and not CombatSystem.anchorConnection then
             escapeToSafety()
         end
     else
-        -- No target found, ALWAYS return to exact wait position
+        -- No target found, stop anchoring and return to wait position
+        stopAnchoring()
         CombatSystem.isInCombat = false
         CombatSystem.currentTarget = nil
         local waitPos = CombatSystem.farmMode == "Cultists" and CombatSystem.waitPositionCultists or CombatSystem.waitPositionCursed
@@ -406,7 +453,7 @@ end
 
 -- Create Rayfield Window
 local Window = Rayfield:CreateWindow({
-    Name = "Advanced Combat System",
+    Name = "Advanced Combat System with Anchoring",
     Icon = 0,
     LoadingTitle = "Combat System Interface",
     LoadingSubtitle = "by Advanced Scripts",
@@ -436,9 +483,10 @@ local Window = Rayfield:CreateWindow({
 -- Create Tabs
 local MainTab = Window:CreateTab("Main Controls", "zap")
 local SkillTab = Window:CreateTab("Skill Selection", "settings")
+local AnchorTab = Window:CreateTab("Anchoring System", "anchor") -- NEW TAB
 local StatusTab = Window:CreateTab("Status Monitor", "activity")
 
-        -- Main Controls
+-- Main Controls
 local FarmModeDropdown = MainTab:CreateDropdown({
     Name = "Farm Mode",
     Options = {"Cultists","Cursed"},
@@ -447,15 +495,6 @@ local FarmModeDropdown = MainTab:CreateDropdown({
     Flag = "FarmMode",
     Callback = function(Options)
         CombatSystem.farmMode = Options[1]
-    end
-})
-
-local AntiFlingToggle = MainTab:CreateToggle({
-    Name = "Anti-Fling Protection",
-    CurrentValue = true,
-    Flag = "AntiFling",
-    Callback = function(Value)
-        CombatSystem.antiFlingEnabled = Value
     end
 })
 
@@ -477,13 +516,128 @@ local EnableToggle = MainTab:CreateToggle({
                 CombatSystem.heartbeatConnection = nil
             end
             stopTeleportLoop()
+            stopAnchoring()
         end
     end
 })
 
+-- NEW: Anchoring Controls Tab
+local AnchorSection = AnchorTab:CreateSection("Anchor Settings")
+
+local AnchorToggle = AnchorTab:CreateToggle({
+    Name = "Enable Target Anchoring",
+    CurrentValue = false,
+    Flag = "EnableAnchor",
+    Callback = function(Value)
+        CombatSystem.anchorEnabled = Value
+        if not Value then
+            stopAnchoring()
+        end
+    end
+})
+
+local AnchorModeDropdown = AnchorTab:CreateDropdown({
+    Name = "Anchor Position Mode",
+    Options = {"above", "behind", "side", "custom"},
+    CurrentOption = {"above"},
+    MultipleOptions = false,
+    Flag = "AnchorMode",
+    Callback = function(Options)
+        CombatSystem.anchorMode = Options[1]
+    end
+})
+
+local LockRotationToggle = AnchorTab:CreateToggle({
+    Name = "Lock Rotation to Target",
+    CurrentValue = true,
+    Flag = "LockRotation",
+    Callback = function(Value)
+        CombatSystem.lockRotation = Value
+    end
+})
+
+local AnchorDistanceSlider = AnchorTab:CreateSlider({
+    Name = "Anchor Distance",
+    Range = {1, 10},
+    Increment = 0.5,
+    Suffix = " studs",
+    CurrentValue = 5,
+    Flag = "AnchorDistance",
+    Callback = function(Value)
+        CombatSystem.anchorDistance = Value
+    end
+})
+
+-- Custom Anchor Offset Controls
+local CustomSection = AnchorTab:CreateSection("Custom Anchor Offset (when mode = custom)")
+
+local CustomXSlider = AnchorTab:CreateSlider({
+    Name = "X Offset",
+    Range = {-10, 10},
+    Increment = 0.5,
+    Suffix = " studs",
+    CurrentValue = 0,
+    Flag = "CustomX",
+    Callback = function(Value)
+        CombatSystem.anchorOffset = Vector3.new(Value, CombatSystem.anchorOffset.Y, CombatSystem.anchorOffset.Z)
+    end
+})
+
+local CustomYSlider = AnchorTab:CreateSlider({
+    Name = "Y Offset",
+    Range = {-10, 10},
+    Increment = 0.5,
+    Suffix = " studs",
+    CurrentValue = 1,
+    Flag = "CustomY",
+    Callback = function(Value)
+        CombatSystem.anchorOffset = Vector3.new(CombatSystem.anchorOffset.X, Value, CombatSystem.anchorOffset.Z)
+    end
+})
+
+local CustomZSlider = AnchorTab:CreateSlider({
+    Name = "Z Offset",
+    Range = {-10, 10},
+    Increment = 0.5,
+    Suffix = " studs",
+    CurrentValue = 0,
+    Flag = "CustomZ",
+    Callback = function(Value)
+        CombatSystem.anchorOffset = Vector3.new(CombatSystem.anchorOffset.X, CombatSystem.anchorOffset.Y, Value)
+    end
+})
+
+-- Anchor Control Buttons
+local AnchorControlSection = AnchorTab:CreateSection("Anchor Controls")
+
+local StartAnchorButton = AnchorTab:CreateButton({
+    Name = "Start Anchoring to Current Target",
+    Callback = function()
+        if CombatSystem.currentTarget then
+            startAnchoring(CombatSystem.currentTarget)
+        else
+            -- Find and anchor to nearest enemy
+            local target = findNearestEnemy()
+            if target then
+                CombatSystem.currentTarget = target
+                startAnchoring(target)
+            end
+        end
+    end
+})
+
+local StopAnchorButton = AnchorTab:CreateButton({
+    Name = "Stop Anchoring",
+    Callback = function()
+        stopAnchoring()
+    end
+})
+
+-- Continue with rest of original code...
 local WaitPosButton = MainTab:CreateButton({
     Name = "Teleport to Wait Position",
     Callback = function()
+        stopAnchoring() -- Stop anchoring when manually moving
         local waitPos = CombatSystem.farmMode == "Cultists" and CombatSystem.waitPositionCultists or CombatSystem.waitPositionCursed
         instantTP(waitPos)
     end
@@ -556,6 +710,7 @@ local StatusLabel = StatusTab:CreateLabel("Status: Idle", "info")
 local TargetLabel = StatusTab:CreateLabel("Target: None", "crosshair")
 local HealthLabel = StatusTab:CreateLabel("Health: 100%", "heart")
 local CooldownLabel = StatusTab:CreateLabel("Cooldowns: None", "clock")
+local AnchorStatusLabel = StatusTab:CreateLabel("Anchor: Inactive", "anchor") -- NEW STATUS
 
 -- Status Update Loop
 RunService.Heartbeat:Connect(function()
@@ -593,6 +748,10 @@ RunService.Heartbeat:Connect(function()
         end
         local cooldownText = #cooldowns > 0 and table.concat(cooldowns, ", ") or "None"
         CooldownLabel:Set("Cooldowns: " .. cooldownText, "clock")
+        
+        -- Update anchor status
+        local anchorStatus = CombatSystem.anchorConnection and "Active (" .. CombatSystem.anchorMode .. ")" or "Inactive"
+        AnchorStatusLabel:Set("Anchor: " .. anchorStatus, "anchor")
     end
 end)
 
@@ -606,6 +765,7 @@ MainTab:CreateButton({
             CombatSystem.heartbeatConnection = nil
         end
         stopTeleportLoop()
+        stopAnchoring()
         EnableToggle:Set(false)
     end
 })
