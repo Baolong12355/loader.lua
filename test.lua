@@ -215,7 +215,7 @@ local function startHeartbeatLoop()
             teleportToPosition(waitPos)
             
             -- Đợi enemy respawn (non-blocking)
-            if tick() - lastTargetCheck > 0.1 then -- Check mỗi 0.1 giây
+            if tick() - lastTargetCheck > 0.01 then -- Check mỗi 0.1 giây
                 lastTargetCheck = tick()
                 spawn(function()
                     waitForEnemyRespawn()
