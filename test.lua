@@ -41,6 +41,7 @@ local CombatSystem = {
     skillCooldowns = {},
     heartbeatConnection = nil,
     currentTween = nil,
+    tweenSpeed = 0,
     tweenQueue = {},
     tweenConnection = nil
 }
@@ -255,18 +256,35 @@ local function escapeToSafety()
     fastTween(escapePos)
 end
 
--- Main Combat Loop with Instant TP
+-- Main Combat Loop with Super Fast Tween (Near Instant)
 local function combatLoop()
     if not CombatSystem.enabled then return end
     
-    -- Handle TP Queue First (NO DELAY - INSTANT)
+    -- Handle Tween Queue First (NEAR INSTANT TWEEN)
     if #CombatSystem.tweenQueue > 0 then
         local targetPosition = CombatSystem.tweenQueue[#CombatSystem.tweenQueue]
         CombatSystem.tweenQueue = {}
         
         local currentChar = Player.Character
         if currentChar and currentChar:FindFirstChild("HumanoidRootPart") then
-            currentChar.HumanoidRootPart.CFrame = CFrame.new(targetPosition)
+            if CombatSystem.currentTween then
+                CombatSystem.currentTween:Cancel()
+            end
+            
+            local tweenInfo = TweenInfo.new(
+                CombatSystem.tweenSpeed,
+                Enum.EasingStyle.Linear,
+                Enum.EasingDirection.InOut,
+                0, false, 0
+            )
+            
+            CombatSystem.currentTween = TweenService:Create(
+                currentChar.HumanoidRootPart,
+                tweenInfo,
+                {CFrame = CFrame.new(targetPosition)}
+            )
+            
+            CombatSystem.currentTween:Play()
         end
     end
     
