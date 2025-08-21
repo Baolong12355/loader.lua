@@ -12,11 +12,10 @@ local FireInput = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Services.
 local combatSettings = {
     enabled = false,
     selectedSkills = {"B"},
-    useM1 = true,
-    useM2 = false,
     waitPosition = Vector3.new(10291.4921875, 6204.5986328125, -255.45745849609375),
-    escapeHeight = 10,
-    targetType = "cultists"
+    escapeHeight = 30,
+    targetType = "cultists",
+    currentSkillIndex = 1
 }
 
 -- Target Lists
@@ -151,8 +150,6 @@ local function escapeToHeight(target)
 end
 
 local function useSkill(skillKey)
-    if hasCooldown(skillKey) then return false end
-    
     local success = pcall(function()
         FireInput:InvokeServer(skillKey)
     end)
@@ -233,28 +230,24 @@ local function startCombatLoop()
         if not combatSettings.enabled or not isInCombat or shouldEscape then return end
         
         -- Chỉ dùng skill khi đã đủ delay (tránh spam)
-        if tick() - lastSkillUse < 0.1 then return end
+        if tick() - lastSkillUse < 0.5 then return end
         
-        -- Thử dùng skills theo thứ tự
-        local skillUsed = false
-        for _, skill in ipairs(combatSettings.selectedSkills) do
-            if not hasCooldown(skill) then
-                if useSkill(skill) then
-                    skillUsed = true
-                    break
-                end
+        -- Dùng 1 skill theo thứ tự
+        if #combatSettings.selectedSkills > 0 then
+            local skill = combatSettings.selectedSkills[combatSettings.currentSkillIndex]
+            useSkill(skill)
+            
+            -- Chuyển sang skill tiếp theo
+            combatSettings.currentSkillIndex = combatSettings.currentSkillIndex + 1
+            if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
+                combatSettings.currentSkillIndex = 1
             end
+            
+            wait(0.1)
         end
         
-        -- Nếu không skill nào dùng được, dùng M1
-        if not skillUsed and combatSettings.useM1 and not hasCooldown("MOUSEBUTTON1") then
-            useSkill("MOUSEBUTTON1")
-        end
-        
-        -- Nếu M2 enabled và không có gì khác dùng được
-        if not skillUsed and combatSettings.useM2 and not hasCooldown("MOUSEBUTTON2") then
-            useSkill("MOUSEBUTTON2")
-        end
+        -- Sau đó dùng M1
+        useSkill("MOUSEBUTTON1")
     end)
 end
 
@@ -332,10 +325,10 @@ local function createGUI()
     
     local EscapeSlider = MainTab:CreateSlider({
         Name = "Escape Height",
-        Range = {5, 20},
-        Increment = 1,
+        Range = {10, 50},
+        Increment = 5,
         Suffix = "studs",
-        CurrentValue = 10,
+        CurrentValue = 30,
         Flag = "EscapeHeight",
         Callback = function(Value)
             combatSettings.escapeHeight = Value
