@@ -215,7 +215,7 @@ local function startHeartbeatLoop()
             teleportToPosition(waitPos)
             
             -- Đợi enemy respawn (non-blocking)
-            if tick() - lastTargetCheck > 0.01 then -- Check mỗi 0.1 giây
+            if tick() - lastTargetCheck > 0.1 then -- Check mỗi 0.1 giây
                 lastTargetCheck = tick()
                 spawn(function()
                     waitForEnemyRespawn()
@@ -330,15 +330,6 @@ local function createGUI()
             -- Reset target khi đổi loại
             currentTarget = nil
             targetLocked = false
-        end,
-    })
-
-    local M1Toggle = MainTab:CreateToggle({
-        Name = "Use M1", 
-        CurrentValue = true,
-        Flag = "UseM1",
-        Callback = function(Value)
-            -- M1 luôn được dùng
         end,
     })
 
