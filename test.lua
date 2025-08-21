@@ -1,5 +1,5 @@
--- Advanced Combat System with Rayfield GUI and Enemy Anchoring
--- Enhanced with target anchoring system
+-- Advanced Combat System with Rayfield GUI and Humanoid Lock
+-- Generated with enhanced combat mechanics
 
 -- Services
 local Players = game:GetService("Players")
@@ -39,15 +39,7 @@ local CombatSystem = {
     lastM1Time = 0,
     lastM2Time = 0,
     skillCooldowns = {},
-    heartbeatConnection = nil,
-    
-    -- NEW: Anchoring System
-    anchorEnabled = false,
-    anchorConnection = nil,
-    anchorOffset = Vector3.new(0, 1, 0), -- Default: 1 stud above target
-    anchorDistance = 5, -- Maximum distance to maintain anchor
-    lockRotation = true, -- Lock rotation to face target
-    anchorMode = "above" -- "above", "behind", "side", "custom"
+    heartbeatConnection = nil
 }
 
 -- Status Check Functions using game modules
@@ -114,76 +106,6 @@ end
 
 local function isOnCooldown(character, skillName)
     return getCooldown(character, skillName) ~= nil
-end
-
--- NEW: Anchoring System Functions
-local function getAnchorOffset(mode, targetRootPart)
-    local offset = Vector3.new(0, 1, 0)
-    
-    if mode == "above" then
-        offset = Vector3.new(0, 3, 0)
-    elseif mode == "behind" then
-        local lookDirection = targetRootPart.CFrame.LookVector
-        offset = -lookDirection * 3 + Vector3.new(0, 1, 0)
-    elseif mode == "side" then
-        local rightDirection = targetRootPart.CFrame.RightVector
-        offset = rightDirection * 3 + Vector3.new(0, 1, 0)
-    elseif mode == "custom" then
-        offset = CombatSystem.anchorOffset
-    end
-    
-    return offset
-end
-
-local function startAnchoring(target)
-    if CombatSystem.anchorConnection then
-        CombatSystem.anchorConnection:Disconnect()
-    end
-    
-    CombatSystem.anchorConnection = RunService.Heartbeat:Connect(function()
-        if not target or not target.Parent then
-            stopAnchoring()
-            return
-        end
-        
-        local currentChar = Player.Character
-        if not currentChar or not currentChar:FindFirstChild("HumanoidRootPart") then
-            return
-        end
-        
-        local targetRootPart = target.PrimaryPart or target:FindFirstChild("HumanoidRootPart") or target:FindFirstChild("Torso") or target:FindFirstChild("UpperTorso")
-        if not targetRootPart then
-            return
-        end
-        
-        -- Calculate anchor position
-        local offset = getAnchorOffset(CombatSystem.anchorMode, targetRootPart)
-        local anchorPosition = targetRootPart.Position + offset
-        
-        -- Check if we need to reposition
-        local currentPosition = currentChar.HumanoidRootPart.Position
-        local distance = (currentPosition - anchorPosition).Magnitude
-        
-        if distance > CombatSystem.anchorDistance or distance < 1 then
-            currentChar.HumanoidRootPart.CFrame = CFrame.new(anchorPosition)
-        end
-        
-        -- Lock rotation to face target if enabled
-        if CombatSystem.lockRotation then
-            local lookDirection = (targetRootPart.Position - currentChar.HumanoidRootPart.Position).Unit
-            if CombatSystem.anchorMode == "above" then
-                lookDirection = Vector3.new(0, -1, 0) -- Look down when above
-            end
-            currentChar.HumanoidRootPart.CFrame = CFrame.lookAt(currentChar.HumanoidRootPart.Position, currentChar.HumanoidRootPart.Position + lookDirection)
-        end
-    end)
-end
-
-local function stopAnchoring()
-    if CombatSystem.anchorConnection then
-        CombatSystem.anchorConnection:Disconnect()
-        CombatSystem.anchorConnection = nil
-    end
 end
 
 -- Target Management
@@ -257,17 +179,12 @@ local function stopTeleportLoop()
 end
 
 local function instantTP(position)
-    -- Don't queue teleport if anchoring is active
-    if not CombatSystem.anchorConnection then
-        table.insert(teleportQueue, position)
-        startTeleportLoop()
-    end
+    table.insert(teleportQueue, position)
+    startTeleportLoop()
 end
 
 local function moveToPosition(targetPos, instant)
-    if not CombatSystem.anchorConnection then
-        instantTP(targetPos) -- Only move if not anchored
-    end
+    instantTP(targetPos) -- Always use instant TP with heartbeat loop
 end
 
 -- Combat Functions
@@ -294,14 +211,17 @@ local function useM2()
     return useSkill("MOUSEBUTTON2")
 end
 
+-- Updated attackTarget function with Humanoid Lock
 local function attackTarget(target)
     if not target or not target:IsA("Model") then
         return false
     end
     
-    -- Find the root part of the target
+    -- Lock vào Humanoid của target
+    local targetHumanoid = target:FindFirstChild("Humanoid")
     local targetRootPart = target.PrimaryPart or target:FindFirstChild("HumanoidRootPart") or target:FindFirstChild("Torso") or target:FindFirstChild("UpperTorso")
-    if not targetRootPart then
+    
+    if not targetHumanoid or not targetRootPart then
         return false
     end
     
@@ -310,51 +230,64 @@ local function attackTarget(target)
         return false
     end
     
-    -- Start anchoring if enabled
-    if CombatSystem.anchorEnabled and not CombatSystem.anchorConnection then
-        startAnchoring(target)
+    -- Lock humanoid để tự động theo target
+    if currentChar:FindFirstChild("Humanoid") then
+        currentChar.Humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+        currentChar.Humanoid.PlatformStand = true
     end
     
-    -- If not anchored, move to attack position
-    if not CombatSystem.anchorConnection then
-        local targetPos = targetRootPart.Position
-        local attackPos = targetPos + Vector3.new(0, 1, 0) -- 1 stud above target
-        
-        -- Move to attack position
-        moveToPosition(attackPos, true)
-        
-        -- Face downward for hitbox optimization
-        local lookDirection = Vector3.new(0, -1, 0)
-        currentChar.HumanoidRootPart.CFrame = CFrame.lookAt(currentChar.HumanoidRootPart.Position, currentChar.HumanoidRootPart.Position + lookDirection)
-    end
+    -- Teleport trực tiếp đến target position
+    local targetPos = targetRootPart.Position
+    local attackPos = targetPos + Vector3.new(0, 1, 0)
+    currentChar.HumanoidRootPart.CFrame = CFrame.new(attackPos)
+    
+    -- Face target
+    local lookDirection = (targetPos - currentChar.HumanoidRootPart.Position).Unit
+    currentChar.HumanoidRootPart.CFrame = CFrame.lookAt(currentChar.HumanoidRootPart.Position, targetPos)
     
     local actionTaken = false
     
-    -- Priority 1: Always check M1 first (since it recovers fast)
+    -- Priority 1: M1 attacks
     if not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) then
         while not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) do
             local m1Success = useM1()
             if m1Success then
-                wait(0.1) -- Small delay between M1 attacks
+                wait(0.1)
                 actionTaken = true
+                -- Update position trong lúc combat để lock vào target
+                if targetRootPart and targetRootPart.Parent then
+                    local newTargetPos = targetRootPart.Position
+                    currentChar.HumanoidRootPart.CFrame = CFrame.new(newTargetPos + Vector3.new(0, 1, 0))
+                end
             else
                 break
             end
         end
     end
     
-    -- Priority 2: Use selected skills one by one, checking M1 after each
+    -- Priority 2: Selected skills
     for _, skill in pairs(CombatSystem.selectedSkills) do
         if not isOnCooldown(currentChar, skill) and not isRagdolled(currentChar) and not isStunned(currentChar) then
+            -- Update position trước khi dùng skill
+            if targetRootPart and targetRootPart.Parent then
+                local newTargetPos = targetRootPart.Position
+                currentChar.HumanoidRootPart.CFrame = CFrame.new(newTargetPos + Vector3.new(0, 1, 0))
+            end
+            
             useSkill(skill)
             actionTaken = true
             
-            -- Check M1 again after each skill (since M1 recovers fast)
+            -- Check M1 again after skill
             if not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) then
                 while not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) do
                     local m1Success = useM1()
                     if m1Success then
                         wait(0.1)
+                        -- Update position
+                        if targetRootPart and targetRootPart.Parent then
+                            local newTargetPos = targetRootPart.Position
+                            currentChar.HumanoidRootPart.CFrame = CFrame.new(newTargetPos + Vector3.new(0, 1, 0))
+                        end
                     else
                         break
                     end
@@ -363,32 +296,48 @@ local function attackTarget(target)
         end
     end
     
-    -- Priority 3: Use selected plus skills one by one, checking M1 after each
+    -- Priority 3: Plus skills
     for _, skill in pairs(CombatSystem.selectedPlusSkills) do
         local plusSkill = skill .. "+"
         if not isOnCooldown(currentChar, plusSkill) and not isRagdolled(currentChar) and not isStunned(currentChar) then
+            -- Update position trước khi dùng plus skill
+            if targetRootPart and targetRootPart.Parent then
+                local newTargetPos = targetRootPart.Position
+                currentChar.HumanoidRootPart.CFrame = CFrame.new(newTargetPos + Vector3.new(0, 1, 0))
+            end
+            
             useSkill(plusSkill)
             actionTaken = true
             
-            -- Check M1 again after each plus skill (since M1 recovers fast)
+            -- Check M1 again after plus skill
             if not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) then
                 while not isOnCooldown(currentChar, "MOUSEBUTTON1") and not isRagdolled(currentChar) and not isStunned(currentChar) do
                     local m1Success = useM1()
                     if m1Success then
                         wait(0.1)
+                        -- Update position
+                        if targetRootPart and targetRootPart.Parent then
+                            local newTargetPos = targetRootPart.Position
+                            currentChar.HumanoidRootPart.CFrame = CFrame.new(newTargetPos + Vector3.new(0, 1, 0))
+                        end
                     else
                         break
                     end
                 end
             end
         end
+    end
+    
+    -- Reset humanoid state sau combat
+    if currentChar:FindFirstChild("Humanoid") then
+        currentChar.Humanoid.PlatformStand = false
+        currentChar.Humanoid:ChangeState(Enum.HumanoidStateType.Running)
     end
     
     return actionTaken
 end
 
 local function escapeToSafety()
-    stopAnchoring() -- Stop anchoring when escaping
     local escapePos = RootPart.Position + Vector3.new(0, 10, 0)
     instantTP(escapePos)
 end
@@ -437,13 +386,12 @@ local function combatLoop()
         if targetDead or not targetStillExists then
             escapeToSafety()
         end
-        -- If no skills were used (all on cooldown), escape temporarily only if not anchored
-        if not skillUsed and not CombatSystem.anchorConnection then
+        -- If no skills were used (all on cooldown), escape temporarily
+        if not skillUsed then
             escapeToSafety()
         end
     else
-        -- No target found, stop anchoring and return to wait position
-        stopAnchoring()
+        -- No target found, ALWAYS return to exact wait position
         CombatSystem.isInCombat = false
         CombatSystem.currentTarget = nil
         local waitPos = CombatSystem.farmMode == "Cultists" and CombatSystem.waitPositionCultists or CombatSystem.waitPositionCursed
@@ -453,7 +401,7 @@ end
 
 -- Create Rayfield Window
 local Window = Rayfield:CreateWindow({
-    Name = "Advanced Combat System with Anchoring",
+    Name = "Advanced Combat System",
     Icon = 0,
     LoadingTitle = "Combat System Interface",
     LoadingSubtitle = "by Advanced Scripts",
@@ -483,7 +431,6 @@ local Window = Rayfield:CreateWindow({
 -- Create Tabs
 local MainTab = Window:CreateTab("Main Controls", "zap")
 local SkillTab = Window:CreateTab("Skill Selection", "settings")
-local AnchorTab = Window:CreateTab("Anchoring System", "anchor") -- NEW TAB
 local StatusTab = Window:CreateTab("Status Monitor", "activity")
 
 -- Main Controls
@@ -516,128 +463,13 @@ local EnableToggle = MainTab:CreateToggle({
                 CombatSystem.heartbeatConnection = nil
             end
             stopTeleportLoop()
-            stopAnchoring()
         end
     end
 })
 
--- NEW: Anchoring Controls Tab
-local AnchorSection = AnchorTab:CreateSection("Anchor Settings")
-
-local AnchorToggle = AnchorTab:CreateToggle({
-    Name = "Enable Target Anchoring",
-    CurrentValue = false,
-    Flag = "EnableAnchor",
-    Callback = function(Value)
-        CombatSystem.anchorEnabled = Value
-        if not Value then
-            stopAnchoring()
-        end
-    end
-})
-
-local AnchorModeDropdown = AnchorTab:CreateDropdown({
-    Name = "Anchor Position Mode",
-    Options = {"above", "behind", "side", "custom"},
-    CurrentOption = {"above"},
-    MultipleOptions = false,
-    Flag = "AnchorMode",
-    Callback = function(Options)
-        CombatSystem.anchorMode = Options[1]
-    end
-})
-
-local LockRotationToggle = AnchorTab:CreateToggle({
-    Name = "Lock Rotation to Target",
-    CurrentValue = true,
-    Flag = "LockRotation",
-    Callback = function(Value)
-        CombatSystem.lockRotation = Value
-    end
-})
-
-local AnchorDistanceSlider = AnchorTab:CreateSlider({
-    Name = "Anchor Distance",
-    Range = {1, 10},
-    Increment = 0.5,
-    Suffix = " studs",
-    CurrentValue = 5,
-    Flag = "AnchorDistance",
-    Callback = function(Value)
-        CombatSystem.anchorDistance = Value
-    end
-})
-
--- Custom Anchor Offset Controls
-local CustomSection = AnchorTab:CreateSection("Custom Anchor Offset (when mode = custom)")
-
-local CustomXSlider = AnchorTab:CreateSlider({
-    Name = "X Offset",
-    Range = {-10, 10},
-    Increment = 0.5,
-    Suffix = " studs",
-    CurrentValue = 0,
-    Flag = "CustomX",
-    Callback = function(Value)
-        CombatSystem.anchorOffset = Vector3.new(Value, CombatSystem.anchorOffset.Y, CombatSystem.anchorOffset.Z)
-    end
-})
-
-local CustomYSlider = AnchorTab:CreateSlider({
-    Name = "Y Offset",
-    Range = {-10, 10},
-    Increment = 0.5,
-    Suffix = " studs",
-    CurrentValue = 1,
-    Flag = "CustomY",
-    Callback = function(Value)
-        CombatSystem.anchorOffset = Vector3.new(CombatSystem.anchorOffset.X, Value, CombatSystem.anchorOffset.Z)
-    end
-})
-
-local CustomZSlider = AnchorTab:CreateSlider({
-    Name = "Z Offset",
-    Range = {-10, 10},
-    Increment = 0.5,
-    Suffix = " studs",
-    CurrentValue = 0,
-    Flag = "CustomZ",
-    Callback = function(Value)
-        CombatSystem.anchorOffset = Vector3.new(CombatSystem.anchorOffset.X, CombatSystem.anchorOffset.Y, Value)
-    end
-})
-
--- Anchor Control Buttons
-local AnchorControlSection = AnchorTab:CreateSection("Anchor Controls")
-
-local StartAnchorButton = AnchorTab:CreateButton({
-    Name = "Start Anchoring to Current Target",
-    Callback = function()
-        if CombatSystem.currentTarget then
-            startAnchoring(CombatSystem.currentTarget)
-        else
-            -- Find and anchor to nearest enemy
-            local target = findNearestEnemy()
-            if target then
-                CombatSystem.currentTarget = target
-                startAnchoring(target)
-            end
-        end
-    end
-})
-
-local StopAnchorButton = AnchorTab:CreateButton({
-    Name = "Stop Anchoring",
-    Callback = function()
-        stopAnchoring()
-    end
-})
-
--- Continue with rest of original code...
 local WaitPosButton = MainTab:CreateButton({
     Name = "Teleport to Wait Position",
     Callback = function()
-        stopAnchoring() -- Stop anchoring when manually moving
         local waitPos = CombatSystem.farmMode == "Cultists" and CombatSystem.waitPositionCultists or CombatSystem.waitPositionCursed
         instantTP(waitPos)
     end
@@ -710,7 +542,6 @@ local StatusLabel = StatusTab:CreateLabel("Status: Idle", "info")
 local TargetLabel = StatusTab:CreateLabel("Target: None", "crosshair")
 local HealthLabel = StatusTab:CreateLabel("Health: 100%", "heart")
 local CooldownLabel = StatusTab:CreateLabel("Cooldowns: None", "clock")
-local AnchorStatusLabel = StatusTab:CreateLabel("Anchor: Inactive", "anchor") -- NEW STATUS
 
 -- Status Update Loop
 RunService.Heartbeat:Connect(function()
@@ -748,10 +579,6 @@ RunService.Heartbeat:Connect(function()
         end
         local cooldownText = #cooldowns > 0 and table.concat(cooldowns, ", ") or "None"
         CooldownLabel:Set("Cooldowns: " .. cooldownText, "clock")
-        
-        -- Update anchor status
-        local anchorStatus = CombatSystem.anchorConnection and "Active (" .. CombatSystem.anchorMode .. ")" or "Inactive"
-        AnchorStatusLabel:Set("Anchor: " .. anchorStatus, "anchor")
     end
 end)
 
@@ -765,7 +592,6 @@ MainTab:CreateButton({
             CombatSystem.heartbeatConnection = nil
         end
         stopTeleportLoop()
-        stopAnchoring()
         EnableToggle:Set(false)
     end
 })
