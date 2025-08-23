@@ -1,446 +1,172 @@
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+local function checkQuestStatus(slayerName)-- AUTO SLAYER QUEST SCRIPT - SIMPLIFIED
+-- Automatically accepts selected Slayer quest when not on cooldown and player meets level requirements
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local Knit = require(ReplicatedStorage.ReplicatedModules.KnitPackage.Knit)
 
-local localPlayer = Players.LocalPlayer
+local LocalPlayer = Players.LocalPlayer
+local QuestLineService = Knit.GetService("QuestLineService")
+local CheckDialogue = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Services.DialogueService.RF.CheckDialogue
 
--- Services và Remote
-local FireInput = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Services.MoveInputService.RF.FireInput
-
--- Combat Settings
-local combatSettings = {
-    enabled = false,
-    selectedSkills = {"B"},
-    escapeHeight = 30,
-    targetType = "cultists",
-    currentSkillIndex = 1
+-- ===== CONFIG =====
+local CONFIG = {
+    ENABLED = true,
+    SELECTED_QUEST = "Gojo", -- Change this to your desired quest: "Gojo", "Finger Bearer", "Xeno"
+    CHECK_INTERVAL = 30, -- Check every 30 seconds
+    DEBUG = true
 }
 
--- Target Lists
-local targetLists = {
-    cultists = {
-        "workspace.Living.Assailant",
-        "workspace.Living.Conjurer"
-    },
-    cursed = {
-        "workspace.Living.Roppongi Curse",
-        "workspace.Living.Mantis Curse", 
-        "workspace.Living.Jujutsu Sorcerer",
-        "workspace.Living.Flyhead"
-    }
-}
+-- ===== FUNCTIONS =====
+local function debugPrint(message)
+    if CONFIG.DEBUG then
+        print("[SLAYER QUEST] " .. message)
+    end
+end
 
-local waitPositions = {
-    cultists = Vector3.new(10291.4921875, 6204.5986328125, -255.45745849609375),
-    cursed = Vector3.new(-240.7166290283203, 233.30340576171875, 417.1275939941406)
-}
+local function getPlayerLevel()
+    local success, level = pcall(function()
+        return LocalPlayer.Data.Ability:GetAttribute("AbilityLevel")
+    end)
+    
+    if success and level then
+        debugPrint("Current player level: " .. tostring(level))
+        return level
+    end
+    
+    debugPrint("Failed to retrieve player level")
+    return 0
+end
 
--- State Variables
-local currentTarget = nil
-local isInCombat = false
-local shouldEscape = false
-local heartbeatConnection = nil
-local combatConnection = nil
-local lastSkillTime = {}
-local currentSkillIndex = 1
-local lastSkillUse = 0
-local targetLocked = false -- Khóa target hiện tại
-local lastTargetCheck = 0
-
--- Helper Functions
-local function getTargetFromPath(path)
-    local success, result = pcall(function()
-        local parts = string.split(path, ".")
-        local obj = _G
-        for i, part in ipairs(parts) do
-            if i == 1 and part == "workspace" then
-                obj = workspace
+local function getAvailableQuests()
+    local success, questInfo = pcall(function()
+        return QuestLineService:GetQuestlineInfo("Slayer_Quest"):expect()
+    end)
+    
+    if not success then
+        debugPrint("Error retrieving quest info: " .. tostring(questInfo))
+        return {}
+    end
+    
+    if not questInfo then
+        debugPrint("Quest info is nil")
+        return {}
+    end
+    
+    if not questInfo.Metadata then
+        debugPrint("Quest metadata is nil")
+        return {}
+    end
+    
+    if not questInfo.Metadata.Slayers then
+        debugPrint("Slayers data is nil")
+        return {}
+    end
+    
+    local playerLevel = getPlayerLevel()
+    local availableQuests = {}
+    
+    debugPrint("Checking available quests for level: " .. playerLevel)
+    
+    for slayerName, slayerData in pairs(questInfo.Metadata.Slayers) do
+        if slayerData and slayerData.Level then
+            local requiredLevel = slayerData.Level
+            if playerLevel >= requiredLevel then
+                debugPrint("Available: " .. slayerName .. " (requires level " .. requiredLevel .. ")")
+                table.insert(availableQuests, slayerName)
             else
-                local cleanPart = part:gsub("'", ""):gsub("%[", ""):gsub("%]", "")
-                obj = obj:FindFirstChild(cleanPart)
-                if not obj then return nil end
+                debugPrint("Not available: " .. slayerName .. " (requires level " .. requiredLevel .. ")")
             end
+        else
+            debugPrint("Invalid slayer data for: " .. tostring(slayerName))
         end
-        return obj
+    end
+    
+    return availableQuests
+end
+    local success, result = pcall(function()
+        return CheckDialogue:InvokeServer("Slayer_Quest", slayerName)
     end)
-    return success and result or nil
+    
+    if not success then
+        return "error"
+    elseif result == false then
+        return "level_too_low"
+    elseif type(result) == "number" then
+        return "cooldown", result
+    elseif result == true then
+        return "available"
+    end
+    
+    return "unknown"
 end
 
-local function isValidTarget(target)
-    return target and target:FindFirstChild("HumanoidRootPart") and target:FindFirstChild("Humanoid")
+local function isLevelSufficient(slayerName)
+    local questInfo = QuestLineService:GetQuestlineInfo("Slayer_Quest"):expect()
+    if not questInfo or not questInfo.Metadata or not questInfo.Metadata.Slayers then
+        return false
+    end
+    
+    local slayerData = questInfo.Metadata.Slayers[slayerName]
+    if not slayerData then
+        return false
+    end
+    
+    local playerLevel = getPlayerLevel()
+    return playerLevel >= slayerData.Level
 end
 
-local function isTargetAlive(target)
-    if not isValidTarget(target) then return false end
-    local humanoid = target:FindFirstChild("Humanoid")
-    return humanoid and humanoid.Health > 0
-end
-
-local function findRandomTarget()
-    local validTargets = {}
-    local targetPaths = targetLists[combatSettings.targetType]
-
-    for _, path in ipairs(targetPaths) do
-        local target = getTargetFromPath(path)
-        if isTargetAlive(target) then
-            table.insert(validTargets, target)
+local function attemptAcceptQuest()
+    debugPrint("Getting available quests...")
+    local availableQuests = getAvailableQuests()
+    
+    if #availableQuests == 0 then
+        debugPrint("No quests available for current level")
+        return false
+    end
+    
+    debugPrint("Available quests: " .. table.concat(availableQuests, ", "))
+    
+    -- Check if selected quest is available
+    local questFound = false
+    for _, questName in ipairs(availableQuests) do
+        if questName == CONFIG.SELECTED_QUEST then
+            questFound = true
+            break
         end
     end
-
-    if #validTargets > 0 then
-        return validTargets[math.random(1, #validTargets)]
-    end
-
-    return nil
-end
-
-local function getNextTarget()
-    -- Chỉ tìm target mới khi target hiện tại chết hoặc không hợp lệ
-    if currentTarget and isTargetAlive(currentTarget) then
-        return currentTarget -- Giữ target hiện tại
+    
+    if not questFound then
+        debugPrint("Selected quest not available: " .. CONFIG.SELECTED_QUEST)
+        return false
     end
     
-    -- Target hiện tại đã chết hoặc không hợp lệ, tìm target mới
-    targetLocked = false
-    local newTarget = findRandomTarget()
+    debugPrint("Checking quest: " .. CONFIG.SELECTED_QUEST)
     
-    if newTarget then
-        targetLocked = true
-    end
+    local status, cooldownTime = checkQuestStatus(CONFIG.SELECTED_QUEST)
     
-    return newTarget
-end
-
-local function waitForEnemyRespawn()
-    -- Đợi cho đến khi có ít nhất 1 enemy spawn
-    while combatSettings.enabled do
-        local target = findRandomTarget()
-        if target then
-            return target
-        end
-        wait(0.1) -- Check mỗi 0.1 giây
-    end
-    
-    return nil
-end
-
-local function isStunned()
-    local character = localPlayer.Character
-    if not character then return false end
-    return character:GetAttribute("Stunned") or false
-end
-
-local function isRagdolled()
-    local character = localPlayer.Character
-    if not character then return false end
-    return character:GetAttribute("Ragdolled") or false
-end
-
-local function hasCooldown(skillKey)
-    local character = localPlayer.Character
-    if not character then return true end
-
-    local cooldownFolder = character:FindFirstChild("Cooldowns")
-    if not cooldownFolder then return false end
-
-    return cooldownFolder:FindFirstChild(skillKey) ~= nil
-end
-
-local function teleportToPosition(position)
-    local character = localPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-    character.HumanoidRootPart.CFrame = CFrame.new(position)
-end
-
-local function teleportBehindTarget(target)
-    local character = localPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") or not isValidTarget(target) then return end
-
-    local targetCFrame = target.HumanoidRootPart.CFrame
-    local behindPos = targetCFrame * CFrame.new(0, 0, 5) -- Ra sau lưng 5 studs
-
-    character.HumanoidRootPart.CFrame = behindPos
-end
-
-local function escapeToHeight(target)
-    local character = localPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-
-    local escapePos
-    if isValidTarget(target) then
-        escapePos = target.HumanoidRootPart.Position + Vector3.new(0, combatSettings.escapeHeight, 0)
-    else
-        escapePos = character.HumanoidRootPart.Position + Vector3.new(0, combatSettings.escapeHeight, 0)
-    end
-
-    character.HumanoidRootPart.CFrame = CFrame.new(escapePos)
-end
-
-local function useSkill(skillKey)
-    local success = pcall(function()
-        FireInput:InvokeServer(skillKey)
-    end)
-
-    if success then
-        lastSkillTime[skillKey] = tick()
-        lastSkillUse = tick()
+    if status == "available" then
+        debugPrint("Successfully accepted: " .. CONFIG.SELECTED_QUEST)
         return true
+    elseif status == "cooldown" then
+        local minutes = math.floor(cooldownTime / 60)
+        local seconds = cooldownTime % 60
+        debugPrint(string.format("Quest on cooldown: %02d:%02d remaining", minutes, seconds))
+    elseif status == "level_too_low" then
+        debugPrint("Level requirement not met")
+    else
+        debugPrint("Quest unavailable: " .. status)
     end
-
+    
     return false
 end
 
--- Main Heartbeat Loop với logic đợi enemy respawn
-local function startHeartbeatLoop()
-    if heartbeatConnection then
-        heartbeatConnection:Disconnect()
-    end
-
-    heartbeatConnection = RunService.Heartbeat:Connect(function()
-        if not combatSettings.enabled then return end
-
-        local character = localPlayer.Character
-        if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-
-        -- Lấy target với logic mới
-        local target = getNextTarget()
-
-        if not target then
-            -- Không có target, đợi enemy respawn
-            isInCombat = false
-            shouldEscape = false
-            
-            -- Về vị trí đợi
-            local waitPos = waitPositions[combatSettings.targetType]
-            teleportToPosition(waitPos)
-            
-            -- Đợi enemy respawn (non-blocking)
-            if tick() - lastTargetCheck > 0.1 then -- Check mỗi 0.1 giây
-                lastTargetCheck = tick()
-                spawn(function()
-                    waitForEnemyRespawn()
-                end)
-            end
-            return
-        end
-
-        -- Có target, bắt đầu combat
-        currentTarget = target
-        isInCombat = true
-
-        -- Check nếu bị stun hoặc ragdoll thì escape
-        local needEscape = isStunned() or isRagdolled()
-
-        -- Teleport logic
-        if needEscape then
-            shouldEscape = true
-            escapeToHeight(target)
-        else
-            shouldEscape = false
-            teleportBehindTarget(target)
-        end
-    end)
-end
-
--- Combat Skills Loop (không thay đổi)
-local function startCombatLoop()
-    if combatConnection then
-        combatConnection:Disconnect()
-    end
-
-    combatConnection = RunService.Heartbeat:Connect(function()
-        if not combatSettings.enabled or not isInCombat or shouldEscape then return end
-
-        -- Chỉ dùng skill khi đã đủ delay
-        if tick() - lastSkillUse < 0.1 then return end
-
-        -- Logic skill
-        if #combatSettings.selectedSkills > 0 then
-            local skill = combatSettings.selectedSkills[combatSettings.currentSkillIndex]
-            useSkill(skill)
-
-            combatSettings.currentSkillIndex = combatSettings.currentSkillIndex + 1
-            if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
-                combatSettings.currentSkillIndex = 1
-            end
-        end
-
-        -- M1 spam
-        spawn(function()
-            while not hasCooldown("MOUSEBUTTON1") and combatSettings.enabled and isInCombat and not shouldEscape do
-                useSkill("MOUSEBUTTON1")
-                wait(0.05)
-            end
-        end)
-    end)
-end
-
--- GUI Creation (không thay đổi)
-local function createGUI()
-    local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
-    local Window = Rayfield:CreateWindow({
-        Name = "Auto Combat System",
-        LoadingTitle = "Combat System Loading...",
-        LoadingSubtitle = "Smart Target Tracking System",
-        Theme = "DarkBlue",
-        ConfigurationSaving = {
-            Enabled = true,
-            FolderName = "CombatSystem",
-            FileName = "Config"
-        }
-    })
-
-    -- Main Tab
-    local MainTab = Window:CreateTab("Main", "sword")
-    local Section1 = MainTab:CreateSection("Combat Settings")
-
-    local EnableToggle = MainTab:CreateToggle({
-        Name = "Enable Combat",
-        CurrentValue = false,
-        Flag = "EnableCombat",
-        Callback = function(Value)
-            combatSettings.enabled = Value
-            if Value then
-                startHeartbeatLoop()
-                startCombatLoop()
-            else
-                if heartbeatConnection then
-                    heartbeatConnection:Disconnect()
-                    heartbeatConnection = nil
-                end
-                if combatConnection then
-                    combatConnection:Disconnect()
-                    combatConnection = nil
-                end
-                -- Reset target state
-                currentTarget = nil
-                targetLocked = false
-            end
-        end,
-    })
-
-    local TargetDropdown = MainTab:CreateDropdown({
-        Name = "Target Type",
-        Options = {"cultists", "cursed"},
-        CurrentOption = {"cultists"},
-        Flag = "TargetType",
-        Callback = function(Options)
-            combatSettings.targetType = Options[1]
-            -- Reset target khi đổi loại
-            currentTarget = nil
-            targetLocked = false
-        end,
-    })
-
-    local EscapeSlider = MainTab:CreateSlider({
-        Name = "Escape Height",
-        Range = {10, 50},
-        Increment = 5,
-        Suffix = "studs",
-        CurrentValue = 30,
-        Flag = "EscapeHeight",
-        Callback = function(Value)
-            combatSettings.escapeHeight = Value
-        end,
-    })
-
-    -- Skills Tab
-    local SkillsTab = Window:CreateTab("Skills", "zap")
-    local Section2 = SkillsTab:CreateSection("Skill Selection")
-
-    local skillKeys = {"MOUSEBUTTON2"}
-    local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    for i = 1, #alphabet do
-        local letter = alphabet:sub(i, i)
-        table.insert(skillKeys, letter .. "+")
-        table.insert(skillKeys, letter)
-    end
-
-    for _, key in ipairs(skillKeys) do
-        local isDefault = key == "B"
-        local displayName = key == "MOUSEBUTTON2" and "M2" or "Skill " .. key
-        local flagName = key:gsub("%+", "Plus"):gsub("MOUSEBUTTON2", "M2")
-
-        SkillsTab:CreateToggle({
-            Name = displayName,
-            CurrentValue = isDefault,
-            Flag = "Skill" .. flagName,
-            Callback = function(Value)
-                if Value then
-                    if not table.find(combatSettings.selectedSkills, key) then
-                        table.insert(combatSettings.selectedSkills, key)
-                    end
-                else
-                    local index = table.find(combatSettings.selectedSkills, key)
-                    if index then
-                        table.remove(combatSettings.selectedSkills, index)
-                        if combatSettings.currentSkillIndex > #combatSettings.selectedSkills then
-                            combatSettings.currentSkillIndex = 1
-                        end
-                    end
-                end
-            end,
-        })
-    end
-
-    -- Info Tab
-    local InfoTab = Window:CreateTab("Info", "info")
-    local Section3 = InfoTab:CreateSection("Current Status")
-
-    local TargetLabel = InfoTab:CreateLabel("Target: None")
-
-    -- Status update
-    spawn(function()
-        while wait(0.5) do
-            if combatSettings.enabled then
-                local targetName = currentTarget and currentTarget.Name or "None"
-                TargetLabel:Set("Target: " .. targetName)
-            else
-                TargetLabel:Set("Target: None")
-            end
-        end
-    end)
-
-    -- Emergency stop
-    MainTab:CreateButton({
-        Name = "Emergency Stop",
-        Callback = function()
-            combatSettings.enabled = false
-            if heartbeatConnection then
-                heartbeatConnection:Disconnect()
-                heartbeatConnection = nil
-            end
-            if combatConnection then
-                combatConnection:Disconnect()
-                combatConnection = nil
-            end
-            currentTarget = nil
-            targetLocked = false
-        end,
-    })
-
-    -- Reset Target button
-    MainTab:CreateButton({
-        Name = "Reset Target",
-        Callback = function()
-            currentTarget = nil
-            targetLocked = false
-        end,
-    })
-end
-
--- Initialize
-createGUI()
-
--- Auto reconnect when character respawns
-localPlayer.CharacterAdded:Connect(function(character)
-    character:WaitForChild("HumanoidRootPart")
-    wait(2)
-    if combatSettings.enabled then
-        startHeartbeatLoop()
-        startCombatLoop()
+-- ===== MAIN LOOP =====
+spawn(function()
+    debugPrint("Auto Slayer Quest started for: " .. CONFIG.SELECTED_QUEST)
+    
+    while CONFIG.ENABLED do
+        attemptAcceptQuest()
+        wait(CONFIG.CHECK_INTERVAL)
     end
 end)
-
-print("Auto Combat System loaded!")
