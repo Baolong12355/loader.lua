@@ -1,175 +1,189 @@
-local function checkQuestStatus(slayerName)-- AUTO SLAYER QUEST SCRIPT - SIMPLIFIED
--- Automatically accepts selected Slayer quest when not on cooldown and player meets level requirements
-
+-- Auto Quest Accept Script
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-local Knit = require(ReplicatedStorage.ReplicatedModules.KnitPackage.Knit)
 
-local LocalPlayer = Players.LocalPlayer
-local QuestLineService = Knit.GetService("QuestLineService")
+local player = Players.LocalPlayer
+
+-- Remotes
 local CheckDialogue = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Services.DialogueService.RF.CheckDialogue
+local QuestLineService = require(ReplicatedStorage.ReplicatedModules.KnitPackage.Knit).GetService("QuestLineService")
 
--- ===== CONFIG =====
-local CONFIG = {
-    ENABLED = true,
-    SELECTED_QUEST = "Gojo", -- Change this to your desired quest: "Gojo", "Finger Bearer", "Xeno"
-    CHECK_INTERVAL = 30, -- Check every 30 seconds
-    DEBUG = true
+-- Cấu hình quest muốn nhận
+local QUEST_CONFIG = {
+    questLine = "Slayer_Quest",
+    preferredQuests = {
+        "Finger Bearer",  -- Ưu tiên cao nhất
+        "Gojo",          -- Ưu tiên trung bình  
+        "Xeno"           -- Ưu tiên thấp
+    }
 }
 
--- ===== FUNCTIONS =====
-local function debugPrint(message)
-    if CONFIG.DEBUG then
-        print("[SLAYER QUEST] " .. message)
+-- Hàm kiểm tra level của player
+local function getPlayerAbilityLevel()
+    if player.Data and player.Data.Ability then
+        return player.Data.Ability:GetAttribute("AbilityLevel") or 0
     end
-end
-
-local function getPlayerLevel()
-    local success, level = pcall(function()
-        return LocalPlayer.Data.Ability:GetAttribute("AbilityLevel")
-    end)
-    
-    if success and level then
-        debugPrint("Current player level: " .. tostring(level))
-        return level
-    end
-    
-    debugPrint("Failed to retrieve player level")
     return 0
 end
 
-local function getAvailableQuests()
+-- Hàm lấy thông tin questline
+local function getQuestlineInfo()
     local success, questInfo = pcall(function()
-        return QuestLineService:GetQuestlineInfo("Slayer_Quest"):expect()
+        return QuestLineService:GetQuestlineInfo(QUEST_CONFIG.questLine):expect()
+    end)
+    
+    if success and questInfo then
+        return questInfo
+    end
+    return nil
+end
+
+-- Hàm kiểm tra quest có sẵn sàng không
+local function checkQuestAvailability(questName)
+    local success, result = pcall(function()
+        return CheckDialogue:InvokeServer(QUEST_CONFIG.questLine, questName)
     end)
     
     if not success then
-        debugPrint("Lỗi khi lấy thông tin quest: " .. tostring(questInfo))
-        return {}
+        return false, "Error checking quest"
     end
     
+    -- result có thể là:
+    -- true = có thể nhận quest
+    -- false = không đủ điều kiện  
+    -- number = thời gian cooldown (giây)
+    if result == true then
+        return true, "Ready"
+    elseif result == false then
+        return false, "Not eligible"
+    elseif type(result) == "number" then
+        local minutes = math.floor(result / 60)
+        local seconds = result % 60
+        return false, string.format("Cooldown: %02d:%02d", minutes, seconds)
+    end
+    
+    return false, "Unknown status"
+end
+
+-- Hàm nhận quest
+local function acceptQuest(questName)
+    -- Sử dụng CheckDialogue để nhận quest (dựa trên logic trong code gốc)
+    local success, result = pcall(function()
+        return CheckDialogue:InvokeServer(QUEST_CONFIG.questLine, questName)
+    end)
+    
+    if success and result == true then
+        print("✅ Đã nhận quest:", questName)
+        return true
+    else
+        print("❌ Không thể nhận quest:", questName, "Result:", result)
+        return false
+    end
+end
+
+-- Hàm tìm và nhận quest phù hợp
+local function findAndAcceptQuest()
+    local questInfo = getQuestlineInfo()
     if not questInfo or not questInfo.Metadata or not questInfo.Metadata.Slayers then
-        debugPrint("Không tìm thấy dữ liệu Slayers")
-        return {}
+        print("❌ Không tìm thấy thông tin quest")
+        return false
     end
     
-    local playerLevel = getPlayerLevel()
+    local playerLevel = getPlayerAbilityLevel()
+    print("🎯 Player Level:", playerLevel)
+    
     local availableQuests = {}
     
-    debugPrint("Kiểm tra quest khả dụng cho level: " .. playerLevel)
-    
-    -- Duyệt qua tất cả slayers (key-value pairs)
-    for questKey, slayerData in pairs(questInfo.Metadata.Slayers) do
-        if slayerData and slayerData.Level then
-            local requiredLevel = slayerData.Level
-            local slayerName = slayerData.Slayer or questKey
+    -- Kiểm tra từng quest trong danh sách ưu tiên
+    for priority, questName in ipairs(QUEST_CONFIG.preferredQuests) do
+        local slayerInfo = questInfo.Metadata.Slayers[questName]
+        
+        if slayerInfo then
+            local requiredLevel = slayerInfo.Level or 0
             
+            -- Kiểm tra level requirement
             if playerLevel >= requiredLevel then
-                debugPrint("Có thể nhận: " .. questKey .. " (" .. slayerName .. ") - Level " .. requiredLevel)
-                table.insert(availableQuests, questKey)
+                local canAccept, status = checkQuestAvailability(questName)
+                
+                print(string.format("Quest: %s (Level %d+) - %s", questName, requiredLevel, status))
+                
+                if canAccept then
+                    table.insert(availableQuests, {
+                        name = questName,
+                        priority = priority,
+                        level = requiredLevel
+                    })
+                end
             else
-                debugPrint("Chưa đủ level: " .. questKey .. " (" .. slayerName .. ") - Cần level " .. requiredLevel)
+                print(string.format("Quest: %s (Level %d+) - Not high enough level", questName, requiredLevel))
             end
-        else
-            debugPrint("Dữ liệu không hợp lệ cho: " .. tostring(questKey))
         end
     end
     
-    return availableQuests
-end
-    local success, result = pcall(function()
-        return CheckDialogue:InvokeServer("Slayer_Quest", slayerName)
-    end)
-    
-    if not success then
-        return "error"
-    elseif result == false then
-        return "level_too_low"
-    elseif type(result) == "number" then
-        return "cooldown", result
-    elseif result == true then
-        return "available"
-    end
-    
-    return "unknown"
-end
-
-local function isLevelSufficient(slayerName)
-    local questInfo = QuestLineService:GetQuestlineInfo("Slayer_Quest"):expect()
-    if not questInfo or not questInfo.Metadata or not questInfo.Metadata.Slayers then
-        return false
-    end
-    
-    local slayerData = questInfo.Metadata.Slayers[slayerName]
-    if not slayerData then
-        return false
-    end
-    
-    local playerLevel = getPlayerLevel()
-    return playerLevel >= slayerData.Level
-end
-
-local function attemptAcceptQuest()
-    if not CONFIG then
-        debugPrint("CONFIG is nil - script configuration error")
-        return false
-    end
-    
-    if not CONFIG.SELECTED_QUEST then
-        debugPrint("No quest selected in CONFIG.SELECTED_QUEST")
-        return false
-    end
-    
-    debugPrint("Lấy danh sách quest khả dụng...")
-    local availableQuests = getAvailableQuests()
-    
-    if #availableQuests == 0 then
-        debugPrint("Không có quest khả dụng cho level hiện tại")
-        return false
-    end
-    
-    debugPrint("Quest khả dụng: " .. table.concat(availableQuests, ", "))
-    
-    -- Kiểm tra quest được chọn có khả dụng không
-    local questFound = false
-    for _, questName in ipairs(availableQuests) do
-        if questName == CONFIG.SELECTED_QUEST then
-            questFound = true
-            break
-        end
-    end
-    
-    if not questFound then
-        debugPrint("Quest được chọn không khả dụng: " .. CONFIG.SELECTED_QUEST)
-        return false
-    end
-    
-    debugPrint("Kiểm tra quest: " .. CONFIG.SELECTED_QUEST)
-    
-    local status, cooldownTime = checkQuestStatus(CONFIG.SELECTED_QUEST)
-    
-    if status == "available" then
-        debugPrint("Nhận quest thành công: " .. CONFIG.SELECTED_QUEST)
-        return true
-    elseif status == "cooldown" then
-        local minutes = math.floor(cooldownTime / 60)
-        local seconds = cooldownTime % 60
-        debugPrint(string.format("Quest đang cooldown: %02d:%02d còn lại", minutes, seconds))
-    elseif status == "level_too_low" then
-        debugPrint("Chưa đủ level yêu cầu")
+    -- Nhận quest có ưu tiên cao nhất
+    if #availableQuests > 0 then
+        -- Sort theo priority (thấp hơn = ưu tiên cao hơn)
+        table.sort(availableQuests, function(a, b)
+            return a.priority < b.priority
+        end)
+        
+        local bestQuest = availableQuests[1]
+        print("🎯 Attempting to accept quest:", bestQuest.name)
+        return acceptQuest(bestQuest.name)
     else
-        debugPrint("Quest không khả dụng: " .. status)
+        print("❌ Không có quest nào khả dụng")
+        return false
     end
-    
-    return false
 end
 
--- ===== MAIN LOOP =====
-spawn(function()
-    debugPrint("Auto Slayer Quest started for: " .. CONFIG.SELECTED_QUEST)
+-- Hàm hiển thị trạng thái tất cả quest
+local function showQuestStatus()
+    print("=== QUEST STATUS ===")
+    local questInfo = getQuestlineInfo()
+    if not questInfo then
+        print("❌ Không tìm thấy quest info")
+        return
+    end
     
-    while CONFIG.ENABLED do
-        attemptAcceptQuest()
-        wait(CONFIG.CHECK_INTERVAL)
+    local playerLevel = getPlayerAbilityLevel()
+    print("Player Level:", playerLevel)
+    print("Current Quest Step:", questInfo.Step or "None")
+    
+    for _, questName in ipairs(QUEST_CONFIG.preferredQuests) do
+        local slayerInfo = questInfo.Metadata.Slayers[questName]
+        if slayerInfo then
+            local canAccept, status = checkQuestAvailability(questName)
+            local levelReq = slayerInfo.Level or 0
+            local eligible = playerLevel >= levelReq
+            
+            print(string.format("%s (Lv%d+): %s %s", 
+                questName, 
+                levelReq, 
+                status,
+                eligible and "✅" or "❌"
+            ))
+        end
+    end
+    print("==================")
+end
+
+-- Auto loop
+spawn(function()
+    wait(5) -- Đợi game load
+    
+    while true do
+        pcall(function()
+            findAndAcceptQuest()
+        end)
+        
+        wait(30) -- Check mỗi 30 giây
     end
 end)
+
+-- Export functions
+_G.AcceptQuest = findAndAcceptQuest
+_G.QuestStatus = showQuestStatus
+
+print("🚀 Auto Quest Accept loaded!")
+print("Functions: _G.AcceptQuest(), _G.QuestStatus()")
+print("Preferred quests:", table.concat(QUEST_CONFIG.preferredQuests, ", "))
