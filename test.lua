@@ -13,7 +13,7 @@ local CheckDialogue = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Servi
 local CONFIG = {
     ENABLED = true,
     SELECTED_QUEST = "Gojo", -- Change this to your desired quest: "Gojo", "Finger Bearer", "Xeno"
-    CHECK_INTERVAL = 30, -- Check every 30 seconds
+    CHECK_INTERVAL = 1, -- Check every 30 seconds
     DEBUG = true
 }
 
@@ -44,34 +44,34 @@ local function getAvailableQuests()
     end)
     
     if not success then
-        debugPrint("Error retrieving quest info: " .. tostring(questInfo))
+        debugPrint("Lỗi khi lấy thông tin quest: " .. tostring(questInfo))
         return {}
     end
     
     if not questInfo or not questInfo.Metadata or not questInfo.Metadata.Slayers then
-        debugPrint("Quest data structure incomplete")
+        debugPrint("Không tìm thấy dữ liệu Slayers")
         return {}
     end
     
     local playerLevel = getPlayerLevel()
     local availableQuests = {}
     
-    debugPrint("Checking available quests for level: " .. playerLevel)
+    debugPrint("Kiểm tra quest khả dụng cho level: " .. playerLevel)
     
-    -- Iterate through slayers array (not key-value pairs)
-    for i, slayerData in ipairs(questInfo.Metadata.Slayers) do
-        if slayerData and slayerData.Slayer and slayerData.Level then
-            local slayerName = slayerData.Slayer
+    -- Duyệt qua tất cả slayers (key-value pairs)
+    for questKey, slayerData in pairs(questInfo.Metadata.Slayers) do
+        if slayerData and slayerData.Level then
             local requiredLevel = slayerData.Level
+            local slayerName = slayerData.Slayer or questKey
             
             if playerLevel >= requiredLevel then
-                debugPrint("Available: " .. slayerName .. " (requires level " .. requiredLevel .. ")")
-                table.insert(availableQuests, slayerName)
+                debugPrint("Có thể nhận: " .. questKey .. " (" .. slayerName .. ") - Level " .. requiredLevel)
+                table.insert(availableQuests, questKey)
             else
-                debugPrint("Not available: " .. slayerName .. " (requires level " .. requiredLevel .. ")")
+                debugPrint("Chưa đủ level: " .. questKey .. " (" .. slayerName .. ") - Cần level " .. requiredLevel)
             end
         else
-            debugPrint("Invalid slayer data at index: " .. tostring(i))
+            debugPrint("Dữ liệu không hợp lệ cho: " .. tostring(questKey))
         end
     end
     
