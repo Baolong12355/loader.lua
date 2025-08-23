@@ -13,7 +13,7 @@ local CheckDialogue = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Servi
 local CONFIG = {
     ENABLED = true,
     SELECTED_QUEST = "Gojo", -- Change this to your desired quest: "Gojo", "Finger Bearer", "Xeno"
-    CHECK_INTERVAL = 1, -- Check every 30 seconds
+    CHECK_INTERVAL = 30, -- Check every 30 seconds
     DEBUG = true
 }
 
@@ -110,17 +110,27 @@ local function isLevelSufficient(slayerName)
 end
 
 local function attemptAcceptQuest()
-    debugPrint("Getting available quests...")
-    local availableQuests = getAvailableQuests()
-    
-    if #availableQuests == 0 then
-        debugPrint("No quests available for current level")
+    if not CONFIG then
+        debugPrint("CONFIG is nil - script configuration error")
         return false
     end
     
-    debugPrint("Available quests: " .. table.concat(availableQuests, ", "))
+    if not CONFIG.SELECTED_QUEST then
+        debugPrint("No quest selected in CONFIG.SELECTED_QUEST")
+        return false
+    end
     
-    -- Check if selected quest is available
+    debugPrint("Lấy danh sách quest khả dụng...")
+    local availableQuests = getAvailableQuests()
+    
+    if #availableQuests == 0 then
+        debugPrint("Không có quest khả dụng cho level hiện tại")
+        return false
+    end
+    
+    debugPrint("Quest khả dụng: " .. table.concat(availableQuests, ", "))
+    
+    -- Kiểm tra quest được chọn có khả dụng không
     local questFound = false
     for _, questName in ipairs(availableQuests) do
         if questName == CONFIG.SELECTED_QUEST then
@@ -130,25 +140,25 @@ local function attemptAcceptQuest()
     end
     
     if not questFound then
-        debugPrint("Selected quest not available: " .. CONFIG.SELECTED_QUEST)
+        debugPrint("Quest được chọn không khả dụng: " .. CONFIG.SELECTED_QUEST)
         return false
     end
     
-    debugPrint("Checking quest: " .. CONFIG.SELECTED_QUEST)
+    debugPrint("Kiểm tra quest: " .. CONFIG.SELECTED_QUEST)
     
     local status, cooldownTime = checkQuestStatus(CONFIG.SELECTED_QUEST)
     
     if status == "available" then
-        debugPrint("Successfully accepted: " .. CONFIG.SELECTED_QUEST)
+        debugPrint("Nhận quest thành công: " .. CONFIG.SELECTED_QUEST)
         return true
     elseif status == "cooldown" then
         local minutes = math.floor(cooldownTime / 60)
         local seconds = cooldownTime % 60
-        debugPrint(string.format("Quest on cooldown: %02d:%02d remaining", minutes, seconds))
+        debugPrint(string.format("Quest đang cooldown: %02d:%02d còn lại", minutes, seconds))
     elseif status == "level_too_low" then
-        debugPrint("Level requirement not met")
+        debugPrint("Chưa đủ level yêu cầu")
     else
-        debugPrint("Quest unavailable: " .. status)
+        debugPrint("Quest không khả dụng: " .. status)
     end
     
     return false
