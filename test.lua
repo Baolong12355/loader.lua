@@ -48,18 +48,8 @@ local function getAvailableQuests()
         return {}
     end
     
-    if not questInfo then
-        debugPrint("Quest info is nil")
-        return {}
-    end
-    
-    if not questInfo.Metadata then
-        debugPrint("Quest metadata is nil")
-        return {}
-    end
-    
-    if not questInfo.Metadata.Slayers then
-        debugPrint("Slayers data is nil")
+    if not questInfo or not questInfo.Metadata or not questInfo.Metadata.Slayers then
+        debugPrint("Quest data structure incomplete")
         return {}
     end
     
@@ -68,9 +58,12 @@ local function getAvailableQuests()
     
     debugPrint("Checking available quests for level: " .. playerLevel)
     
-    for slayerName, slayerData in pairs(questInfo.Metadata.Slayers) do
-        if slayerData and slayerData.Level then
+    -- Iterate through slayers array (not key-value pairs)
+    for i, slayerData in ipairs(questInfo.Metadata.Slayers) do
+        if slayerData and slayerData.Slayer and slayerData.Level then
+            local slayerName = slayerData.Slayer
             local requiredLevel = slayerData.Level
+            
             if playerLevel >= requiredLevel then
                 debugPrint("Available: " .. slayerName .. " (requires level " .. requiredLevel .. ")")
                 table.insert(availableQuests, slayerName)
@@ -78,7 +71,7 @@ local function getAvailableQuests()
                 debugPrint("Not available: " .. slayerName .. " (requires level " .. requiredLevel .. ")")
             end
         else
-            debugPrint("Invalid slayer data for: " .. tostring(slayerName))
+            debugPrint("Invalid slayer data at index: " .. tostring(i))
         end
     end
     
