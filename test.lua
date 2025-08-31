@@ -221,6 +221,24 @@ end)
 --// 🧲 Auto Pickup Logic
 local isNotOnAlready = true
 local lastPickupTime = tick()
+local currentItem = nil
+local heartbeatConnection = nil
+
+-- Heartbeat loop để dịch chuyển xuống dưới item
+local function startItemTeleportLoop()
+    if heartbeatConnection then
+        heartbeatConnection:Disconnect()
+    end
+    
+    heartbeatConnection = game:GetService("RunService").Heartbeat:Connect(function()
+        if currentItem and currentItem.Parent and currentItem.PrimaryPart and not isNotOnAlready then
+            local itemPos = currentItem.PrimaryPart.Position
+            local belowItemPos = itemPos + Vector3.new(0, -2.5, 0)
+            plr.Character.HumanoidRootPart.CFrame = CFrame.new(belowItemPos)
+        end
+    end)
+end
+
 itemSpawns.ChildAdded:Connect(function(item)
     repeat task.wait() until item.Name ~= "Model" and isNotOnAlready and not plr.Character.HumanoidRootPart.Anchored
     if getgenv().Settings.AutoFarm and item.PrimaryPart and item:FindFirstChild("ProximityPrompt __") then
@@ -228,7 +246,11 @@ itemSpawns.ChildAdded:Connect(function(item)
         task.spawn(function() console.Send(`picking up {item.Name}!`,"ITEM_PICKUP") end)
         lastPickupTime = tick()
         isNotOnAlready = false
-        plr.Character.HumanoidRootPart.CFrame = item.PrimaryPart.CFrame
+        currentItem = item
+        
+        -- Bắt đầu loop teleport xuống dưới item
+        startItemTeleportLoop()
+        
         task.wait(getgenv().Settings.PickupDelay or 0.5)
         firesignal(item:FindFirstChildWhichIsA("ProximityPrompt").Triggered)
         spawn(function()
@@ -245,6 +267,14 @@ itemSpawns.ChildAdded:Connect(function(item)
             end
         end)
         item.AncestryChanged:Wait()
+        
+        -- Dừng loop và reset
+        currentItem = nil
+        if heartbeatConnection then
+            heartbeatConnection:Disconnect()
+            heartbeatConnection = nil
+        end
+        
         isNotOnAlready = true
         plr.Character.HumanoidRootPart.CFrame = CFrame.new(-23, -33, 28)
     end
@@ -299,7 +329,7 @@ end)
 --// ⏰ Server Hop if Inactive
 task.spawn(function()
     while task.wait(0.5) do
-        if tick() - lastPickupTime > 3*2 or checkForKickMessage() then -- 10*2 to account for 0.5
+        if tick() - lastPickupTime > 5*2 or checkForKickMessage() then -- 10*2 to account for 0.5
             serverHop() -- maybe lastditch l8r
         end
     end
