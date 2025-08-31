@@ -299,7 +299,7 @@ end)
 --// ⏰ Server Hop if Inactive
 task.spawn(function()
     while task.wait(0.5) do
-        if tick() - lastPickupTime > 5*2 or checkForKickMessage() then -- 10*2 to account for 0.5
+        if tick() - lastPickupTime > 3*2 or checkForKickMessage() then -- 10*2 to account for 0.5
             serverHop() -- maybe lastditch l8r
         end
     end
