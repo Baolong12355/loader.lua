@@ -228,7 +228,7 @@ itemSpawns.ChildAdded:Connect(function(item)
         task.spawn(function() console.Send(`picking up {item.Name}!`,"ITEM_PICKUP") end)
         lastPickupTime = tick()
         isNotOnAlready = false
-        plr.Character.HumanoidRootPart.CFrame = item.PrimaryPart.CFrame * CFrame.new(0, -2, 0)
+        plr.Character.HumanoidRootPart.CFrame = item.PrimaryPart.CFrame
         task.wait(getgenv().Settings.PickupDelay or 0.5)
         firesignal(item:FindFirstChildWhichIsA("ProximityPrompt").Triggered)
         spawn(function()
@@ -299,7 +299,7 @@ end)
 --// ⏰ Server Hop if Inactive
 task.spawn(function()
     while task.wait(0.5) do
-        if tick() - lastPickupTime > 90 or checkForKickMessage() then -- 90 seconds = 1 minute 30 seconds
+        if tick() - lastPickupTime > 5*2 or checkForKickMessage() then -- 10*2 to account for 0.5
             serverHop() -- maybe lastditch l8r
         end
     end
