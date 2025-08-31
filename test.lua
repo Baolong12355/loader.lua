@@ -233,7 +233,7 @@ local function startItemTeleportLoop()
     heartbeatConnection = game:GetService("RunService").Heartbeat:Connect(function()
         if currentItem and currentItem.Parent and currentItem.PrimaryPart and not isNotOnAlready then
             local itemPos = currentItem.PrimaryPart.Position
-            local belowItemPos = itemPos + Vector3.new(0, -4,5, 0)
+            local belowItemPos = itemPos + Vector3.new(0, -10, 0)
             plr.Character.HumanoidRootPart.CFrame = CFrame.new(belowItemPos)
         end
     end)
