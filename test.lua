@@ -1,4 +1,3 @@
--- this is the RELEASE version of autohop
 repeat task.wait() until game:IsLoaded()
 if game.PlaceId ~= 2809202155 then return end
 
@@ -14,7 +13,6 @@ local Option = getgenv().Settings.SellAll and "Option2" or "Option1"
 local luckyBought = false
 
 --// 📁 Folder & File Setup
-
 if not isfolder("YBA_AUTOHOP") then makefolder("YBA_AUTOHOP") end
 if not isfile("YBA_AUTOHOP/Count.txt") then writefile("YBA_AUTOHOP/Count.txt", "") end
 if not isfile("YBA_AUTOHOP/lastLucky.txt") then
@@ -29,110 +27,188 @@ if not isfile("YBA_AUTOHOP/theme.mp3") then
         warn("Failed to download file. Status Code:", response.StatusCode)
     end
 end
+
 --// ⏳ Wait for Core Game Objects
 repeat task.wait() until game:IsLoaded() and game.ReplicatedStorage and game.ReplicatedFirst 
     and plr and plr.Character and plr.PlayerGui and plr:FindFirstChild("PlayerStats")
 
---// 🔁 Server Hop Function
+--// 🔁 ENHANCED Server Hop Function with Retry Mechanism
 local function serverHop()
     local gameId = game.PlaceId
-    local servers, cursor = {}, ""
+    local maxRetries = 100
+    local retryDelay = 0.1
+    
+    for attempt = 1, maxRetries do
+        print(`Server hop attempt {attempt}/{maxRetries}`)
+        
+        local servers, cursor = {}, ""
+        local foundServers = false
 
-    repeat
-        local success, result = pcall(function()
-            return game.HttpService:JSONDecode(game:HttpGet(
-                "https://games.roblox.com/v1/games/" .. gameId .. "/servers/Public?sortOrder=Asc&limit=100&cursor=" .. cursor
-            ))
-        end)
+        -- Retry mechanism for fetching server list
+        repeat
+            local success, result = pcall(function()
+                return game.HttpService:JSONDecode(game:HttpGet(
+                    "https://games.roblox.com/v1/games/" .. gameId .. "/servers/Public?sortOrder=Asc&limit=100&cursor=" .. cursor
+                ))
+            end)
 
-        if success and result and result.data then
-            for _, server in ipairs(result.data) do
-                if server.playing >= 14 and server.playing < server.maxPlayers and server.id ~= game.JobId then
-                    table.insert(servers, server.id)
+            if success and result and result.data then
+                for _, server in ipairs(result.data) do
+                    if server.playing >= 14 and server.playing < server.maxPlayers and server.id ~= game.JobId then
+                        table.insert(servers, server.id)
+                        foundServers = true
+                    end
+                end
+                cursor = result.nextPageCursor or ""
+            else
+                warn(`Failed to fetch servers on attempt {attempt}: `, result)
+                task.wait(retryDelay)
+                break
+            end
+        until cursor == "" or #servers >= 3 -- Tăng số server tìm được để có nhiều lựa chọn
+
+        if foundServers and #servers > 0 then
+            local targetServerId = servers[math.random(1, #servers)]
+            
+            -- Retry mechanism for teleportation
+            local teleportSuccess = pcall(function()
+                game:GetService("TeleportService"):TeleportToPlaceInstance(gameId, targetServerId, plr)
+            end)
+            
+            if teleportSuccess then
+                print(`Successfully initiated teleport to server {targetServerId}`)
+                return true
+            else
+                warn(`Teleport failed on attempt {attempt}`)
+            end
+        else
+            warn(`No suitable servers found on attempt {attempt}`)
+        end
+        
+        -- Wait before retry
+        if attempt < maxRetries then
+            task.wait(retryDelay * attempt) -- Exponential backoff
+        end
+    end
+    
+    warn("All server hop attempts failed. Staying in current server.")
+    return false
+end
+
+--// 📬 Webhook Notification Handler (Enhanced)
+local function webHookHandler(Mode)
+    local maxRetries = 3
+    
+    for attempt = 1, maxRetries do
+        local success = pcall(function()
+            local lCount = 1
+            for _, item in pairs(plr.Backpack:GetChildren()) do
+                if item.Name == "Lucky Arrow" then
+                    lCount += 1
                 end
             end
-            cursor = result.nextPageCursor or ""
+
+            local textContent, titleContent, descriptionContent, colorContent, imageContent, thumbnailContent, footerContent
+
+            if Mode == "luckyArrow" then
+                local req = request({Url = `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={plr.UserId}&size=48x48&format=png`})
+                local body = game:GetService("HttpService"):JSONDecode(req.Body)
+
+                titleContent = plr.Name
+                descriptionContent = os.date("%I:%M %p")
+                colorContent = 16776960
+                imageContent = {url = "https://static.wikia.nocookie.net/your-bizarre-adventure/images/f/fd/LuckyArrow.png/revision/latest?cb=20221020062009"}
+                thumbnailContent = {url = body.data[1].imageUrl}
+
+                if getgenv().Settings.PingOnLuckyArrow and lCount >=9 and readfile("YBA_AUTOHOP/lastLucky.txt") ~= plr.Name then
+                    writefile("YBA_AUTOHOP/lastLucky.txt",plr.Name)
+                    warn(getgenv().Settings.DiscordID)
+                    textContent = `<@{getgenv().Settings.DiscordID}>, your account, {plr.Name} has ~9/9 lucky arrows`
+                end
+                footerContent = {text = `{lCount}/9 lucky arrows`}
+            end
+
+            request({
+                Url = getgenv().Settings.URL,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = game:GetService("HttpService"):JSONEncode({
+                    content = textContent,
+                    embeds = {{
+                        title = titleContent,
+                        description = descriptionContent,
+                        color = colorContent,
+                        image = imageContent,
+                        thumbnail = thumbnailContent,
+                        footer = footerContent,
+                    }}
+                })
+            })
+        end)
+        
+        if success then
+            print(`Webhook sent successfully on attempt {attempt}`)
+            return true
         else
-            break
+            warn(`Webhook failed on attempt {attempt}`)
+            if attempt < maxRetries then
+                task.wait(1 * attempt) -- Wait longer each retry
+            end
         end
-    until cursor == "" or #servers >= 1
-
-    if #servers > 0 then
-        game:GetService("TeleportService"):TeleportToPlaceInstance(gameId, servers[math.random(1, #servers)], plr)
-    else
-        warn("No available servers found.")
     end
+    
+    warn("All webhook attempts failed")
+    return false
 end
 
---// 📬 Webhook Notification Handler
-local function webHookHandler(Mode)
-    local lCount = 1
-    for _, item in pairs(plr.Backpack:GetChildren()) do
-        if item.Name == "Lucky Arrow" then
-            lCount += 1
-        end
-    end
-
-    local textContent, titleContent, descriptionContent, colorContent, imageContent, thumbnailContent, footerContent
-
-    if Mode == "luckyArrow" then
-        
-        local req = request({Url = `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={plr.UserId}&size=48x48&format=png`})
-        local body = game:GetService("HttpService"):JSONDecode(req.Body)
-
-        titleContent = plr.Name
-        descriptionContent = os.date("%I:%M %p")
-        colorContent = 16776960
-        imageContent = {url = "https://static.wikia.nocookie.net/your-bizarre-adventure/images/f/fd/LuckyArrow.png/revision/latest?cb=20221020062009"}
-        thumbnailContent = {url = body.data[1].imageUrl}
-        
-        if getgenv().Settings.PingOnLuckyArrow and lCount >=9 and readfile("YBA_AUTOHOP/lastLucky.txt") ~= plr.Name then
-            
-            writefile("YBA_AUTOHOP/lastLucky.txt",plr.Name)
-            warn(getgenv().Settings.DiscordID)
-            textContent = `<@{getgenv().Settings.DiscordID}>, your account, {plr.Name} has ~9/9 lucky arrows`
-        end
-        footerContent = {text = `{lCount}/9 lucky arrows`}
-    end
-
-    request({
-        Url = getgenv().Settings.URL,
-        Method = "POST",
-        Headers = { ["Content-Type"] = "application/json" },
-        Body = game:GetService("HttpService"):JSONEncode({
-            content = textContent,
-            embeds = {{
-                title = titleContent,
-                description = descriptionContent,
-                color = colorContent,
-                image = imageContent,
-                thumbnail = thumbnailContent,
-                footer = footerContent,
-            }}
-        })
-    })
-end
-
---// 🎒 Inventory Processor
+--// 🎒 Enhanced Inventory Processor with Retry
 local function processInventory()
     if not getgenv().Settings.SellAll then return end
 
-    local uniqueItems = {}
-    for _, item in ipairs(plr.Backpack:GetChildren()) do
-        uniqueItems[item.Name] = item
-    end
+    local maxRetries = 3
+    
+    for attempt = 1, maxRetries do
+        local success = pcall(function()
+            local uniqueItems = {}
+            for _, item in ipairs(plr.Backpack:GetChildren()) do
+                uniqueItems[item.Name] = item
+            end
 
-    for name, item in pairs(uniqueItems) do
-        if name ~= "Lucky Arrow" and name ~= "Stand Arrow" then
-            task.wait(0.5)
-            plr.Character.Humanoid:EquipTool(item)
-            plr.Character.RemoteEvent:FireServer("EndDialogue", {
-                NPC = "Merchant",
-                Option = Option,
-                Dialogue = "Dialogue5"
-            })
+            for name, item in pairs(uniqueItems) do
+                if name ~= "Lucky Arrow" and name ~= "Stand Arrow" then
+                    task.wait(0.5)
+                    
+                    -- Retry equipping tool
+                    local equipSuccess = pcall(function()
+                        plr.Character.Humanoid:EquipTool(item)
+                    end)
+                    
+                    if equipSuccess then
+                        -- Retry selling
+                        pcall(function()
+                            plr.Character.RemoteEvent:FireServer("EndDialogue", {
+                                NPC = "Merchant",
+                                Option = Option,
+                                Dialogue = "Dialogue5"
+                            })
+                        end)
+                    end
+                end
+            end
+        end)
+        
+        if success then
+            return true
+        else
+            warn(`Inventory processing failed on attempt {attempt}`)
+            if attempt < maxRetries then
+                task.wait(1)
+            end
         end
     end
+    
+    warn("All inventory processing attempts failed")
+    return false
 end
 
 -- Auto Sell Inventory Every 12 Seconds
@@ -142,50 +218,73 @@ task.spawn(function()
     end
 end)
 
---// 🔧 Main Setup
+--// 🔧 Enhanced Main Setup with Retry
 local function setup()
-    -- Hook "Returner" InvokeServer call
-    local old
-    old = hookmetamethod(game, "__namecall", function(self, ...)
-        if tostring(self) == "Returner" and tostring(getnamecallmethod()) == "InvokeServer" then
-            return "  ___XP DE KEY"
-        end
-        return old(self, ...)
-    end)
+    local maxRetries = 3
+    
+    for attempt = 1, maxRetries do
+        local success = pcall(function()
+            -- Hook "Returner" InvokeServer call
+            local old
+            old = hookmetamethod(game, "__namecall", function(self, ...)
+                if tostring(self) == "Returner" and tostring(getnamecallmethod()) == "InvokeServer" then
+                    return "  ___XP DE KEY"
+                end
+                return old(self, ...)
+            end)
 
-    -- Prevent spawn distance checks
-    local vector3Metatable = getrawmetatable(Vector3.new())
-    local oldIndex = vector3Metatable.__index
-    setreadonly(vector3Metatable, false)
-    vector3Metatable.__index = newcclosure(function(self, idx)
-        if string.lower(idx) == "magnitude" and getcallingscript() == replicatedFirst.ItemSpawn then
-            return 0
-        end
-        return oldIndex(self, idx)
-    end)
-    setreadonly(vector3Metatable, true)
+            -- Prevent spawn distance checks
+            local vector3Metatable = getrawmetatable(Vector3.new())
+            local oldIndex = vector3Metatable.__index
+            setreadonly(vector3Metatable, false)
+            vector3Metatable.__index = newcclosure(function(self, idx)
+                if string.lower(idx) == "magnitude" and getcallingscript() == replicatedFirst.ItemSpawn then
+                    return 0
+                end
+                return oldIndex(self, idx)
+            end)
+            setreadonly(vector3Metatable, true)
 
-    -- Rename items based on their prompt text
-    for _, item in pairs(itemSpawns:GetChildren()) do
-        local prox = item:WaitForChild("ProximityPrompt", 9)
-        item.Name = prox.ObjectText
-    end
+            -- Rename items based on their prompt text
+            for _, item in pairs(itemSpawns:GetChildren()) do
+                local prox = item:WaitForChild("ProximityPrompt", 9)
+                if prox then
+                    item.Name = prox.ObjectText
+                end
+            end
 
-    -- Handle newly spawned items
-    itemSpawns.ChildAdded:Connect(function(item)
-        print("new item added to workspace")
-        local prox = item:WaitForChild("ProximityPrompt", 9)
-        item.Name = prox.ObjectText
-        for _, v in pairs(itemSpawns:GetDescendants()) do
-            if v:IsA("ProximityPrompt") and v.MaxActivationDistance == 0 and v.Name ~= "Proximity Prompt __" then
-                v.Name = "ProximityPrompt __"
+            -- Handle newly spawned items
+            itemSpawns.ChildAdded:Connect(function(item)
+                print("new item added to workspace")
+                local prox = item:WaitForChild("ProximityPrompt", 9)
+                if prox then
+                    item.Name = prox.ObjectText
+                end
+                
+                for _, v in pairs(itemSpawns:GetDescendants()) do
+                    if v:IsA("ProximityPrompt") and v.MaxActivationDistance == 0 and v.Name ~= "Proximity Prompt __" then
+                        v.Name = "ProximityPrompt __"
+                    end
+                end
+
+                for _, v in pairs(itemSpawns:GetChildren()) do
+                    if not v:FindFirstChild("ProximityPrompt") then v:Destroy() end
+                end
+            end)
+        end)
+        
+        if success then
+            print(`Setup completed successfully on attempt {attempt}`)
+            return true
+        else
+            warn(`Setup failed on attempt {attempt}`)
+            if attempt < maxRetries then
+                task.wait(1)
             end
         end
-
-        for _, v in pairs(itemSpawns:GetChildren()) do
-            if not v:FindFirstChild("ProximityPrompt") then v:Destroy() end
-        end
-    end)
+    end
+    
+    error("Setup failed after all retry attempts")
 end
 
 local function checkForKickMessage()
@@ -196,29 +295,56 @@ local function checkForKickMessage()
     return false
 end
 
---// ▶️ Skip Loading Screen and Enter Game
-if not plr.Character:FindFirstChild("RemoteEvent") then
-    task.wait(1)    
+--// ▶️ Enhanced Game Entry with Retry
+local function enterGame()
+    local maxRetries = 5
+    
+    for attempt = 1, maxRetries do
+        local success = pcall(function()
+            if not plr.Character:FindFirstChild("RemoteEvent") then
+                task.wait(1)    
+            end
+            plr.Character.RemoteEvent:FireServer("PressedPlay")
+            loaded = true
+        end)
+        
+        if success then
+            print(`Game entry successful on attempt {attempt}`)
+            break
+        else
+            warn(`Game entry failed on attempt {attempt}`)
+            if attempt < maxRetries then
+                task.wait(2)
+            end
+        end
+    end
+    
+    task.spawn(function()
+        pcall(function()
+            workspace:WaitForChild("LoadingScreen",90):WaitForChild("Song",90).SoundId = getcustomasset("YBA_AUTOHOP/theme.mp3")
+        end)
+    end)
 end
-plr.Character.RemoteEvent:FireServer("PressedPlay")
-loaded = true
-task.spawn(function()
-    workspace:WaitForChild("LoadingScreen",90):WaitForChild("Song",90).SoundId = getcustomasset("YBA_AUTOHOP/theme.mp3")
-end)
 
---// 🚀 Start Automation
+--// 🚀 Start Automation with Enhanced Error Handling
 if not getgenv().Settings.AutoFarm then return end
+
+enterGame()
+
 repeat task.wait(0.5) until loaded
+
 local console = loadstring(game:HttpGet("https://raw.githubusercontent.com/crcket/ROBLOX/refs/heads/main/crckonsle.lua"))()
 
 task.wait(12)
 setup()
 print("ran setup")
 task.spawn(function()
-    console.Send(`ran setup @ {game.JobId}!`,"ANNOUNCEMENT")
+    pcall(function()
+        console.Send(`ran setup @ {game.JobId}!`,"ANNOUNCEMENT")
+    end)
 end)
 
---// 🧲 Auto Pickup Logic
+--// 🧲 Enhanced Auto Pickup Logic
 local isNotOnAlready = true
 local lastPickupTime = tick()
 local currentItem = nil
@@ -229,13 +355,15 @@ local function startItemTeleportLoop()
     if heartbeatConnection then
         heartbeatConnection:Disconnect()
     end
-    
+
     heartbeatConnection = game:GetService("RunService").Heartbeat:Connect(function()
-        if currentItem and currentItem.Parent and currentItem.PrimaryPart and not isNotOnAlready then
-            local itemPos = currentItem.PrimaryPart.Position
-            local belowItemPos = itemPos + Vector3.new(0, -10, 0)
-            plr.Character.HumanoidRootPart.CFrame = CFrame.new(belowItemPos)
-        end
+        pcall(function()
+            if currentItem and currentItem.Parent and currentItem.PrimaryPart and not isNotOnAlready then
+                local itemPos = currentItem.PrimaryPart.Position
+                local belowItemPos = itemPos + Vector3.new(0, -10, 0)
+                plr.Character.HumanoidRootPart.CFrame = CFrame.new(belowItemPos)
+            end
+        end)
     end)
 end
 
@@ -243,94 +371,150 @@ itemSpawns.ChildAdded:Connect(function(item)
     repeat task.wait() until item.Name ~= "Model" and isNotOnAlready and not plr.Character.HumanoidRootPart.Anchored
     if getgenv().Settings.AutoFarm and item.PrimaryPart and item:FindFirstChild("ProximityPrompt __") then
         print(`-> picking up {item.Name}!`)
-        task.spawn(function() console.Send(`picking up {item.Name}!`,"ITEM_PICKUP") end)
+        task.spawn(function() 
+            pcall(function()
+                console.Send(`picking up {item.Name}!`,"ITEM_PICKUP") 
+            end)
+        end)
+        
         lastPickupTime = tick()
         isNotOnAlready = false
         currentItem = item
-        
+
         -- Bắt đầu loop teleport xuống dưới item
         startItemTeleportLoop()
-        
+
         task.wait(getgenv().Settings.PickupDelay or 0.5)
-        firesignal(item:FindFirstChildWhichIsA("ProximityPrompt").Triggered)
+        
+        -- Enhanced pickup with retry
+        local pickupSuccess = false
+        for pickupAttempt = 1, 3 do
+            local success = pcall(function()
+                firesignal(item:FindFirstChildWhichIsA("ProximityPrompt").Triggered)
+            end)
+            
+            if success then
+                pickupSuccess = true
+                break
+            else
+                warn(`Pickup attempt {pickupAttempt} failed`)
+                task.wait(0.5)
+            end
+        end
+        
+        if not pickupSuccess then
+            warn("All pickup attempts failed, removing item")
+            pcall(function() item.Parent = nil end)
+        end
+        
         spawn(function()
             task.wait((getgenv().Settings.PickupDelay or 0.5)+0.5)
             if item.Parent then
-                firesignal(item:FindFirstChildWhichIsA("ProximityPrompt").Triggered)
+                pcall(function()
+                    firesignal(item:FindFirstChildWhichIsA("ProximityPrompt").Triggered)
+                end)
                 task.wait((getgenv().Settings.PickupDelay or 0.5)+0.5)
                 if item.Parent then
                     item.Parent = nil
                     task.spawn(function()
-                        console.Send(`{item.Name} took too long to pick up.. deleting`,"ITEM_TIMEOUT")
+                        pcall(function()
+                            console.Send(`{item.Name} took too long to pick up.. deleting`,"ITEM_TIMEOUT")
+                        end)
                     end)
                 end
             end
         end)
-        item.AncestryChanged:Wait()
         
+        item.AncestryChanged:Wait()
+
         -- Dừng loop và reset
         currentItem = nil
         if heartbeatConnection then
             heartbeatConnection:Disconnect()
             heartbeatConnection = nil
         end
-        
+
         isNotOnAlready = true
-        plr.Character.HumanoidRootPart.CFrame = CFrame.new(-23, -33, 28)
+        pcall(function()
+            plr.Character.HumanoidRootPart.CFrame = CFrame.new(-23, -33, 28)
+        end)
     end
 end)
 
---// 🧾 Auto Sell When "Message" Pops Up
+--// 🧾 Enhanced Auto Sell When "Message" Pops Up
 plrGui.ChildAdded:Connect(function(thing)
     if thing.Name == "Message" then
         task.wait()
-        local itemName = thing:WaitForChild("TextLabel").Text:match("%d+%s+(.+) in your inventory"):gsub("%(s%)$", "")
-        local item = plr.Backpack:FindFirstChild(itemName)
-        if item then item.Parent = plr.Character end
+        local success = pcall(function()
+            local itemName = thing:WaitForChild("TextLabel").Text:match("%d+%s+(.+) in your inventory"):gsub("%(s%)$", "")
+            local item = plr.Backpack:FindFirstChild(itemName)
+            if item then item.Parent = plr.Character end
 
-        plr.Character.RemoteEvent:FireServer("EndDialogue", {
-            NPC = "Merchant",
-            Option = Option,
-            Dialogue = "Dialogue5"
-        })
+            plr.Character.RemoteEvent:FireServer("EndDialogue", {
+                NPC = "Merchant",
+                Option = Option,
+                Dialogue = "Dialogue5"
+            })
+        end)
+        
+        if not success then
+            warn("Failed to process inventory message")
+        end
     end
 end)
 
---// 🍀 Auto Buy Lucky Arrows
+--// 🍀 Enhanced Auto Buy Lucky Arrows
 plr.PlayerStats.Money.Changed:Connect(function()
-    if not luckyBought and plr.PlayerStats.Money.Value >= 50000 then
-        local luckyNum = 0
-        for _, v in pairs(plr.Backpack:GetChildren()) do
-            if v.Name == "Lucky Arrow" then luckyNum += 1 end
-        end
-        if luckyNum <= 8 then
-            luckyBought = true
-            task.wait(1)
-            plr.Character.RemoteEvent:FireServer("PurchaseShopItem", { ItemName = "1x Lucky Arrow" })
-            webHookHandler("luckyArrow")
-            local log = `{plr.Name} {os.date("%I:%M %p")}\n`
-            writefile("YBA_AUTOHOP/Count.txt", readfile("YBA_AUTOHOP/Count.txt") .. log)
-        else
-            luckyBought = true
-            if getgenv().Settings.PingOnLuckyArrow then
-                warn(readfile("YBA_AUTOHOP/lastLucky.txt"))
-                if readfile("YBA_AUTOHOP/lastLucky.txt") == plr.Name then
-                    else
-                    webHookHandler("luckyArrow")
-                end
-                warn("didthislucksend")
+    pcall(function()
+        if not luckyBought and plr.PlayerStats.Money.Value >= 50000 then
+            local luckyNum = 0
+            for _, v in pairs(plr.Backpack:GetChildren()) do
+                if v.Name == "Lucky Arrow" then luckyNum += 1 end
             end
-            getgenv().Settings.SellAll = false
-            Option = "Option1"
+            if luckyNum <= 8 then
+                luckyBought = true
+                task.wait(1)
+                
+                -- Retry mechanism for purchase
+                for attempt = 1, 3 do
+                    local purchaseSuccess = pcall(function()
+                        plr.Character.RemoteEvent:FireServer("PurchaseShopItem", { ItemName = "1x Lucky Arrow" })
+                    end)
+                    
+                    if purchaseSuccess then
+                        webHookHandler("luckyArrow")
+                        local log = `{plr.Name} {os.date("%I:%M %p")}\n`
+                        writefile("YBA_AUTOHOP/Count.txt", readfile("YBA_AUTOHOP/Count.txt") .. log)
+                        break
+                    else
+                        warn(`Purchase attempt {attempt} failed`)
+                        task.wait(1)
+                    end
+                end
+            else
+                luckyBought = true
+                if getgenv().Settings.PingOnLuckyArrow then
+                    warn(readfile("YBA_AUTOHOP/lastLucky.txt"))
+                    if readfile("YBA_AUTOHOP/lastLucky.txt") == plr.Name then
+                        -- Already notified
+                    else
+                        webHookHandler("luckyArrow")
+                    end
+                    warn("didthislucksend")
+                end
+                getgenv().Settings.SellAll = false
+                Option = "Option1"
+            end
         end
-    end
+    end)
 end)
 
---// ⏰ Server Hop if Inactive
+--// ⏰ Enhanced Server Hop Timer with Retry
 task.spawn(function()
     while task.wait(0.5) do
-        if tick() - lastPickupTime > 5*2 or checkForKickMessage() then -- 10*2 to account for 0.5
-            serverHop() -- maybe lastditch l8r
+        if tick() - lastPickupTime > 6 or checkForKickMessage() then
+            print("Initiating server hop due to inactivity or kick message")
+            serverHop()
         end
     end
 end)
