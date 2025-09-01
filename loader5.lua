@@ -4,7 +4,7 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 -- urls
-local remoteKeyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key.txt" -- URL mới để lấy key
+local remoteKeyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key.txt" -- URL để lấy key
 local sheetURL = "https://api.sheetbest.com/sheets/15da3e15-a25e-423c-bdbf-92a1deaae024"
 local jsonURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/x.json"
 local loaderURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/loader.lua"
@@ -16,9 +16,23 @@ local maxSlots = 5
 local pingInterval = 30
 local username = Players.LocalPlayer.Name
 
--- Cấu hình loader sớm để có thể lấy Key
-getgenv().TDX_Config = getgenv().TDX_Config or {
-    ["Key"] = "", -- Để trống hoặc cung cấp một giá trị mặc định nếu cần
+-- **CẢI TIẾN KHỞI TẠO CẤU HÌNH TDX_Config**
+-- Đảm bảo getgenv().TDX_Config là một bảng. Nếu đã tồn tại, giữ nguyên, nếu không, tạo bảng rỗng.
+getgenv().TDX_Config = getgenv().TDX_Config or {}
+
+-- Đảm bảo trường "Key" tồn tại trong TDX_Config.
+-- Nếu người dùng đã cài đặt Key trước đó (ví dụ qua GUI hoặc script khác), giá trị đó sẽ được giữ lại.
+-- Nếu chưa có, nó sẽ được gán giá trị mặc định là chuỗi rỗng.
+if getgenv().TDX_Config["Key"] == nil then
+    getgenv().TDX_Config["Key"] = ""
+end
+
+-- Sau khi đảm bảo TDX_Config và TDX_Config.Key tồn tại, giờ đây chúng ta có thể đọc inputKey một cách an toàn.
+local inputKey = getgenv().TDX_Config.Key
+
+-- Điền các giá trị mặc định khác cho TDX_Config nếu chúng chưa được đặt.
+-- Điều này sẽ không ghi đè các giá trị mà người dùng đã đặt trước đó.
+local defaultConfig = {
     ["mapvoting"] = "MILITARY BASE",
     ["Return Lobby"] = true,
     ["x1.5 Speed"] = true,
@@ -30,17 +44,27 @@ getgenv().TDX_Config = getgenv().TDX_Config or {
     ["Auto Difficulty"] = "Tower Battles"
 }
 
-local inputKey = getgenv().TDX_Config.Key
+for key, value in pairs(defaultConfig) do
+    if getgenv().TDX_Config[key] == nil then
+        getgenv().TDX_Config[key] = value
+    end
+end
+-- **KẾT THÚC CẢI TIẾN KHỞI TẠO CẤU HÌNH**
 
--- Hàm mới để xác thực key từ xa
+
+-- Hàm để xác thực key từ xa
 local function validateRemoteKey(key)
-    if not key or key == "" then return false end -- Kiểm tra nếu key rỗng
+    if not key or key == "" then
+        warn("[✘] Key truy cập không được cung cấp hoặc rỗng.")
+        return false
+    end
+
     local success, content = pcall(function()
         return game:HttpGet(remoteKeyURL)
     end)
 
     if not success then
-        warn("[✘] Không thể tải key từ xa:", content)
+        warn("[✘] Không thể tải danh sách key từ xa:", content)
         return false
     end
 
@@ -66,7 +90,6 @@ local function updateStatus(username, key, status)
         status = status,
         last_ping = os.date("!%Y-%m-%dT%H:%M:%SZ")
     }
-    -- Sử dụng HttpService:PostAsync cho HttpPost an toàn hơn (nếu có sẵn hoặc giả định môi trường hỗ trợ)
     pcall(function() HttpService:PostAsync(sheetURL, HttpService:JSONEncode(data), Enum.HttpContentType.ApplicationJson) end)
 end
 
@@ -79,8 +102,7 @@ local function checkKeySlot()
     if not responseSuccess then
         warn("[✘] Không thể truy cập SheetBest để kiểm tra slot key:", response)
         -- Cho phép người dùng tiếp tục nếu không thể kiểm tra slot để tránh bị kick oan
-        -- Hoặc bạn có thể chọn kick người dùng nếu muốn bảo mật nghiêm ngặt hơn
-        return true 
+        return true
     end
 
     local dataSuccess, data = pcall(function()
@@ -97,7 +119,8 @@ local function checkKeySlot()
         if row.key == inputKey and row.status == "online" then
             local success, lastPing = pcall(function()
                 -- Đảm bảo định dạng thời gian phù hợp với os.time
-                return os.time(os.date("!*t", os.time{year=tonumber(row.last_ping:sub(1,4)), month=tonumber(row.last_ping:sub(6,7)), day=tonumber(row.last_ping:sub(9,10)), hour=tonumber(row.last_ping:sub(12,13)), min=tonumber(row.last_ping:sub(15,16)), sec=tonumber(row.last_ping:sub(18,19))}))
+                local year, month, day, hour, min, sec = row.last_ping:match("^(%d%d%d%d)-(%d%d)-(%d%d)T(%d%d):(%d%d):(%d%d)Z")
+                return os.time({year=tonumber(year), month=tonumber(month), day=tonumber(day), hour=tonumber(hour), min=tonumber(min), sec=tonumber(sec)})
             end)
             if success and os.time() - lastPing <= pingInterval * 2 then
                 count = count + 1
@@ -153,8 +176,8 @@ _G.WaveConfig = {
     ["WAVE 8"] = 44,
     ["WAVE 9"] = 44,
     ["WAVE 10"] = 44,
-    ["WAVE 11"] = 44, 
-    ["WAVE 12"] = 44, 
+    ["WAVE 11"] = 44,
+    ["WAVE 12"] = 44,
     ["WAVE 13"] = 44,
     ["WAVE 14"] = 144,
     ["WAVE 15"] = 44,
