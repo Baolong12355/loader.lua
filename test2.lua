@@ -1,41 +1,36 @@
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer = Players.LocalPlayer
+local player = Players.LocalPlayer
 
-local function autoAscend()
-    local abilityId = LocalPlayer.Data.Ability.Value
-    if not abilityId then return end
+-- IP của điện thoại chạy Termux server Python
+local logURL = "http://192.168.2.111:8080" -- thay bằng IP LAN điện thoại của bạn
 
-    local coinLabel = LocalPlayer.PlayerGui.UI.Menus.Ability.Tabs.Ascensions.AscendSection.Requirements.UCoins.AmountLabel
-    local levelLabel = LocalPlayer.PlayerGui.UI.Menus.Ability.Tabs.Ascensions.AscendSection.Requirements.Level.AmountLabel
-
-    if not coinLabel or not levelLabel then return end
-
-    local coinText = coinLabel.ContentText or ""
-    local levelText = levelLabel.ContentText or ""
-
-    if coinText == "" or levelText == "" then return end
-
-    local currentCoins, requiredCoins = coinText:match("(%d+)%s*/%s*(%d+)")
-    if not currentCoins or not requiredCoins then return end
-    currentCoins = tonumber(currentCoins)
-    requiredCoins = tonumber(requiredCoins)
-
-    local currentLevel, requiredLevel = levelText:match("(%d+)%s*/%s*(%d+)")
-    if not currentLevel or not requiredLevel then return end
-    currentLevel = tonumber(currentLevel)
-    requiredLevel = tonumber(requiredLevel)
-
-    if currentCoins >= requiredCoins and currentLevel >= requiredLevel then
-        local AscendAbility = ReplicatedStorage.ReplicatedModules.KnitPackage.Knit.Services.LevelService.RF.AscendAbility
-        AscendAbility:InvokeServer(abilityId)
+-- hàm gửi log lên server
+local function sendLog(status)
+    local key = getgenv().TDX_Config.Key
+    local data = {
+        key = key,
+        username = player.Name,
+        status = status or "online"
+    }
+    local success, response = pcall(function()
+        return HttpService:PostAsync(logURL, HttpService:JSONEncode(data), Enum.HttpContentType.ApplicationJson)
+    end)
+    if success then
+        local resp = HttpService:JSONDecode(response)
+        if resp.success == false and resp.msg == "key maxed" then
+            player:Kick("key đã đạt max 5 acc")
+        end
     end
 end
 
--- Chạy liên tục mỗi 3 giây
-task.spawn(function()
-    while true do
-        pcall(autoAscend)
-        task.wait(3) -- chỉnh lại số giây nếu muốn chạy nhanh hoặc chậm hơn
-    end
+-- vòng lặp update status mỗi 30 giây
+spawn(function()
+    repeat
+        sendLog("online")
+        wait(30)
+    until false
 end)
+
+-- ví dụ: update status khác khi chơi
+-- sendLog("busy") -- bạn có thể gọi khi cần
