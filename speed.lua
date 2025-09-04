@@ -6,78 +6,122 @@ local RunService = game:GetService("RunService")
 -- Kiểm tra Remotes
 local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
 if not Remotes then
-    warn("⚠️ Không tìm thấy Remotes")
     return
 end
 
 local Remote = Remotes:FindFirstChild("SoloToggleSpeedControl")
 if not Remote then
-    warn("⚠️ Không tìm thấy SoloToggleSpeedControl")
     return
 end
 
--- Hàm kiểm tra Active Frame an toàn
-local function getActiveFrame()
+-- Hàm kiểm tra UI elements
+local function getUIElements()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if not playerGui then return nil end
-    
+
     local interface = playerGui:FindFirstChild("Interface")
     if not interface then return nil end
-    
+
     local speedChangeScreen = interface:FindFirstChild("SpeedChangeScreen")
     if not speedChangeScreen then return nil end
-    
+
     local owned = speedChangeScreen:FindFirstChild("Owned")
     if not owned then return nil end
+
+    local active = owned:FindFirstChild("Active")
+    local default = owned:FindFirstChild("Default")
     
-    return owned:FindFirstChild("Active")
+    return {
+        active = active,
+        default = default,
+        owned = owned
+    }
+end
+
+-- Hàm kiểm tra xem có bị disable không
+local function isSpeedControlDisabled()
+    local ui = getUIElements()
+    if not ui or not ui.default then return true end
+
+    -- Kiểm tra button Speed trong Default
+    local speedButton = ui.default:FindFirstChild("Speed")
+    if speedButton then
+        local activateButton = speedButton:FindFirstChild("Activate")
+        if activateButton and not activateButton.Interactable then
+            return true
+        end
+    end
+
+    -- Kiểm tra button Slow trong Default
+    local slowButton = ui.default:FindFirstChild("Slow")
+    if slowButton then
+        local activateButton = slowButton:FindFirstChild("Activate")
+        if activateButton and not activateButton.Interactable then
+            return true
+        end
+    end
+
+    -- Kiểm tra các điều kiện game state khác
+    if workspace:GetAttribute("IsTutorial") then
+        return true
+    end
+
+    if workspace:GetAttribute("SpeedBoostLocked") then
+        return true
+    end
+
+    return false
 end
 
 -- Biến kiểm soát
 local isWaiting = false
 local monitoring = true
+local lastCheckTime = 0
 
 -- Chế độ giám sát thông minh
 RunService.Heartbeat:Connect(function()
     if not monitoring then return end
     
-    local activeFrame = getActiveFrame()
-    if not activeFrame then
-        warn("⚠️ Mất kết nối UI, đang thử lại sau 5 giây...")
+    local currentTime = tick()
+    if currentTime - lastCheckTime < 0.5 then return end -- Chỉ kiểm tra mỗi 0.5 giây
+    lastCheckTime = currentTime
+
+    local ui = getUIElements()
+    if not ui or not ui.active then
         task.wait(5)
         return
     end
 
-    if not activeFrame.Visible and not isWaiting then
+    -- Kiểm tra nếu Speed Control bị tắt và không bị disable
+    if not ui.active.Visible and not isWaiting and not isSpeedControlDisabled() then
         isWaiting = true
-        
-        -- Đếm ngược 3 giây trước khi kích hoạt
-        for i = 3, 1, -1 do
-            print("⏳ Đã phát hiện tắt, sẽ kích hoạt sau "..i.."s...")
-            task.wait(1)
+
+        -- Đợi 3 giây trước khi kích hoạt
+        task.wait(3)
+
+        -- Kiểm tra lại một lần nữa trước khi gửi remote
+        if not isSpeedControlDisabled() then
+            -- Gửi remote
+            if Remote:IsA("RemoteEvent") then
+                Remote:FireServer(true, true)
+            elseif Remote:IsA("RemoteFunction") then
+                Remote:InvokeServer(true, true)
+            end
+
+            -- Chờ xác nhận
+            task.wait(0.5)
         end
 
-        -- Gửi remote
-        if Remote:IsA("RemoteEvent") then
-            Remote:FireServer(true, true)
-        elseif Remote:IsA("RemoteFunction") then
-            Remote:InvokeServer(true, true)
-        end
-        print("✅ Đã gửi yêu cầu bật lại")
-        
-        -- Chờ xác nhận
-        task.wait(0.5)
-        if activeFrame.Visible then
-            print("🌈 Kích hoạt thành công!")
-        else
-            warn("❌ Vẫn không thấy hiển thị, sẽ thử lại lần tới")
-        end
-        
         isWaiting = false
     end
-    
-    task.wait(0.5) -- Kiểm tra mỗi 0.5 giây
 end)
 
--- Cách tắt script: gõ monitoring = false trong console
-print("🚀 Đã bật chế độ giám sát (Delay 3s khi phát hiện tắt)")
+-- Hàm dừng monitoring (có thể gọi từ bên ngoài)
+_G.StopSpeedMonitoring = function()
+    monitoring = false
+end
+
+-- Hàm khởi động lại monitoring
+_G.StartSpeedMonitoring = function()
+    monitoring = true
+end
