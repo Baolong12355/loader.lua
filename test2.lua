@@ -23,7 +23,7 @@ local skipTowerTypes = {
         ["Cryo Helicopter"] = true,
         ["Medic"] = true,
         ["Combat Drone"] = true,
-        ["Machine Gunner" = true
+        ["Machine Gunner"] = true  -- Skip Machine Gunner completely
 }
 
 local fastTowers = {
@@ -78,7 +78,17 @@ local function getRange(tower)
         return 0
 end
 
--- NEW: Function to get skill range from ability config
+-- NEW: Check if ability needs manual aiming (position)
+local function needsManualAiming(ability)
+        if not ability or not ability.Config then return false end
+        
+        local config = ability.Config
+        return config.IsManualAimAtPath or 
+               config.IsManualAimAtGround or 
+               config.IsManualAimAtTower or 
+               config.IsManualAimAtEnemy or 
+               config.IsManualRotation
+end
 local function getSkillRange(ability)
         if not ability or not ability.Config then return nil end
         
@@ -463,6 +473,7 @@ RunService.Heartbeat:Connect(function()
                         
                         -- NEW: Get skill range dynamically
                         local skillRange = getEffectiveSkillRange(tower, ability, towerRange)
+                        local requiresManualAim = needsManualAiming(ability)
 
                         -- Jet Trooper skip skill 1
                         if tower.Type == "Jet Trooper" and index == 1 then
@@ -549,63 +560,70 @@ RunService.Heartbeat:Connect(function()
                         local needsSpecialTarget = typeof(isSpecialTower) == "table" and isSpecialTower.onlyAbilityIndex == index or isSpecialTower == true
 
                         if not targetPos and not needsSpecialTarget and allowUse then
-                                -- Kiểm tra xem có enemy trong skill range không
-                                local enemiesInRange = {}
-                                for _, enemy in ipairs(getEnemies()) do
-                                        if enemy.GetPosition then
-                                                local ePos = enemy:GetPosition()
-                                                if enemy.Type == "Arrow" then continue end -- Skip arrows
-                                                if skipAirTowers[tower.Type] and enemy.IsAirUnit then continue end -- Skip air for certain towers
-                                                
-                                                if getDistance2D(ePos, pos) <= skillRange then
-                                                        table.insert(enemiesInRange, enemy)
+                                if requiresManualAim then
+                                        -- Skill cần manual aim - tìm target
+                                        local enemiesInRange = {}
+                                        for _, enemy in ipairs(getEnemies()) do
+                                                if enemy.GetPosition then
+                                                        local ePos = enemy:GetPosition()
+                                                        if enemy.Type == "Arrow" then continue end -- Skip arrows
+                                                        if skipAirTowers[tower.Type] and enemy.IsAirUnit then continue end -- Skip air for certain towers
+                                                        
+                                                        if getDistance2D(ePos, pos) <= skillRange then
+                                                                table.insert(enemiesInRange, enemy)
+                                                        end
                                                 end
                                         end
-                                end
-                                
-                                if #enemiesInRange > 0 then
-                                        targetPos = findTarget(pos, skillRange, {
-                                                mode = "farthest",
-                                                excludeArrows = true,
-                                                excludeAir = skipAirTowers[tower.Type] or false
-                                        })
-                                        if not targetPos then allowUse = false end
+                                        
+                                        if #enemiesInRange > 0 then
+                                                targetPos = findTarget(pos, skillRange, {
+                                                        mode = "farthest",
+                                                        excludeArrows = true,
+                                                        excludeAir = skipAirTowers[tower.Type] or false
+                                                })
+                                                if not targetPos then allowUse = false end
+                                        else
+                                                allowUse = false -- Không có enemy trong skill range
+                                        end
                                 else
-                                        allowUse = false -- Không có enemy trong skill range
+                                        -- Skill không cần manual aim - chỉ cần activate
+                                        allowUse = true
                                 end
                         end
 
                         -- General logic for special towers with targeting
                         if not targetPos and needsSpecialTarget and allowUse then
-                                -- Kiểm tra xem có enemy trong skill range không
-                                local enemiesInRange = {}
-                                for _, enemy in ipairs(getEnemies()) do
-                                        if enemy.GetPosition then
-                                                local ePos = enemy:GetPosition()
-                                                if getDistance2D(ePos, pos) <= skillRange then
-                                                        table.insert(enemiesInRange, enemy)
+                                if requiresManualAim then
+                                        -- Special tower với manual aim
+                                        local enemiesInRange = {}
+                                        for _, enemy in ipairs(getEnemies()) do
+                                                if enemy.GetPosition then
+                                                        local ePos = enemy:GetPosition()
+                                                        if getDistance2D(ePos, pos) <= skillRange then
+                                                                table.insert(enemiesInRange, enemy)
+                                                        end
                                                 end
                                         end
-                                end
-                                
-                                if #enemiesInRange > 0 then
-                                        targetPos = findTarget(pos, skillRange, {
-                                                mode = "farthest",
-                                                excludeArrows = true,
-                                                excludeAir = skipAirTowers[tower.Type] or false
-                                        })
-                                        if not targetPos then allowUse = false end
-                                else
-                                        allowUse = false -- Không có enemy trong skill range
+                                        
+                                        if #enemiesInRange > 0 then
+                                                targetPos = findTarget(pos, skillRange, {
+                                                        mode = "farthest",
+                                                        excludeArrows = true,
+                                                        excludeAir = skipAirTowers[tower.Type] or false
+                                                })
+                                                if not targetPos then allowUse = false end
+                                        else
+                                                allowUse = false -- Không có enemy trong skill range
+                                        end
                                 end
                         end
 
                         -- Execute skill nếu điều kiện đáp ứng
                         if allowUse then
-                                if (needsSpecialTarget or not isSpecialTower) and targetPos then
-                                        SendSkill(hash, index, targetPos)
-                                elseif not needsSpecialTarget and not targetPos then
-                                        SendSkill(hash, index)
+                                if requiresManualAim and targetPos then
+                                        SendSkill(hash, index, targetPos)  -- Skill cần manual aim với position
+                                elseif not requiresManualAim then
+                                        SendSkill(hash, index)  -- Skill không cần manual aim
                                 end
                         end
                 end
