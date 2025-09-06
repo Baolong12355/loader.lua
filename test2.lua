@@ -22,7 +22,8 @@ local skipTowerTypes = {
         ["Helicopter"] = true,
         ["Cryo Helicopter"] = true,
         ["Medic"] = true,
-        ["Combat Drone"] = true
+        ["Combat Drone"] = true,
+        ["Machine Gunner" = true
 }
 
 local fastTowers = {
