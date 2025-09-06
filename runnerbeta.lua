@@ -60,7 +60,7 @@ local defaultConfig = {
     ["MacroStepDelay"] = 0.1,
     ["MaxConcurrentRebuilds"] = 5,
     ["MonitorCheckDelay"] = 0.05,
-    ["AllowParallelTargets"] = false,
+    ["AllowParallelTargets"] = true,
     ["AllowParallelSkips"] = true  -- New option for parallel skip waves
 }
 
