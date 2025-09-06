@@ -48,7 +48,7 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["Macro Name"] = "e",
+    ["Macro Name"] = "hw3",
     ["PlaceMode"] = "Rewrite",
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
