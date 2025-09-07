@@ -659,6 +659,11 @@ RunService.Heartbeat:Connect(function()
                         -- General targeting for directional towers
                         local directional = directionalTowerTypes[tower.Type]
                         local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
+                        
+                        -- NEW: Also check if ability requires manual aiming (needs pos)
+                        if ability and requiresManualAiming(ability) then
+                                sendWithPos = true
+                        end
 
                         if not targetPos and sendWithPos and allowUse then
                                 -- NEW: Use enhanced targeting system
