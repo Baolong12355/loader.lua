@@ -210,7 +210,7 @@ end
 -- NEW: Check if ability has splash damage for enhanced targeting
 local function hasSplashDamage(ability)
         if not ability or not ability.Config then return false end
-        
+
         -- Check for splash damage indicators
         if ability.Config.ProjectileHitData then
                 local hitData = ability.Config.ProjectileHitData
@@ -218,41 +218,41 @@ local function hasSplashDamage(ability)
                         return true, hitData.SplashRadius
                 end
         end
-        
+
         -- Check for radius effects
         if ability.Config.HasRadiusEffect and ability.Config.EffectRadius and ability.Config.EffectRadius > 0 then
                 return true, ability.Config.EffectRadius
         end
-        
+
         return false, 0
 end
 
 -- NEW: Get effective range for ability (ability range overrides tower range)
 local function getAbilityRange(ability, defaultRange)
         if not ability or not ability.Config then return defaultRange end
-        
+
         local config = ability.Config
-        
+
         -- Check for infinite range
         if config.ManualAimInfiniteRange == true then
                 return math.huge
         end
-        
+
         -- Check for custom manual aim range
         if config.ManualAimCustomRange and config.ManualAimCustomRange > 0 then
                 return config.ManualAimCustomRange
         end
-        
+
         -- Check for ability-specific range
         if config.Range and config.Range > 0 then
                 return config.Range
         end
-        
+
         -- Check for custom query data range
         if config.CustomQueryData and config.CustomQueryData.Range then
                 return config.CustomQueryData.Range
         end
-        
+
         -- Default to tower range
         return defaultRange
 end
@@ -260,7 +260,7 @@ end
 -- NEW: Check if ability requires manual aiming
 local function requiresManualAiming(ability)
         if not ability or not ability.Config then return false end
-        
+
         return ability.Config.IsManualAimAtGround == true or 
                ability.Config.IsManualAimAtPath == true
 end
@@ -325,7 +325,7 @@ local function getEnhancedTarget(pos, towerRange, towerType, ability)
         if ability then
                 local isSplash, splashRadius = hasSplashDamage(ability)
                 local isManualAim = requiresManualAiming(ability)
-                
+
                 -- If it's a splash ability or requires manual aiming, target farthest enemy
                 if isSplash or isManualAim then
                         return getFarthestEnemyInRange(pos, effectiveRange, options)
@@ -649,7 +649,7 @@ RunService.Heartbeat:Connect(function()
                         -- General targeting for directional towers
                         local directional = directionalTowerTypes[tower.Type]
                         local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
-                        
+
                         -- NEW: Also check if ability requires manual aiming (needs pos)
                         if ability and requiresManualAiming(ability) then
                                 sendWithPos = true
