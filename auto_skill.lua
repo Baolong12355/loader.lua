@@ -144,7 +144,7 @@ local function getEnemyPathDistance(enemy)
         if not enemy or not enemy.GetPathPosition then return 0 end
         local success, pathPos = pcall(function() return enemy:GetPathPosition() end)
         if not success then return 0 end
-        
+
         -- Calculate distance traveled along path (approximate)
         local totalDistance = 0
         if enemy.PathHandler and enemy.PathHandler.DistanceTraveled then
@@ -152,7 +152,7 @@ local function getEnemyPathDistance(enemy)
         elseif enemy.PathIndex then
                 totalDistance = enemy.PathIndex * 10  -- Rough estimate
         end
-        
+
         return totalDistance
 end
 
@@ -161,13 +161,13 @@ local function getFarthestEnemyInRange(pos, range, options)
         options = options or {}
         local excludeAir = options.excludeAir or false
         local excludeArrows = options.excludeArrows or false
-        
+
         local candidates = {}
         for _, enemy in ipairs(getEnemies()) do
                 if not enemy.GetPosition then continue end
                 if excludeArrows and enemy.Type == "Arrow" then continue end
                 if excludeAir and enemy.IsAirUnit then continue end
-                
+
                 local ePos = enemy:GetPosition()
                 if getDistance2D(ePos, pos) <= range then
                         table.insert(candidates, {
@@ -176,14 +176,14 @@ local function getFarthestEnemyInRange(pos, range, options)
                         })
                 end
         end
-        
+
         if #candidates == 0 then return nil end
-        
+
         -- Sort by path distance (farthest first)
         table.sort(candidates, function(a, b)
                 return a.pathDistance > b.pathDistance
         end)
-        
+
         return candidates[1].enemy:GetPosition()
 end
 
@@ -192,32 +192,90 @@ local function getNearestEnemyInRange(pos, range, options)
         options = options or {}
         local excludeAir = options.excludeAir or false
         local excludeArrows = options.excludeArrows or false
-        
+
         for _, enemy in ipairs(getEnemies()) do
                 if not enemy.GetPosition then continue end
                 if excludeArrows and enemy.Type == "Arrow" then continue end
                 if excludeAir and enemy.IsAirUnit then continue end
-                
+
                 local ePos = enemy:GetPosition()
                 if getDistance2D(ePos, pos) <= range then
                         return ePos
                 end
         end
-        
+
         return nil
+end
+
+-- NEW: Check if ability has splash damage for enhanced targeting
+local function hasSplashDamage(ability)
+        if not ability or not ability.Config then return false end
+        
+        -- Check for splash damage indicators
+        if ability.Config.ProjectileHitData then
+                local hitData = ability.Config.ProjectileHitData
+                if hitData.IsSplash and hitData.SplashRadius and hitData.SplashRadius > 0 then
+                        return true, hitData.SplashRadius
+                end
+        end
+        
+        -- Check for radius effects
+        if ability.Config.HasRadiusEffect and ability.Config.EffectRadius and ability.Config.EffectRadius > 0 then
+                return true, ability.Config.EffectRadius
+        end
+        
+        return false, 0
+end
+
+-- NEW: Get effective range for ability (ability range overrides tower range)
+local function getAbilityRange(ability, defaultRange)
+        if not ability or not ability.Config then return defaultRange end
+        
+        local config = ability.Config
+        
+        -- Check for infinite range
+        if config.ManualAimInfiniteRange == true then
+                return math.huge
+        end
+        
+        -- Check for custom manual aim range
+        if config.ManualAimCustomRange and config.ManualAimCustomRange > 0 then
+                return config.ManualAimCustomRange
+        end
+        
+        -- Check for ability-specific range
+        if config.Range and config.Range > 0 then
+                return config.Range
+        end
+        
+        -- Check for custom query data range
+        if config.CustomQueryData and config.CustomQueryData.Range then
+                return config.CustomQueryData.Range
+        end
+        
+        -- Default to tower range
+        return defaultRange
+end
+
+-- NEW: Check if ability requires manual aiming
+local function requiresManualAiming(ability)
+        if not ability or not ability.Config then return false end
+        
+        return ability.Config.IsManualAimAtGround == true or 
+               ability.Config.IsManualAimAtPath == true
 end
 
 -- ======== Tower attack state tracking ========
 local function updateTowerAttackStates()
         local ownedTowers = TowerClass.GetTowers() or {}
         local now = tick()
-        
+
         for hash, tower in pairs(ownedTowers) do
                 if not tower or not tower.TimeUntilNextAttack then continue end
-                
+
                 local currentTime = tower.TimeUntilNextAttack
                 local lastTime = lastAttackCheck[hash]
-                
+
                 -- If TimeUntilNextAttack just reset (was higher, now lower), tower attacked
                 if lastTime and lastTime > currentTime and currentTime > 0 then
                         towerAttackStates[hash] = {
@@ -226,9 +284,9 @@ local function updateTowerAttackStates()
                                 tower = tower
                         }
                 end
-                
+
                 lastAttackCheck[hash] = currentTime
-                
+
                 -- Clear attack state if too much time has passed
                 if towerAttackStates[hash] and (now - towerAttackStates[hash].lastAttackTime) > 3 then
                         towerAttackStates[hash] = nil
@@ -239,33 +297,47 @@ end
 local function hasAttackingTowersInRange(checkTower, range)
         local checkPos = getTowerPos(checkTower)
         if not checkPos then return false end
-        
+
         for hash, attackState in pairs(towerAttackStates) do
                 if hash == checkTower.Hash then continue end  -- Skip self
                 if not attackState.isAttacking then continue end
-                
+
                 local otherPos = getTowerPos(attackState.tower)
                 if otherPos and getDistance2D(checkPos, otherPos) <= range then
                         return true
                 end
         end
-        
+
         return false
 end
 
 -- ======== Enhanced targeting functions ========
-local function getEnhancedTarget(pos, range, towerType, hasSkillRange)
+local function getEnhancedTarget(pos, towerRange, towerType, ability)
         local options = {
                 excludeAir = skipAirTowers[towerType] or false,
                 excludeArrows = true
         }
-        
+
+        -- Get the actual range for this ability (may override tower range)
+        local effectiveRange = getAbilityRange(ability, towerRange)
+
+        -- NEW: Enhanced logic for splash abilities
+        if ability then
+                local isSplash, splashRadius = hasSplashDamage(ability)
+                local isManualAim = requiresManualAiming(ability)
+                
+                -- If it's a splash ability or requires manual aiming, target farthest enemy
+                if isSplash or isManualAim then
+                        return getFarthestEnemyInRange(pos, effectiveRange, options)
+                end
+        end
+
         -- For regular towers (non-special), always use farthest enemy
         if not directionalTowerTypes[towerType] then
-                return getFarthestEnemyInRange(pos, range, options)
+                return getFarthestEnemyInRange(pos, effectiveRange, options)
         else
                 -- For special towers, use nearest enemy to preserve original behavior
-                return getNearestEnemyInRange(pos, range, options)
+                return getNearestEnemyInRange(pos, effectiveRange, options)
         end
 end
 
@@ -406,7 +478,7 @@ end
 RunService.Heartbeat:Connect(function()
         local now = tick()
         local ownedTowers = TowerClass.GetTowers() or {}
-        
+
         -- Update tower attack states for support tower logic
         updateTowerAttackStates()
 
@@ -418,7 +490,7 @@ RunService.Heartbeat:Connect(function()
                         local _, p2 = GetCurrentUpgradeLevels(tower)
                         if p2 >= 4 then
                                 if medicLastUsedTime[hash] and now - medicLastUsedTime[hash] < medicDelay then continue end
-                                
+
                                 local medicRange = getRange(tower)
                                 -- Only use skill if there are attacking towers in range
                                 if hasAttackingTowersInRange(tower, medicRange) then
@@ -500,108 +572,92 @@ RunService.Heartbeat:Connect(function()
 
                         -- NEW: Flame Trooper logic
                         if tower.Type == "Flame Trooper" then
-                                targetPos = getEnhancedTarget(pos, 9.5, tower.Type, hasSkillRange)
-                                if targetPos then
-                                        SendSkill(hash, index, targetPos)
-                                        break
-                                end
+                                targetPos = getEnhancedTarget(pos, 9.5, tower.Type, ability)
+                                if targetPos then SendSkill(hash, index, targetPos) end
+                                break -- Skip general logic
                         end
 
                         -- Enhanced Ice Breaker logic
                         if tower.Type == "Ice Breaker" then
                                 if index == 1 then
-                                        targetPos = getEnhancedTarget(pos, range, tower.Type, hasSkillRange)
-                                        allowUse = targetPos ~= nil
+                                        targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
+                                        if targetPos then SendSkill(hash, index, targetPos) end
                                 elseif index == 2 then
-                                        targetPos = getEnhancedTarget(pos, 8, tower.Type, hasSkillRange)
-                                        allowUse = targetPos ~= nil
-                                else
-                                        allowUse = false
+                                        targetPos = getEnhancedTarget(pos, 8, tower.Type, ability)
+                                        if targetPos then SendSkill(hash, index, targetPos) end
                                 end
+                                break -- Skip general logic
                         end
 
                         -- Enhanced Slammer logic
                         if tower.Type == "Slammer" then
-                                -- For Slammer, check if there are enemies in range first
-                                local enemyInRange = getEnhancedTarget(pos, range, tower.Type, hasSkillRange)
+                                local enemyInRange = getEnhancedTarget(pos, range, tower.Type, ability)
                                 if enemyInRange then
-                                        allowUse = true
-                                        -- Don't set targetPos here - let it be handled by directional logic below
-                                else
-                                        allowUse = false
+                                        SendSkill(hash, index, enemyInRange)
                                 end
+                                break -- Skip general logic
                         end
 
                         -- Enhanced John logic
                         if tower.Type == "John" then
                                 if p1 >= 5 then
-                                        targetPos = getEnhancedTarget(pos, range, tower.Type, hasSkillRange)
-                                        allowUse = targetPos ~= nil
+                                        targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
                                 else
-                                        targetPos = getEnhancedTarget(pos, 4.5, tower.Type, hasSkillRange)
-                                        allowUse = targetPos ~= nil
+                                        targetPos = getEnhancedTarget(pos, 4.5, tower.Type, ability)
                                 end
+                                if targetPos then SendSkill(hash, index, targetPos) end
+                                break -- Skip general logic
                         end
 
                         -- Enhanced Mobster logic
                         if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
                                 if p2 >= 3 and p2 <= 5 then
                                         targetPos = getMobsterTarget(tower, hash, 2)
-                                        if not targetPos then break end
+                                        if targetPos then SendSkill(hash, index, targetPos) end
                                 elseif p1 >= 4 and p1 <= 5 then
                                         targetPos = getMobsterTarget(tower, hash, 1)
-                                        if not targetPos then break end
-                                else
-                                        allowUse = false
+                                        if targetPos then SendSkill(hash, index, targetPos) end
                                 end
+                                break -- Skip general logic
                         end
 
                         -- Enhanced Commander logic (skill 3 only)
                         if tower.Type == "Commander" and index == 3 then
                                 targetPos = getCommanderTarget()
-                                if not targetPos then break end
+                                if targetPos then SendSkill(hash, index, targetPos) end
+                                break -- Skip general logic
                         end
 
-                        -- NEW: Enhanced EDJ logic (skill 1 only with attack state checking)
+                        -- MODIFIED: EDJ logic (skill 1 only) - Removed enemy range check
                         if tower.Type == "EDJ" and index == 1 then
                                 local edjRange = getRange(tower)
                                 if hasAttackingTowersInRange(tower, edjRange) then
-                                        targetPos = getEnhancedTarget(pos, range, tower.Type, hasSkillRange)
-                                        if not targetPos then break end
-                                else
-                                        allowUse = false
+                                        SendSkill(hash, index)
                                 end
+                                break -- Skip general logic
                         end
 
-                        -- Enhanced Commander skill 1 logic with attack state checking
+                        -- MODIFIED: Commander skill 1 logic - Removed enemy range check
                         if tower.Type == "Commander" and index == 1 then
                                 local commanderRange = getRange(tower)
                                 if hasAttackingTowersInRange(tower, commanderRange) then
-                                        targetPos = getEnhancedTarget(pos, range, tower.Type, hasSkillRange)
-                                        if not targetPos then break end
-                                else
-                                        allowUse = false
+                                        SendSkill(hash, index)
                                 end
+                                -- Continue to check other skills (don't break)
                         end
 
                         -- General targeting for directional towers
                         local directional = directionalTowerTypes[tower.Type]
                         local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
+                        
+                        -- NEW: Also check if ability requires manual aiming (needs pos)
+                        if ability and requiresManualAiming(ability) then
+                                sendWithPos = true
+                        end
 
                         if not targetPos and sendWithPos and allowUse then
-                                -- For regular towers, use farthest enemy; for special towers, use nearest
-                                if directional then
-                                        targetPos = getNearestEnemyInRange(pos, range, {
-                                                excludeAir = skipAirTowers[tower.Type] or false,
-                                                excludeArrows = true
-                                        })
-                                else
-                                        targetPos = getFarthestEnemyInRange(pos, range, {
-                                                excludeAir = skipAirTowers[tower.Type] or false,
-                                                excludeArrows = true
-                                        })
-                                end
-                                
+                                -- NEW: Use enhanced targeting system
+                                targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
                                 if not targetPos then allowUse = false end
                         end
 
