@@ -634,23 +634,35 @@ RunService.Heartbeat:Connect(function()
                                 if not targetPos then break end
                         end
 
-                        -- MODIFIED: EDJ logic (skill 1 only) - Removed enemy range check
+                        -- NEW: Enhanced EDJ logic (skill 1 only with attack state checking)
                         if tower.Type == "EDJ" and index == 1 then
                                 local edjRange = getRange(tower)
-                                if hasAttackingTowersInRange(tower, edjRange) then
-                                        allowUse = true
-                                        -- Don't check for enemies, just use the skill
+                                local hasAttacking = hasAttackingTowersInRange(tower, edjRange)
+                                
+                                if hasAttacking then
+                                        targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
+                                        if targetPos then
+                                                
+                                        else
+                                                allowUse = false
+                                        end
                                 else
                                         allowUse = false
                                 end
                         end
 
-                        -- MODIFIED: Commander skill 1 logic - Removed enemy range check
+                        -- Enhanced Commander skill 1 logic with attack state checking
                         if tower.Type == "Commander" and index == 1 then
                                 local commanderRange = getRange(tower)
-                                if hasAttackingTowersInRange(tower, commanderRange) then
-                                        allowUse = true
-                                        -- Don't check for enemies, just use the skill
+                                local hasAttacking = hasAttackingTowersInRange(tower, commanderRange)
+                                
+                                if hasAttacking then
+                                        targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
+                                        if targetPos then
+                                                
+                                        else
+                                                allowUse = false
+                                        end
                                 else
                                         allowUse = false
                                 end
