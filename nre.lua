@@ -22,6 +22,8 @@ local hash2pos = {} -- Ánh xạ hash của tower tới vị trí SpawnCFrame
 -- Hàng đợi và cấu hình cho việc ghi nhận
 local pendingQueue = {}
 local timeout = 2
+local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
+local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upgrade sinh đôi
 
 -- THÊM: Universal compatibility functions
 local function getGlobalEnv()
@@ -433,6 +435,62 @@ ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(functio
     end
 end)
 
+-- SỬA: Xử lý sự kiện nâng cấp tower - TĂNG CƯỜNG XỬ LÝ TỐC ĐỘ CAO
+ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
+    if not data or not data[1] then return end
+
+    local towerData = data[1]
+    local hash = towerData.Hash
+    local newLevels = towerData.LevelReplicationData
+    local currentTime = tick()
+
+    -- SỬA: Bỏ duplicate threshold - chỉ kiểm tra thay đổi thực sự
+    local hasRealChange = false
+    
+    -- Khởi tạo lastKnownLevels nếu chưa có
+    if not lastKnownLevels[hash] then
+        lastKnownLevels[hash] = {0, 0}
+        hasRealChange = true -- Tower mới luôn có thay đổi
+    else
+        -- Kiểm tra xem có thay đổi level thực sự không
+        for path = 1, 2 do
+            local oldLevel = lastKnownLevels[hash][path] or 0
+            local newLevel = newLevels[path] or 0
+            if newLevel > oldLevel then
+                hasRealChange = true
+                break
+            end
+        end
+    end
+    
+    -- Chỉ xử lý nếu có thay đổi thực sự
+    if not hasRealChange then
+        return
+    end
+    
+    lastUpgradeTime[hash] = currentTime
+
+    -- SỬA: Xử lý TẤT CẢ path được upgrade - KHÔNG BREAK
+    local upgradesFound = {}
+    for path = 1, 2 do
+        local oldLevel = lastKnownLevels[hash][path] or 0
+        local newLevel = newLevels[path] or 0
+        if newLevel > oldLevel then
+            local upgradeCount = newLevel - oldLevel
+            table.insert(upgradesFound, {path = path, count = upgradeCount})
+        end
+    end
+
+    -- Ghi log cho TẤT CẢ các path được upgrade
+    for _, upgrade in ipairs(upgradesFound) do
+        local code = string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), upgrade.path, upgrade.count)
+        processAndWriteAction(code)
+    end
+
+    -- Cập nhật lastKnownLevels LUÔN
+    lastKnownLevels[hash] = {newLevels[1] or 0, newLevels[2] or 0}
+end)
+
 -- Xử lý sự kiện thay đổi mục tiêu
 ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
     if data and data[1] then
@@ -517,15 +575,8 @@ local function handleRemote(name, args)
         end
     end
 
-    -- SỬA: GHI LOG UPGRADE TRỰC TIẾP
-    if name == "TowerUpgradeRequest" then
-        local hash, path, count = unpack(args)
-        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
-            local code = string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count)
-            -- Ghi log trực tiếp thay vì chờ server xác nhận
-            processAndWriteAction(code)
-        end
-    elseif name == "PlaceTower" then
+    -- SỬA: BỎ HOOK REMOTE UPGRADE - không xử lý TowerUpgradeRequest nữa
+    if name == "PlaceTower" then
         local a1, towerName, vec, rot = unpack(args)
         if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
             local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
@@ -586,6 +637,46 @@ task.spawn(function()
     end
 end)
 
+-- THÊM: Fallback mechanism để catch upgrade bị miss
+task.spawn(function()
+    while task.wait(0.1) do -- Kiểm tra mỗi 0.1 giây
+        if TowerClass and TowerClass.GetTowers then
+            local towers = TowerClass.GetTowers()
+            for hash, tower in pairs(towers) do
+                if tower.LevelReplicationData then
+                    local hashStr = tostring(hash)
+                    local currentLevels = tower.LevelReplicationData
+                    
+                    -- Khởi tạo nếu chưa có
+                    if not lastKnownLevels[hashStr] then
+                        lastKnownLevels[hashStr] = {currentLevels[1] or 0, currentLevels[2] or 0}
+                    else
+                        -- Kiểm tra nếu có upgrade bị miss
+                        local missedUpgrades = {}
+                        for path = 1, 2 do
+                            local oldLevel = lastKnownLevels[hashStr][path] or 0
+                            local newLevel = currentLevels[path] or 0
+                            if newLevel > oldLevel then
+                                local upgradeCount = newLevel - oldLevel
+                                table.insert(missedUpgrades, {path = path, count = upgradeCount})
+                            end
+                        end
+                        
+                        -- Ghi log cho upgrade bị miss
+                        for _, upgrade in ipairs(missedUpgrades) do
+                            local code = string.format("TDX:upgradeTower(%s, %d, %d)", hashStr, upgrade.path, upgrade.count)
+                            processAndWriteAction(code)
+                        end
+                        
+                        -- Cập nhật levels
+                        lastKnownLevels[hashStr] = {currentLevels[1] or 0, currentLevels[2] or 0}
+                    end
+                end
+            end
+        end
+    end
+end)
+
 -- SỬA: Vòng lặp cập nhật vị trí SpawnCFrame của tower
 task.spawn(function()
     while task.wait() do
@@ -615,9 +706,9 @@ getGlobalEnv().TDX_CLEANUP_SKIP_WAVE = cleanupSkipWaveConnection
 preserveSuperFunctions()
 setupHooks()
 
-print("✅ TDX Recorder Direct Upgrade Logging đã hoạt động!")
+print("✅ TDX Recorder Server Event Upgrade Logging đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
 print("⏭️ Đã thêm hook Skip Wave Vote!")
 print("🚀 Skip Wave sử dụng RunService.Heartbeat để tối ưu hiệu suất!")
-print("⚡ Upgrade được ghi log trực tiếp khi gửi request!")
+print("🎯 Upgrade được ghi log trực tiếp từ server event thay vì hook remote!")
