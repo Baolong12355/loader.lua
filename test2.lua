@@ -637,9 +637,15 @@ RunService.Heartbeat:Connect(function()
                         -- NEW: Enhanced EDJ logic (skill 1 only with attack state checking)
                         if tower.Type == "EDJ" and index == 1 then
                                 local edjRange = getRange(tower)
-                                if hasAttackingTowersInRange(tower, edjRange) then
+                                local hasAttacking = hasAttackingTowersInRange(tower, edjRange)
+                                print("EDJ Check - Has attacking towers:", hasAttacking, "Range:", edjRange)
+                                if hasAttacking then
                                         targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                        if not targetPos then break end
+                                        if targetPos then
+                                                print("EDJ using skill 1")
+                                        else
+                                                allowUse = false
+                                        end
                                 else
                                         allowUse = false
                                 end
@@ -648,9 +654,15 @@ RunService.Heartbeat:Connect(function()
                         -- Enhanced Commander skill 1 logic with attack state checking
                         if tower.Type == "Commander" and index == 1 then
                                 local commanderRange = getRange(tower)
-                                if hasAttackingTowersInRange(tower, commanderRange) then
+                                local hasAttacking = hasAttackingTowersInRange(tower, commanderRange)
+                                print("Commander Check - Has attacking towers:", hasAttacking, "Range:", commanderRange)
+                                if hasAttacking then
                                         targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                        if not targetPos then break end
+                                        if targetPos then
+                                                print("Commander using skill 1")
+                                        else
+                                                allowUse = false
+                                        end
                                 else
                                         allowUse = false
                                 end
