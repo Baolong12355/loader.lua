@@ -573,99 +573,77 @@ RunService.Heartbeat:Connect(function()
                         -- NEW: Flame Trooper logic
                         if tower.Type == "Flame Trooper" then
                                 targetPos = getEnhancedTarget(pos, 9.5, tower.Type, ability)
-                                if targetPos then
-                                        SendSkill(hash, index, targetPos)
-                                        break
-                                end
+                                if targetPos then SendSkill(hash, index, targetPos) end
+                                break -- Skip general logic
                         end
 
                         -- Enhanced Ice Breaker logic
                         if tower.Type == "Ice Breaker" then
                                 if index == 1 then
                                         targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                        allowUse = targetPos ~= nil
+                                        if targetPos then SendSkill(hash, index, targetPos) end
                                 elseif index == 2 then
                                         targetPos = getEnhancedTarget(pos, 8, tower.Type, ability)
-                                        allowUse = targetPos ~= nil
-                                else
-                                        allowUse = false
+                                        if targetPos then SendSkill(hash, index, targetPos) end
                                 end
+                                break -- Skip general logic
                         end
 
                         -- Enhanced Slammer logic
                         if tower.Type == "Slammer" then
-                                -- For Slammer, check if there are enemies in range first
                                 local enemyInRange = getEnhancedTarget(pos, range, tower.Type, ability)
                                 if enemyInRange then
-                                        allowUse = true
-                                        -- Don't set targetPos here - let it be handled by directional logic below
-                                else
-                                        allowUse = false
+                                        SendSkill(hash, index, enemyInRange)
                                 end
+                                break -- Skip general logic
                         end
 
                         -- Enhanced John logic
                         if tower.Type == "John" then
                                 if p1 >= 5 then
                                         targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                        allowUse = targetPos ~= nil
                                 else
                                         targetPos = getEnhancedTarget(pos, 4.5, tower.Type, ability)
-                                        allowUse = targetPos ~= nil
                                 end
+                                if targetPos then SendSkill(hash, index, targetPos) end
+                                break -- Skip general logic
                         end
 
                         -- Enhanced Mobster logic
                         if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
                                 if p2 >= 3 and p2 <= 5 then
                                         targetPos = getMobsterTarget(tower, hash, 2)
-                                        if not targetPos then break end
+                                        if targetPos then SendSkill(hash, index, targetPos) end
                                 elseif p1 >= 4 and p1 <= 5 then
                                         targetPos = getMobsterTarget(tower, hash, 1)
-                                        if not targetPos then break end
-                                else
-                                        allowUse = false
+                                        if targetPos then SendSkill(hash, index, targetPos) end
                                 end
+                                break -- Skip general logic
                         end
 
                         -- Enhanced Commander logic (skill 3 only)
                         if tower.Type == "Commander" and index == 3 then
                                 targetPos = getCommanderTarget()
-                                if not targetPos then break end
+                                if targetPos then SendSkill(hash, index, targetPos) end
+                                break -- Skip general logic
                         end
 
-                        -- NEW: Enhanced EDJ logic (skill 1 only with attack state checking)
+                        -- MODIFIED: EDJ logic (skill 1 only) - Removed enemy range check
                         if tower.Type == "EDJ" and index == 1 then
                                 local edjRange = getRange(tower)
-                                local hasAttacking = hasAttackingTowersInRange(tower, edjRange)
-                                
-                                if hasAttacking then
-                                        targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                        if targetPos then
-                                                
-                                        else
-                                                allowUse = false
-                                        end
-                                else
-                                        allowUse = false
+                                if hasAttackingTowersInRange(tower, edjRange) then
+                                        SendSkill(hash, index)
                                 end
+                                break -- Skip general logic
                         end
 
-                        -- Enhanced Commander skill 1 logic with attack state checking
+                        -- MODIFIED: Commander skill 1 logic - Removed enemy range check
                         if tower.Type == "Commander" and index == 1 then
                                 local commanderRange = getRange(tower)
-                                local hasAttacking = hasAttackingTowersInRange(tower, commanderRange)
-                                
-                                if hasAttacking then
-                                        targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                        if targetPos then
-                                                
-                                        else
-                                                allowUse = false
-                                        end
-                                else
-                                        allowUse = false
+                                if hasAttackingTowersInRange(tower, commanderRange) then
+                                        SendSkill(hash, index)
                                 end
+                                -- Continue to check other skills (don't break)
                         end
 
                         -- General targeting for directional towers
