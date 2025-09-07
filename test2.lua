@@ -634,23 +634,23 @@ RunService.Heartbeat:Connect(function()
                                 if not targetPos then break end
                         end
 
-                        -- NEW: Enhanced EDJ logic (skill 1 only with attack state checking)
+                        -- MODIFIED: EDJ logic (skill 1 only) - Removed enemy range check
                         if tower.Type == "EDJ" and index == 1 then
                                 local edjRange = getRange(tower)
                                 if hasAttackingTowersInRange(tower, edjRange) then
-                                        targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                        if not targetPos then break end
+                                        allowUse = true
+                                        -- Don't check for enemies, just use the skill
                                 else
                                         allowUse = false
                                 end
                         end
 
-                        -- Enhanced Commander skill 1 logic with attack state checking
+                        -- MODIFIED: Commander skill 1 logic - Removed enemy range check
                         if tower.Type == "Commander" and index == 1 then
                                 local commanderRange = getRange(tower)
                                 if hasAttackingTowersInRange(tower, commanderRange) then
-                                        targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                        if not targetPos then break end
+                                        allowUse = true
+                                        -- Don't check for enemies, just use the skill
                                 else
                                         allowUse = false
                                 end
