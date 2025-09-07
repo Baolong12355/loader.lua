@@ -435,7 +435,7 @@ ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(functio
     end
 end)
 
--- SỬA: Xử lý sự kiện nâng cấp tower - GHI LOG TRỰC TIẾP TỪ SERVER EVENT
+-- SỬA: Xử lý sự kiện nâng cấp tower - TĂNG CƯỜNG XỬ LÝ TỐC ĐỘ CAO
 ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
     if not data or not data[1] then return end
 
@@ -444,22 +444,44 @@ ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(functio
     local newLevels = towerData.LevelReplicationData
     local currentTime = tick()
 
-    -- Chống upgrade sinh đôi
-    if lastUpgradeTime[hash] and (currentTime - lastUpgradeTime[hash]) < 0.0001 then
-        return
+    -- SỬA: Giảm thời gian duplicate detection và thêm fallback
+    local duplicateThreshold = 0.05 -- Tăng từ 0.0001 lên 0.05 giây
+    if lastUpgradeTime[hash] and (currentTime - lastUpgradeTime[hash]) < duplicateThreshold then
+        -- Thay vì return luôn, kiểm tra xem có thay đổi level thực sự không
+        local hasRealChange = false
+        if lastKnownLevels[hash] then
+            for path = 1, 2 do
+                local oldLevel = lastKnownLevels[hash][path] or 0
+                local newLevel = newLevels[path] or 0
+                if newLevel > oldLevel then
+                    hasRealChange = true
+                    break
+                end
+            end
+        end
+        -- Nếu không có thay đổi thực sự thì mới return
+        if not hasRealChange then
+            return
+        end
     end
     lastUpgradeTime[hash] = currentTime
 
-    -- SỬA: Xử lý nhiều path được upgrade cùng lúc
+    -- Khởi tạo lastKnownLevels nếu chưa có
+    if not lastKnownLevels[hash] then
+        lastKnownLevels[hash] = {0, 0}
+    end
+
+    -- SỬA: Xử lý nhiều path được upgrade cùng lúc với logging chi tiết
     local upgradesFound = {}
-    if lastKnownLevels[hash] then
-        for path = 1, 2 do
-            local oldLevel = lastKnownLevels[hash][path] or 0
-            local newLevel = newLevels[path] or 0
-            if newLevel > oldLevel then
-                local upgradeCount = newLevel - oldLevel
-                table.insert(upgradesFound, {path = path, count = upgradeCount})
-            end
+    for path = 1, 2 do
+        local oldLevel = lastKnownLevels[hash][path] or 0
+        local newLevel = newLevels[path] or 0
+        if newLevel > oldLevel then
+            local upgradeCount = newLevel - oldLevel
+            table.insert(upgradesFound, {path = path, count = upgradeCount})
+            -- Debug log để tracking
+            print(string.format("🔧 Upgrade detected - Hash: %s, Path: %d, %d→%d (+%d)", 
+                tostring(hash), path, oldLevel, newLevel, upgradeCount))
         end
     end
 
@@ -470,7 +492,8 @@ ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(functio
         processAndWriteAction(code)
     end
 
-    lastKnownLevels[hash] = newLevels or {}
+    -- Cập nhật lastKnownLevels LUÔN, kể cả khi không có upgrade
+    lastKnownLevels[hash] = {newLevels[1] or 0, newLevels[2] or 0}
 end)
 
 -- Xử lý sự kiện thay đổi mục tiêu
@@ -619,6 +642,48 @@ task.spawn(function()
     end
 end)
 
+-- THÊM: Fallback mechanism để catch upgrade bị miss
+task.spawn(function()
+    while task.wait(0.1) do -- Kiểm tra mỗi 0.1 giây
+        if TowerClass and TowerClass.GetTowers then
+            local towers = TowerClass.GetTowers()
+            for hash, tower in pairs(towers) do
+                if tower.LevelReplicationData then
+                    local hashStr = tostring(hash)
+                    local currentLevels = tower.LevelReplicationData
+                    
+                    -- Khởi tạo nếu chưa có
+                    if not lastKnownLevels[hashStr] then
+                        lastKnownLevels[hashStr] = {currentLevels[1] or 0, currentLevels[2] or 0}
+                    else
+                        -- Kiểm tra nếu có upgrade bị miss
+                        local missedUpgrades = {}
+                        for path = 1, 2 do
+                            local oldLevel = lastKnownLevels[hashStr][path] or 0
+                            local newLevel = currentLevels[path] or 0
+                            if newLevel > oldLevel then
+                                local upgradeCount = newLevel - oldLevel
+                                table.insert(missedUpgrades, {path = path, count = upgradeCount})
+                                print(string.format("⚠️ MISSED UPGRADE DETECTED - Hash: %s, Path: %d, %d→%d (+%d)", 
+                                    hashStr, path, oldLevel, newLevel, upgradeCount))
+                            end
+                        end
+                        
+                        -- Ghi log cho upgrade bị miss
+                        for _, upgrade in ipairs(missedUpgrades) do
+                            local code = string.format("TDX:upgradeTower(%s, %d, %d)", hashStr, upgrade.path, upgrade.count)
+                            processAndWriteAction(code)
+                        end
+                        
+                        -- Cập nhật levels
+                        lastKnownLevels[hashStr] = {currentLevels[1] or 0, currentLevels[2] or 0}
+                    end
+                end
+            end
+        end
+    end
+end)
+
 -- SỬA: Vòng lặp cập nhật vị trí SpawnCFrame của tower
 task.spawn(function()
     while task.wait() do
@@ -649,3 +714,8 @@ preserveSuperFunctions()
 setupHooks()
 
 print("✅ TDX Recorder Server Event Upgrade Logging đã hoạt động!")
+print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
+print("🔄 Đã tích hợp với hệ thống rebuild mới!")
+print("⏭️ Đã thêm hook Skip Wave Vote!")
+print("🚀 Skip Wave sử dụng RunService.Heartbeat để tối ưu hiệu suất!")
+print("🎯 Upgrade được ghi log trực tiếp từ server event thay vì hook remote!")
