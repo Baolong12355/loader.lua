@@ -19,12 +19,6 @@ end
 local recordedActions = {} -- Bảng lưu trữ tất cả các hành động dưới dạng table
 local hash2pos = {} -- Ánh xạ hash của tower tới vị trí SpawnCFrame
 
--- Hàng đợi và cấu hình cho việc ghi nhận
-local pendingQueue = {}
-local timeout = 2
-local lastKnownLevels = {} -- { [towerHash] = {path1Level, path2Level} }
-local lastUpgradeTime = {} -- { [towerHash] = timestamp } để phát hiện upgrade sinh đôi
-
 -- THÊM: Universal compatibility functions
 local function getGlobalEnv()
     if getgenv then return getgenv() end
@@ -400,185 +394,69 @@ end
 --=                      XỬ LÝ SỰ KIỆN & HOOKS                                 =
 --==============================================================================
 
--- Thêm một yêu cầu vào hàng đợi chờ xác nhận
-local function setPending(typeStr, code, hash)
-    table.insert(pendingQueue, {
-        type = typeStr,
-        code = code,
-        created = tick(),
-        hash = hash
-    })
-end
-
--- Xác nhận một yêu cầu từ hàng đợi và xử lý nó
-local function tryConfirm(typeStr, specificHash)
-    for i = #pendingQueue, 1, -1 do
-        local item = pendingQueue[i]
-        if item.type == typeStr then
-            if not specificHash or string.find(item.code, tostring(specificHash)) then
-                processAndWriteAction(item.code) -- Thay thế việc ghi file txt
-                table.remove(pendingQueue, i)
-                return
-            end
-        end
-    end
-end
-
--- Xử lý sự kiện đặt/bán tower
-ReplicatedStorage.Remotes.TowerFactoryQueueUpdated.OnClientEvent:Connect(function(data)
-    local d = data and data[1]
-    if not d then return end
-    if d.Creation then
-        tryConfirm("Place")
-    else
-        tryConfirm("Sell")
-    end
-end)
-
--- Xử lý sự kiện nâng cấp tower
-ReplicatedStorage.Remotes.TowerUpgradeQueueUpdated.OnClientEvent:Connect(function(data)
-    if not data or not data[1] then return end
-
-    local towerData = data[1]
-    local hash = towerData.Hash
-    local newLevels = towerData.LevelReplicationData
-    local currentTime = tick()
-
-    -- Chống upgrade sinh đôi
-    if lastUpgradeTime[hash] and (currentTime - lastUpgradeTime[hash]) < 0.0001 then
-        return
-    end
-    lastUpgradeTime[hash] = currentTime
-
-    local upgradedPath, upgradeCount = nil, 0
-    if lastKnownLevels[hash] then
-        for path = 1, 2 do
-            local oldLevel = lastKnownLevels[hash][path] or 0
-            local newLevel = newLevels[path] or 0
-            if newLevel > oldLevel then
-                upgradedPath = path
-                upgradeCount = newLevel - oldLevel
-                break
-            end
-        end
-    end
-
-    if upgradedPath and upgradeCount > 0 then
-        local code = string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), upgradedPath, upgradeCount)
-        processAndWriteAction(code) -- Thay thế việc ghi file txt
-
-        -- Xóa các yêu cầu nâng cấp đang chờ cho tower này
-        for i = #pendingQueue, 1, -1 do
-            if pendingQueue[i].type == "Upgrade" and pendingQueue[i].hash == hash then
-                table.remove(pendingQueue, i)
-            end
-        end
-    else
-        tryConfirm("Upgrade", hash)
-    end
-
-    lastKnownLevels[hash] = newLevels or {}
-end)
-
--- Xử lý sự kiện thay đổi mục tiêu
-ReplicatedStorage.Remotes.TowerQueryTypeIndexChanged.OnClientEvent:Connect(function(data)
-    if data and data[1] then
-        tryConfirm("Target")
-    end
-end)
-
--- THÊM: Xử lý sự kiện skip wave vote
-ReplicatedStorage.Remotes.SkipWaveVoteCast.OnClientEvent:Connect(function()
-    tryConfirm("SkipWave")
-end)
-
--- THÊM: Xử lý sự kiện moving skill được sử dụng
-pcall(function()
-    -- Tạo một event listener giả cho moving skills
-    -- Vì không có event riêng, chúng ta sẽ confirm sau 0.2 giây
-    task.spawn(function()
-        while task.wait(0.2) do
-            -- Auto confirm tất cả moving skills pending
-            for i = #pendingQueue, 1, -1 do
-                local item = pendingQueue[i]
-                if item.type == "MovingSkill" and tick() - item.created > 0.1 then
-                    processAndWriteAction(item.code)
-                    table.remove(pendingQueue, i)
-                end
-            end
-        end
-    end)
-end)
-
--- THÊM: Auto pending cho skip wave với heartbeat connection
-local skipWaveConnection = RunService.Heartbeat:Connect(function()
-    -- Auto confirm tất cả skip wave pending sau 0.1 giây
-    for i = #pendingQueue, 1, -1 do
-        local item = pendingQueue[i]
-        if item.type == "SkipWave" and tick() - item.created > 0.1 then
-            processAndWriteAction(item.code)
-            table.remove(pendingQueue, i)
-        end
-    end
-end)
-
--- Xử lý các lệnh gọi remote
-local function handleRemote(name, args)
+-- Xử lý các lệnh gọi remote với return value check
+local function handleRemote(name, args, returnValue)
     -- SỬA: Điều kiện ngăn log được xử lý trong processAndWriteAction
 
-    -- THÊM: Xử lý SkipWaveVoteCast
+    -- THÊM: Xử lý SkipWaveVoteCast - chỉ ghi khi return value là true
     if name == "SkipWaveVoteCast" then
-        if args and args[1] == true then
-            setPending("SkipWave", "TDX:skipWave()")
+        if returnValue == true then
+            processAndWriteAction("TDX:skipWave()")
         end
     end
 
-    -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills
+    -- THÊM: Xử lý TowerUseAbilityRequest cho moving skills - chỉ ghi khi return value là true
     if name == "TowerUseAbilityRequest" then
-        local towerHash, skillIndex, targetPos = unpack(args)
-        if typeof(towerHash) == "number" and typeof(skillIndex) == "number" then
-            local towerName = GetTowerNameByHash(towerHash)
-            if IsMovingSkillTower(towerName, skillIndex) then
-                local code
+        if returnValue == true then
+            local towerHash, skillIndex, targetPos = unpack(args)
+            if typeof(towerHash) == "number" and typeof(skillIndex) == "number" then
+                local towerName = GetTowerNameByHash(towerHash)
+                if IsMovingSkillTower(towerName, skillIndex) then
+                    local code
 
-                -- Skill cần position (skill 1)
-                if IsPositionRequiredSkill(towerName, skillIndex) and typeof(targetPos) == "Vector3" then
-                    code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
-                        tostring(towerHash), 
-                        skillIndex, 
-                        tostring(targetPos.X), 
-                        tostring(targetPos.Y), 
-                        tostring(targetPos.Z))
+                    -- Skill cần position (skill 1)
+                    if IsPositionRequiredSkill(towerName, skillIndex) and typeof(targetPos) == "Vector3" then
+                        code = string.format("TDX:useMovingSkill(%s, %d, Vector3.new(%s, %s, %s))", 
+                            tostring(towerHash), 
+                            skillIndex, 
+                            tostring(targetPos.X), 
+                            tostring(targetPos.Y), 
+                            tostring(targetPos.Z))
 
-                -- Skill không cần position (skill 3)
-                elseif not IsPositionRequiredSkill(towerName, skillIndex) then
-                    code = string.format("TDX:useSkill(%s, %d)", 
-                        tostring(towerHash), 
-                        skillIndex)
-                end
+                    -- Skill không cần position (skill 3)
+                    elseif not IsPositionRequiredSkill(towerName, skillIndex) then
+                        code = string.format("TDX:useSkill(%s, %d)", 
+                            tostring(towerHash), 
+                            skillIndex)
+                    end
 
-                if code then
-                    setPending("MovingSkill", code, towerHash)
+                    if code then
+                        processAndWriteAction(code)
+                    end
                 end
             end
         end
     end
 
-    if name == "TowerUpgradeRequest" then
-        local hash, path, count = unpack(args)
-        if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
-            setPending("Upgrade", string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count), hash)
+    -- Xử lý các remote khác khi return value là true/success
+    if returnValue == true then
+        if name == "TowerUpgradeRequest" then
+            local hash, path, count = unpack(args)
+            if typeof(hash) == "number" and typeof(path) == "number" and typeof(count) == "number" and path >= 0 and path <= 2 and count > 0 and count <= 5 then
+                local code = string.format("TDX:upgradeTower(%s, %d, %d)", tostring(hash), path, count)
+                processAndWriteAction(code)
+            end
+        elseif name == "PlaceTower" then
+            local a1, towerName, vec, rot = unpack(args)
+            if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
+                local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
+                processAndWriteAction(code)
+            end
+        elseif name == "SellTower" then
+            processAndWriteAction("TDX:sellTower("..tostring(args[1])..")")
+        elseif name == "ChangeQueryType" then
+            processAndWriteAction(string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
         end
-    elseif name == "PlaceTower" then
-        local a1, towerName, vec, rot = unpack(args)
-        if typeof(a1) == "number" and typeof(towerName) == "string" and typeof(vec) == "Vector3" and typeof(rot) == "number" then
-            local code = string.format('TDX:placeTower(%s, "%s", Vector3.new(%s, %s, %s), %s)', tostring(a1), towerName, tostring(vec.X), tostring(vec.Y), tostring(vec.Z), tostring(rot))
-            setPending("Place", code)
-        end
-    elseif name == "SellTower" then
-        setPending("Sell", "TDX:sellTower("..tostring(args[1])..")")
-    elseif name == "ChangeQueryType" then
-        setPending("Target", string.format("TDX:changeQueryType(%s, %s)", tostring(args[1]), tostring(args[2])))
     end
 end
 
@@ -591,14 +469,16 @@ local function setupHooks()
 
     -- Hook FireServer
     local oldFireServer = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
-        handleRemote(self.Name, {...})
-        return oldFireServer(self, ...)
+        local result = oldFireServer(self, ...)
+        handleRemote(self.Name, {...}, result)
+        return result
     end)
 
     -- Hook InvokeServer - ĐẶC BIỆT QUAN TRỌNG CHO TowerUseAbilityRequest
     local oldInvokeServer = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(self, ...)
-        handleRemote(self.Name, {...})
-        return oldInvokeServer(self, ...)
+        local result = oldInvokeServer(self, ...)
+        handleRemote(self.Name, {...}, result)
+        return result
     end)
 
     -- Hook namecall - QUAN TRỌNG NHẤT CHO ABILITY REQUEST
@@ -606,29 +486,19 @@ local function setupHooks()
     oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         if checkcaller() then return oldNamecall(self, ...) end
         local method = getnamecallmethod()
+        local result = oldNamecall(self, ...)
+        
         if method == "FireServer" or method == "InvokeServer" then
-            handleRemote(self.Name, {...})
+            handleRemote(self.Name, {...}, result)
         end
-        return oldNamecall(self, ...)
+        
+        return result
     end)
 end
 
 --==============================================================================
 --=                         VÒNG LẶP & KHỞI TẠO                               =
 --==============================================================================
-
--- Vòng lặp dọn dẹp hàng đợi chờ
-task.spawn(function()
-    while task.wait(0.5) do
-        local now = tick()
-        for i = #pendingQueue, 1, -1 do
-            if now - pendingQueue[i].created > timeout then
-                warn("❌ Không xác thực được: " .. pendingQueue[i].type .. " | Code: " .. pendingQueue[i].code)
-                table.remove(pendingQueue, i)
-            end
-        end
-    end
-end)
 
 -- SỬA: Vòng lặp cập nhật vị trí SpawnCFrame của tower
 task.spawn(function()
@@ -644,23 +514,12 @@ task.spawn(function()
     end
 end)
 
--- Cleanup function để disconnect khi cần thiết
-local function cleanupSkipWaveConnection()
-    if skipWaveConnection then
-        skipWaveConnection:Disconnect()
-        skipWaveConnection = nil
-    end
-end
-
--- Lưu cleanup function vào global environment
-getGlobalEnv().TDX_CLEANUP_SKIP_WAVE = cleanupSkipWaveConnection
-
 -- Khởi tạo
 preserveSuperFunctions()
 setupHooks()
 
-print("✅ TDX Recorder Moving Skills + Skip Wave Hook đã hoạt động!")
+print("✅ TDX Recorder Return Value Check đã hoạt động!")
 print("📁 Dữ liệu sẽ được ghi trực tiếp vào: " .. outJson)
 print("🔄 Đã tích hợp với hệ thống rebuild mới!")
-print("⏭️ Đã thêm hook Skip Wave Vote!")
-print("🚀 Skip Wave sử dụng RunService.Heartbeat để tối ưu hiệu suất!")
+print("✔️ Chỉ ghi khi server trả về true (thành công)!")
+print("🚀 Tối ưu hóa hiệu suất với return value validation!")
