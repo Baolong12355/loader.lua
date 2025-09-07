@@ -26,7 +26,8 @@ local skipTowerTypes = {
         ["Helicopter"] = true,
         ["Cryo Helicopter"] = true,
         ["Medic"] = true,
-        ["Combat Drone"] = true
+        ["Combat Drone"] = true,
+        ["Machine Gunner"] = true  -- Added Machine Gunner to skip list
 }
 
 local fastTowers = {
@@ -186,6 +187,26 @@ local function getFarthestEnemyInRange(pos, range, options)
         return candidates[1].enemy:GetPosition()
 end
 
+-- Get nearest enemy (for original behavior preservation)
+local function getNearestEnemyInRange(pos, range, options)
+        options = options or {}
+        local excludeAir = options.excludeAir or false
+        local excludeArrows = options.excludeArrows or false
+        
+        for _, enemy in ipairs(getEnemies()) do
+                if not enemy.GetPosition then continue end
+                if excludeArrows and enemy.Type == "Arrow" then continue end
+                if excludeAir and enemy.IsAirUnit then continue end
+                
+                local ePos = enemy:GetPosition()
+                if getDistance2D(ePos, pos) <= range then
+                        return ePos
+                end
+        end
+        
+        return nil
+end
+
 -- ======== Tower attack state tracking ========
 local function updateTowerAttackStates()
         local ownedTowers = TowerClass.GetTowers() or {}
@@ -239,16 +260,12 @@ local function getEnhancedTarget(pos, range, towerType, hasSkillRange)
                 excludeArrows = true
         }
         
-        -- For special towers or those with skill range, use farthest enemy
-        if directionalTowerTypes[towerType] or hasSkillRange then
+        -- For regular towers (non-special), always use farthest enemy
+        if not directionalTowerTypes[towerType] then
                 return getFarthestEnemyInRange(pos, range, options)
         else
-                -- For regular towers, use nearest enemy (original behavior)
-                return findTarget(pos, range, {
-                        mode = "nearest",
-                        excludeAir = options.excludeAir,
-                        excludeArrows = options.excludeArrows
-                })
+                -- For special towers, use nearest enemy to preserve original behavior
+                return getNearestEnemyInRange(pos, range, options)
         end
 end
 
@@ -443,9 +460,15 @@ RunService.Heartbeat:Connect(function()
                                 hasSkillRange = ability.Config.Range ~= nil and ability.Config.Range > 0
                         end
 
-                        -- Jet Trooper skip skill 1
-                        if tower.Type == "Jet Trooper" and index == 1 then
-                                allowUse = false
+                        -- Enhanced Jet Trooper logic (skip skill 1, only use skill 2)
+                        if tower.Type == "Jet Trooper" then
+                                if index == 1 then
+                                        allowUse = false  -- Always skip skill 1
+                                elseif index == 2 then
+                                        allowUse = true   -- Only use skill 2
+                                else
+                                        allowUse = false  -- Skip any other skills
+                                end
                         end
 
                         -- Enhanced Ghost logic
@@ -499,8 +522,14 @@ RunService.Heartbeat:Connect(function()
 
                         -- Enhanced Slammer logic
                         if tower.Type == "Slammer" then
-                                targetPos = getEnhancedTarget(pos, range, tower.Type, hasSkillRange)
-                                allowUse = targetPos ~= nil
+                                -- For Slammer, check if there are enemies in range first
+                                local enemyInRange = getEnhancedTarget(pos, range, tower.Type, hasSkillRange)
+                                if enemyInRange then
+                                        allowUse = true
+                                        -- Don't set targetPos here - let it be handled by directional logic below
+                                else
+                                        allowUse = false
+                                end
                         end
 
                         -- Enhanced John logic
@@ -555,13 +584,34 @@ RunService.Heartbeat:Connect(function()
                                 end
                         end
 
-                        -- General targeting for directional towers or towers with skill range
+                        -- General targeting for directional towers
                         local directional = directionalTowerTypes[tower.Type]
                         local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
 
                         if not targetPos and sendWithPos and allowUse then
-                                targetPos = getEnhancedTarget(pos, range, tower.Type, hasSkillRange)
+                                -- For regular towers, use farthest enemy; for special towers, use nearest
+                                if directional then
+                                        targetPos = getNearestEnemyInRange(pos, range, {
+                                                excludeAir = skipAirTowers[tower.Type] or false,
+                                                excludeArrows = true
+                                        })
+                                else
+                                        targetPos = getFarthestEnemyInRange(pos, range, {
+                                                excludeAir = skipAirTowers[tower.Type] or false,
+                                                excludeArrows = true
+                                        })
+                                end
+                                
                                 if not targetPos then allowUse = false end
+                        end
+
+                        -- For non-directional regular towers, ensure they target farthest enemy
+                        if not sendWithPos and not directional and allowUse then
+                                local hasEnemies = getFarthestEnemyInRange(pos, range, {
+                                        excludeAir = skipAirTowers[tower.Type] or false,
+                                        excludeArrows = true
+                                })
+                                if not hasEnemies then allowUse = false end
                         end
 
                         -- Execute skill if conditions are met
