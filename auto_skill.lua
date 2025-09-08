@@ -210,7 +210,7 @@ end
 -- NEW: Check if ability has splash damage for enhanced targeting
 local function hasSplashDamage(ability)
         if not ability or not ability.Config then return false end
-
+        
         -- Check for splash damage indicators
         if ability.Config.ProjectileHitData then
                 local hitData = ability.Config.ProjectileHitData
@@ -218,41 +218,41 @@ local function hasSplashDamage(ability)
                         return true, hitData.SplashRadius
                 end
         end
-
+        
         -- Check for radius effects
         if ability.Config.HasRadiusEffect and ability.Config.EffectRadius and ability.Config.EffectRadius > 0 then
                 return true, ability.Config.EffectRadius
         end
-
+        
         return false, 0
 end
 
 -- NEW: Get effective range for ability (ability range overrides tower range)
 local function getAbilityRange(ability, defaultRange)
         if not ability or not ability.Config then return defaultRange end
-
+        
         local config = ability.Config
-
+        
         -- Check for infinite range
         if config.ManualAimInfiniteRange == true then
                 return math.huge
         end
-
+        
         -- Check for custom manual aim range
         if config.ManualAimCustomRange and config.ManualAimCustomRange > 0 then
                 return config.ManualAimCustomRange
         end
-
+        
         -- Check for ability-specific range
         if config.Range and config.Range > 0 then
                 return config.Range
         end
-
+        
         -- Check for custom query data range
         if config.CustomQueryData and config.CustomQueryData.Range then
                 return config.CustomQueryData.Range
         end
-
+        
         -- Default to tower range
         return defaultRange
 end
@@ -260,7 +260,7 @@ end
 -- NEW: Check if ability requires manual aiming
 local function requiresManualAiming(ability)
         if not ability or not ability.Config then return false end
-
+        
         return ability.Config.IsManualAimAtGround == true or 
                ability.Config.IsManualAimAtPath == true
 end
@@ -325,7 +325,7 @@ local function getEnhancedTarget(pos, towerRange, towerType, ability)
         if ability then
                 local isSplash, splashRadius = hasSplashDamage(ability)
                 local isManualAim = requiresManualAiming(ability)
-
+                
                 -- If it's a splash ability or requires manual aiming, target farthest enemy
                 if isSplash or isManualAim then
                         return getFarthestEnemyInRange(pos, effectiveRange, options)
@@ -485,7 +485,7 @@ RunService.Heartbeat:Connect(function()
         for hash, tower in pairs(ownedTowers) do
                 if not tower or not tower.AbilityHandler then continue end
 
-                -- Enhanced Medic logic with attack state checking
+                -- Enhanced Medic logic with attack state checking AND skill cooldown
                 if tower.Type == "Medic" then
                         local _, p2 = GetCurrentUpgradeLevels(tower)
                         if p2 >= 4 then
@@ -496,12 +496,14 @@ RunService.Heartbeat:Connect(function()
                                 if hasAttackingTowersInRange(tower, medicRange) then
                                         for index = 1, 3 do
                                                 local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-                                                if not isCooldownReady(hash, index, ability) then continue end
-                                                local targetHash = getBestMedicTarget(tower, ownedTowers)
-                                                if targetHash then
-                                                        SendSkill(hash, index, nil, targetHash)
-                                                        medicLastUsedTime[hash] = now
-                                                        break
+                                                -- Check if skill is ready AND there are attacking towers
+                                                if isCooldownReady(hash, index, ability) then
+                                                        local targetHash = getBestMedicTarget(tower, ownedTowers)
+                                                        if targetHash then
+                                                                SendSkill(hash, index, nil, targetHash)
+                                                                medicLastUsedTime[hash] = now
+                                                                break
+                                                        end
                                                 end
                                         end
                                 end
@@ -628,20 +630,24 @@ RunService.Heartbeat:Connect(function()
                                 break -- Skip general logic
                         end
 
-                        -- MODIFIED: EDJ logic (skill 1 only) - Removed enemy range check
+                        -- MODIFIED: EDJ logic (skill 1 only) - Only when skill is ready AND towers attacking
                         if tower.Type == "EDJ" and index == 1 then
-                                local edjRange = getRange(tower)
-                                if hasAttackingTowersInRange(tower, edjRange) then
-                                        SendSkill(hash, index)
+                                if isCooldownReady(hash, index, ability) then
+                                        local edjRange = getRange(tower)
+                                        if hasAttackingTowersInRange(tower, edjRange) then
+                                                SendSkill(hash, index)
+                                        end
                                 end
                                 break -- Skip general logic
                         end
 
-                        -- MODIFIED: Commander skill 1 logic - Removed enemy range check
+                        -- MODIFIED: Commander skill 1 logic - Only when skill is ready AND towers attacking
                         if tower.Type == "Commander" and index == 1 then
-                                local commanderRange = getRange(tower)
-                                if hasAttackingTowersInRange(tower, commanderRange) then
-                                        SendSkill(hash, index)
+                                if isCooldownReady(hash, index, ability) then
+                                        local commanderRange = getRange(tower)
+                                        if hasAttackingTowersInRange(tower, commanderRange) then
+                                                SendSkill(hash, index)
+                                        end
                                 end
                                 -- Continue to check other skills (don't break)
                         end
@@ -649,7 +655,7 @@ RunService.Heartbeat:Connect(function()
                         -- General targeting for directional towers
                         local directional = directionalTowerTypes[tower.Type]
                         local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
-
+                        
                         -- NEW: Also check if ability requires manual aiming (needs pos)
                         if ability and requiresManualAiming(ability) then
                                 sendWithPos = true
