@@ -1,264 +1,128 @@
-local HttpService = game:GetService("HttpService")
+
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
-pcall(function() HttpService.HttpEnabled = true end)
+-- ⚙️ Webhook URL
+local WEBHOOK_URL = https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC" -- <<== ĐỔI LINK TẠI ĐÂY
 
-local function isExecutor()
-    local hasExecutor = typeof(getgenv) == "function" or 
-                        typeof(syn) == "table" or 
-                        typeof(is_synapse_function) == "function" or
-                        typeof(http_request) == "function"
-    local RunService = game:GetService("RunService")
-    local isServer = RunService:IsServer()
-    return hasExecutor and not isServer
-end
-
+-- ✅ Kiểm tra có thể gửi webhook
 local function canSend()
-    local ok, httpEnabled = pcall(function() return HttpService.HttpEnabled end)
-    return ok and httpEnabled and isExecutor()
+	local hasExecutor = typeof(getgenv) == "function" or typeof(syn) == "table" or typeof(is_synapse_function) == "function" or typeof(http_request) == "function"
+	local ok, httpEnabled = pcall(function() return HttpService.HttpEnabled end)
+	return hasExecutor and ok and httpEnabled
 end
 
--- Chuyển table sang fields cho discord embed
+-- 🔁 Chuyển table sang dạng Discord fields
 local function fieldsFromTable(tab, prefix)
-    local fields = {}
-    prefix = prefix and (prefix .. " ") or ""
-    for k, v in pairs(tab) do
-        if typeof(v) == "table" then
-            if #v > 0 then -- Nếu là một mảng (ví dụ: PowerUps), nối các phần tử bằng xuống dòng
-                table.insert(fields, {name = prefix .. tostring(k), value = table.concat(v, "\n"), inline = false})
-            else -- Nếu là một bảng con thông thường, đệ quy
-                for _, f in ipairs(fieldsFromTable(v, prefix .. k)) do
-                    table.insert(fields, f)
-                end
-            end
-        else
-            table.insert(fields, {name = prefix .. tostring(k), value = tostring(v), inline = false})
-        end
-    end
-    return fields
+	local fields = {}
+	prefix = prefix and (prefix .. " ") or ""
+	for k, v in pairs(tab) do
+		if typeof(v) == "table" then
+			for _, f in ipairs(fieldsFromTable(v, prefix .. k)) do
+				table.insert(fields, f)
+			end
+		else
+			table.insert(fields, {name = prefix .. tostring(k), value = tostring(v), inline = false})
+		end
+	end
+	return fields
 end
 
+-- 📨 Format JSON cho Discord
 local function formatDiscordEmbed(data, title)
-    title = title or (data.type == "game" and "Game Result" or "Lobby Info")
-    local fields = {}
-    if data.type == "lobby" and data.stats then
-        fields = fieldsFromTable(data.stats)
-    elseif data.type == "game" and data.rewards then
-        fields = fieldsFromTable(data.rewards)
-    else
-        fields = fieldsFromTable(data)
-    end
-    return HttpService:JSONEncode({
-        embeds = {{
-            title = title,
-            color = 0x5B9DFF,
-            fields = fields
-        }}
-    })
+	title = title or (data.type == "game" and "Game Result" or "Lobby Info")
+	local fields = {}
+	if data.stats then
+		fields = fieldsFromTable(data.stats)
+	elseif data.rewards then
+		fields = fieldsFromTable(data.rewards)
+	else
+		fields = fieldsFromTable(data)
+	end
+	return HttpService:JSONEncode({
+		embeds = {{
+			title = title,
+			color = 0x5B9DFF,
+			fields = fields
+		}}
+	})
 end
 
+-- 🚀 Gửi webhook
 local function sendToWebhook(data)
-    if not canSend() then return end
-    local url = (_G.urlConfig and _G.urlConfig.url) or ""
-    if url == "" then return end
-    local body = formatDiscordEmbed(data)
-    if typeof(http_request) == "function" then
-        pcall(function()
-            http_request({
-                Url = url,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = body
-            })
-        end)
-    else
-        pcall(function()
-            HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
-        end)
-    end
+	if not canSend() then return end
+	local body = formatDiscordEmbed(data)
+	if typeof(http_request) == "function" then
+		pcall(function()
+			http_request({
+				Url = WEBHOOK_URL,
+				Method = "POST",
+				Headers = {["Content-Type"] = "application/json"},
+				Body = body
+			})
+		end)
+	else
+		pcall(function()
+			HttpService:PostAsync(WEBHOOK_URL, body, Enum.HttpContentType.ApplicationJson)
+		end)
+	end
 end
 
-local function checkLobby()
-    -- Lấy thông tin lobby và gửi Discord
-    local stats = {
-        Level = LocalPlayer.leaderstats and LocalPlayer.leaderstats.Level and LocalPlayer.leaderstats.Level.Value or "N/A",
-        Wins  = LocalPlayer.leaderstats and LocalPlayer.leaderstats.Wins and LocalPlayer.leaderstats.Wins.Value or "N/A",
-        Gold  = LocalPlayer.PlayerGui and LocalPlayer.PlayerGui.GUI and LocalPlayer.PlayerGui.GUI.NewGoldDisplay 
-            and LocalPlayer.PlayerGui.GUI.NewGoldDisplay.GoldText and LocalPlayer.PlayerGui.GUI.NewGoldDisplay.GoldText.Text or "N/A"
-    }
-    sendToWebhook({type = "lobby", stats = stats})
+-- 🏠 Gửi dữ liệu lobby
+local function sendLobbyInfo()
+	local stats = {
+		Level = LocalPlayer.leaderstats and LocalPlayer.leaderstats.Level and LocalPlayer.leaderstats.Level.Value or "N/A",
+		Wins  = LocalPlayer.leaderstats and LocalPlayer.leaderstats.Wins and LocalPlayer.leaderstats.Wins.Value or "N/A",
+		Gold  = LocalPlayer.PlayerGui and LocalPlayer.PlayerGui.GUI and LocalPlayer.PlayerGui.GUI.NewGoldDisplay 
+			and LocalPlayer.PlayerGui.GUI.NewGoldDisplay.GoldText and LocalPlayer.PlayerGui.GUI.NewGoldDisplay.GoldText.Text or "N/A"
+	}
+	sendToWebhook({type = "lobby", stats = stats})
 end
 
--- *** PHƯƠNG PHÁP DỰ PHÒNG: ĐỌC TỪ UI (nếu hooking không khả dụng) ***
--- CHÚ Ý: Phương pháp này sẽ có độ trễ do chờ UI hiển thị và các animation hoàn tất.
-local function waitForGameOverScreen_Fallback()
-    local gui = LocalPlayer.PlayerGui:WaitForChild("Interface")
-    local gos = gui:WaitForChild("GameOverScreen", 60)
-    if not gos then return end
-    repeat task.wait() until gos.Visible
+-- 🧠 Hook DisplayScreen từ GameOverRewardsScreenHandler
+local function hookGameOver()
+	local success, err = pcall(function()
+		local RewardsHandler = require(LocalPlayer.PlayerScripts.Client.UserInterfaceHandler:WaitForChild("GameOverRewardsScreenHandler"))
+		local oldDisplayScreen = RewardsHandler.DisplayScreen
 
-    -- Chờ các hiệu ứng hiển thị phần thưởng (Gold, XP, Tokens) hoàn tất.
-    -- Dựa trên GameOverScreenHandler, animation cho Tokens có độ trễ bắt đầu là 2.5 giây và thời lượng 0.75 giây.
-    -- Thêm một khoảng đệm nhỏ (0.2 giây) để đảm bảo mọi thứ đã ổn định và giá trị được cập nhật đầy đủ.
-    task.wait(2.5 + 0.75 + 0.2) -- Tổng cộng khoảng 3.45 giây chờ sau khi màn hình hiển thị.
-
-    return gos
+		RewardsHandler.DisplayScreen = function(delay1, delay2, data)
+			task.spawn(function()
+				local name = LocalPlayer.Name
+				local rewardData = {
+					type = "game",
+					rewards = {
+						Map = data.MapName or "Unknown",
+						Mode = tostring(data.Difficulty),
+						Time = data.TimeElapsed and tostring(data.TimeElapsed) or "N/A",
+						Result = data.Victory and "Victory" or "Defeat",
+						Gold = tostring((data.PlayerNameToGoldMap or {})[name] or 0),
+						XP = tostring((data.PlayerNameToXPMap or {})[name] or 0),
+						Tokens = tostring((data.PlayerNameToTokensMap or {})[name] or 0),
+						PowerUps = {}
+					}
+				}
+				local powerups = (data.PlayerNameToPowerUpsRewardedMapMap or {})[name] or {}
+				for id, count in pairs(powerups) do
+					table.insert(rewardData.rewards.PowerUps, id .. " x" .. tostring(count))
+				end
+				sendToWebhook(rewardData)
+			end)
+			return oldDisplayScreen(delay1, delay2, data)
+		end
+	end)
+	if not success then warn("Webhook hook error: ", err) end
 end
 
--- Lấy số từ text, ví dụ "x3" => 3, không được thì trả về 1
-local function extractNumber(str)
-    if not str then return 1 end
-    local n = string.match(str, "%d+")
-    return n and tonumber(n) or 1
-end
-
-local function checkGameOver_Fallback()
-    print("Sử dụng phương pháp dự phòng (đọc GUI). Sẽ có độ trễ để chờ hoạt ảnh UI hoàn tất.")
-    local gos = waitForGameOverScreen_Fallback()
-    if not gos then return end
-    local main = gos.Main
-    local rewards, withTokens = nil, false
-    local result = {}
-
-    -- Lấy frame thưởng phù hợp
-    if main:FindFirstChild("RewardsFrameWithTokens") and main.RewardsFrameWithTokens.Visible then
-        rewards = main.RewardsFrameWithTokens.InnerFrame
-        withTokens = true
-    elseif main:FindFirstChild("RewardsFrame") and main.RewardsFrame.Visible then
-        rewards = main.RewardsFrame.InnerFrame
-        withTokens = false
-    end
-
-    if rewards then
-        -- Gold: chỉ lấy số gốc, không bonus
-        result.Gold = rewards.Gold and rewards.Gold.TextLabel and rewards.Gold.TextLabel.Text or "N/A"
-
-        -- XP: nếu có bonus visible thì cộng số bonus vào số gốc, chỉ lấy số
-        local xp = rewards.XP and rewards.XP.TextLabel and rewards.XP.TextLabel.Text or "0"
-        local xpBase = tonumber((xp or ""):gsub(",", ""):match("%d+")) or 0
-        local xpBonus = 0
-        if rewards.XP and rewards.XP.BonusTextLabel and rewards.XP.BonusTextLabel.Visible then
-            local bonusText = rewards.XP.BonusTextLabel.Text or ""
-            xpBonus = tonumber(bonusText:gsub(",", ""):match("%d+")) or 0
-        end
-        result.XP = tostring(xpBase + xpBonus)
-
-        if withTokens then
-            result.Tokens = rewards.Tokens and rewards.Tokens.TextLabel and rewards.Tokens.TextLabel.Text or "N/A"
-        end
-    end
-
-    -- Thông tin phụ
-    if main:FindFirstChild("InfoFrame") then
-        result.Map = main.InfoFrame.Map and main.InfoFrame.Map.Text or "N/A"
-        result.Time = main.InfoFrame.Time and main.InfoFrame.Time.Text or "N/A"
-        result.Mode = main.InfoFrame.Mode and main.InfoFrame.Mode.Text or "N/A"
-    end
-
-    -- Powerups: tìm mọi frame tên có "PowerUps", bỏ qua UIListLayout và ItemTemplate
-    local powerups = {}
-    local content = gos.Rewards and gos.Rewards.Content
-    if content then
-        for _, v in pairs(content:GetChildren()) do
-            if v.Name:find("PowerUps") then
-                for _, item in pairs(v.Items:GetChildren()) do
-                    if item:IsA("UIListLayout") or item.Name == "ItemTemplate" then
-                        continue
-                    end
-                    local count = 1
-                    if item:FindFirstChild("CountText") then
-                        count = extractNumber(item.CountText.Text)
-                    end
-                    table.insert(powerups, item.Name .. " x" .. tostring(count))
-                end
-            end
-        end
-    end
-    result.PowerUps = powerups
-
-    -- Kết quả trận
-    if main:FindFirstChild("VictoryText") and main.VictoryText.Visible then
-        result.Result = "Victory"
-    elseif main:FindFirstChild("DefeatText") and main.DefeatText.Visible then
-        result.Result = "Defeat"
-    else
-        result.Result = "Unknown"
-    end
-
-    sendToWebhook({type = "game", rewards = result})
-end
--- *** KẾT THÚC PHƯƠNG PHÁP DỰ PHÒNG ***
-
+-- 🎯 Xác định ở lobby hay trong trận
 local function isLobby()
-    local gui = LocalPlayer.PlayerGui:FindFirstChild("GUI")
-    return gui and gui:FindFirstChild("NewGoldDisplay")
+	local gui = LocalPlayer.PlayerGui:FindFirstChild("GUI")
+	return gui and gui:FindFirstChild("NewGoldDisplay")
 end
 
--- Logic chính của script
+-- 🚦 Chạy
 if isLobby() then
-    checkLobby()
+	sendLobbyInfo()
 else
-    local hookedSuccessfully = false
-    pcall(function()
-        local UserInterfaceHandler = Players.LocalPlayer:WaitForChild("PlayerScripts").Client.UserInterfaceHandler
-        local GameOverScreenHandler = require(UserInterfaceHandler:WaitForChild("GameOverScreenHandler"))
-
-        -- Kiểm tra xem hookfunction có khả dụng không
-        if typeof(hookfunction) == "function" then
-            -- Hook hàm DisplayScreen trong module GameOverScreenHandler
-            local originalDisplayScreen = GameOverScreenHandler.DisplayScreen -- Lưu trữ hàm gốc
-
-            hookfunction(originalDisplayScreen, function(self, arg1)
-                local LocalPlayerName = Players.LocalPlayer.Name
-
-                -- Trích xuất dữ liệu phần thưởng thô trực tiếp từ arg1
-                local gold = arg1.PlayerNameToGoldMap[LocalPlayerName] or 0
-                local xp = arg1.PlayerNameToXPMap[LocalPlayerName] or 0
-                local tokens = arg1.PlayerNameToTokensMap[LocalPlayerName] or 0
-                local victory = arg1.Victory or false
-                local mapName = arg1.MapName or "N/A"
-                local difficulty = arg1.Difficulty or "N/A"
-                local timeElapsed = arg1.TimeElapsed or 0
-
-                -- Định dạng thời gian cho Discord embed dễ đọc hơn
-                local minutes = math.floor(timeElapsed / 60)
-                local seconds = math.floor(timeElapsed % 60)
-                local formattedTime = string.format("%02d:%02d", minutes, seconds)
-
-                -- Trích xuất PowerUps
-                local powerupDataMap = arg1.PlayerNameToPowerUpsRewardedMapMap[LocalPlayerName] or {}
-                local formattedPowerups = {}
-                for powerUpName, count in pairs(powerupDataMap) do
-                    table.insert(formattedPowerups, powerUpName .. " x" .. tostring(count))
-                end
-                -- Nếu không có powerups, nó sẽ là một bảng rỗng.
-
-                sendToWebhook({
-                    type = "game",
-                    rewards = {
-                        Result = victory and "Victory" or "Defeat",
-                        Gold = tostring(gold),
-                        XP = tostring(xp),
-                        Tokens = tostring(tokens),
-                        Map = mapName,
-                        Mode = difficulty,
-                        Time = formattedTime,
-                        PowerUps = formattedPowerups -- Gửi dưới dạng một mảng các chuỗi
-                    }
-                })
-
-                -- Gọi hàm gốc để UI của game vẫn hoạt động bình thường
-                return originalDisplayScreen(self, arg1)
-            end)
-            hookedSuccessfully = true
-            print("Đã hook GameOverScreenHandler.DisplayScreen thành công. Webhook sẽ gửi thông tin phần thưởng ngay lập tức, không có độ trễ UI.")
-        else
-            warn("hookfunction không khả dụng. Webhook sẽ quay lại phương pháp đọc UI, có thể có độ trễ do hoạt ảnh GUI.")
-        end
-    end)
-
-    if not hookedSuccessfully then
-        checkGameOver_Fallback()
-    end
+	hookGameOver()
 end
