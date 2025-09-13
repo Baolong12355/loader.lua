@@ -111,7 +111,7 @@ local function loopCheckLobbyGold()
                     end
                 end
             end
-            task.wait(0.25) -- ⬅️ delay 0.25 giây giữa mỗi lần kiểm tra
+            task.wait(0.5) -- ⬅️ delay 0.25 giây giữa mỗi lần kiểm tra
         end
     end)
 end
