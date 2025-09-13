@@ -31,14 +31,7 @@ local skipTowerTypes = {
         ["Machine Gunner"] = true
 }
 
-local fastTowers = {
-        ["Ice Breaker"] = true,
-        ["John"] = true,
-        ["Slammer"] = true,
-        ["Mobster"] = true,
-        ["Golden Mobster"] = true,
-        ["Flame Trooper"] = true
-}
+-- Removed fastTowers table since we're removing delays
 
 local skipAirTowers = {
         ["Ice Breaker"] = true,
@@ -49,7 +42,7 @@ local skipAirTowers = {
 }
 
 -- Tracking variables
-local lastUsedTime = {}
+-- Removed lastUsedTime since we're removing delays
 local mobsterUsedEnemies = {}
 local prevCooldown = {}
 local medicLastUsedTime = {}
@@ -406,25 +399,25 @@ end
 -- ======== NEW: Tower Attack Event Handler ========
 local function handleTowerAttack(attackData)
         local ownedTowers = TowerClass.GetTowers() or {}
-        
+
         for _, data in ipairs(attackData) do
                 local attackingTowerHash = data.X  -- Hash of tower that just attacked
                 local targetHash = data.Y  -- Target hash (if needed)
-                
+
                 local attackingTower = ownedTowers[attackingTowerHash]
                 if not attackingTower then continue end
-                
+
                 -- Check for support towers in range that can buff the attacking tower
                 for hash, tower in pairs(ownedTowers) do
                         if hash == attackingTowerHash then continue end -- Skip self
-                        
+
                         local towerPos = getTowerPos(tower)
                         local attackingPos = getTowerPos(attackingTower)
                         if not towerPos or not attackingPos then continue end
-                        
+
                         local distance = getDistance2D(towerPos, attackingPos)
                         local towerRange = getRange(tower)
-                        
+
                         -- Check if support tower is in range of attacking tower
                         if distance <= towerRange then
                                 -- Handle different support tower types
@@ -465,18 +458,16 @@ end
 -- Listen to TowerAttack event
 TowerAttack.OnClientEvent:Connect(handleTowerAttack)
 
--- ======== MAIN LOOP (for regular towers) ========
+-- ======== MAIN LOOP (for regular towers) - NO DELAYS ========
 RunService.Heartbeat:Connect(function()
-        local now = tick()
         local ownedTowers = TowerClass.GetTowers() or {}
 
         for hash, tower in pairs(ownedTowers) do
                 if not tower or not tower.AbilityHandler then continue end
                 if skipTowerTypes[tower.Type] then continue end
 
-                local delay = fastTowers[tower.Type] and 0.1 or 0.2
-                if lastUsedTime[hash] and now - lastUsedTime[hash] < delay then continue end
-                lastUsedTime[hash] = now
+                -- REMOVED ALL DELAY LOGIC HERE
+                -- No more lastUsedTime checks or delay variables
 
                 local p1, p2 = GetCurrentUpgradeLevels(tower)
                 local pos = getTowerPos(tower)
