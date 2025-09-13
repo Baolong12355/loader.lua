@@ -2,53 +2,48 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
+-- cấu hình retry
 local MAX_RETRY = 3
-local RETRY_DELAY = 0.5 -- giây giữa các lần retry
+local RETRY_DELAY = 0.5 -- giây
 
+-- lấy URL webhook
 local function getWebhookURL()
     return getgenv().webhookConfig and getgenv().webhookConfig.webhookUrl or ""
 end
 
-local function canSend()
-    local hasExecutor = typeof(getgenv) == "function" or typeof(http_request) == "function"
-    local ok, httpEnabled = pcall(function() return HttpService.HttpEnabled end)
-    return hasExecutor and ok and httpEnabled and getWebhookURL() ~= ""
-end
-
-local function fieldsFromTable(tab, prefix)
-    local fields = {}
-    prefix = prefix and (prefix .. " ") or ""
-    for k, v in pairs(tab) do
-        if typeof(v) == "table" then
-            for _, f in ipairs(fieldsFromTable(v, prefix .. k)) do
-                table.insert(fields, f)
-            end
-        else
-            table.insert(fields, {name = prefix .. tostring(k), value = tostring(v), inline = false})
-        end
-    end
-    return fields
-end
-
+-- gửi webhook với retry + console log
 local function sendToWebhook(data)
-    if not canSend() then 
-        print("[Webhook] cannot send: HttpService disabled or url missing")
-        return 
+    local url = getWebhookURL()
+    if url == "" then
+        print("[Webhook] cannot send: url missing")
+        return
     end
 
     local body = HttpService:JSONEncode({
         embeds = {{
             title = data.type == "game" and "Game Result" or "Lobby Info",
             color = 0x5B9DFF,
-            fields = fieldsFromTable(data.rewards or data.stats or data)
+            fields = (function()
+                local fields = {}
+                local function addFields(tab, prefix)
+                    prefix = prefix and (prefix .. " ") or ""
+                    for k, v in pairs(tab) do
+                        if typeof(v) == "table" then
+                            addFields(v, prefix .. k)
+                        else
+                            table.insert(fields, {name = prefix .. tostring(k), value = tostring(v), inline = false})
+                        end
+                    end
+                end
+                addFields(data.rewards or data.stats or data)
+                return fields
+            end)()
         }}
     })
 
-    local url = getWebhookURL()
-
     task.spawn(function()
         for attempt = 1, MAX_RETRY do
-            print(string.format("[Webhook] sending attempt %d...", attempt))
+            print("[Webhook] sending attempt " .. attempt .. "...")
             local success, err = pcall(function()
                 if typeof(http_request) == "function" then
                     http_request({
@@ -170,6 +165,7 @@ local function hookGameReward()
     end)
 end
 
+-- kiểm tra lobby
 local function isLobby()
     local gui = LocalPlayer:FindFirstChild("PlayerGui")
     return gui and gui:FindFirstChild("GUI") and gui.GUI:FindFirstChild("CurrencyDisplay") ~= nil
