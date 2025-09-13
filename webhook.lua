@@ -60,7 +60,7 @@ local function sendLobbyInfo()
     local stats = {
         Level = LocalPlayer:FindFirstChild("leaderstats") and LocalPlayer.leaderstats:FindFirstChild("Level") and LocalPlayer.leaderstats.Level.Value or "N/A",
         Wins = LocalPlayer.leaderstats and LocalPlayer.leaderstats:FindFirstChild("Wins") and LocalPlayer.leaderstats.Wins.Value or "N/A",
-        Gold = gui and gui:FindFirstChild("GUI") and gui.GUI:FindFirstChild("NewGoldDisplay") and gui.GUI.NewGoldDisplay:FindFirstChild("GoldText") and gui.GUI.NewGoldDisplay.GoldText.Text or "N/A"
+        Gold = gui and gui:FindFirstChild("GUI") and gui.GUI:FindFirstChild("CurrencyDisplay") and gui.GUI.CurrencyDisplay:FindFirstChild("GoldDisplay") and gui.GUI.CurrencyDisplay.GoldDisplay:FindFirstChild("ValueText") and gui.GUI.CurrencyDisplay.GoldDisplay.ValueText.Text or "N/A"
     }
     sendToWebhook({type = "lobby", stats = stats})
 end
@@ -72,12 +72,19 @@ local function checkLobbyGold()
     local ENABLE_KICK = TARGET_GOLD and true or false
     if not TARGET_GOLD then return end -- không bật nếu không có target
 
-    local gui = LocalPlayer:FindFirstChild("PlayerGui")
+    local gui = LocalPlayer:WaitForChild("PlayerGui", 10) -- đợi tối đa 10s
     if not gui then return end
-    local goldText = gui:FindFirstChild("GUI") and gui.GUI:FindFirstChild("NewGoldDisplay") and gui.GUI.NewGoldDisplay:FindFirstChild("GoldText")
-    if not goldText or not goldText:IsA("TextLabel") then return end
 
-    local goldAmount = tonumber(goldText.Text:gsub("[$,]", "")) or 0
+    local mainGUI = gui:WaitForChild("GUI", 5)
+    if not mainGUI then return end
+
+    local currencyDisplay = mainGUI:WaitForChild("CurrencyDisplay", 5)
+    local goldDisplay = currencyDisplay:WaitForChild("GoldDisplay", 5)
+    local valueText = goldDisplay:WaitForChild("ValueText", 5)
+    if not valueText or not valueText:IsA("TextLabel") then return end
+
+    -- lọc số
+    local goldAmount = tonumber(valueText.Text:gsub("[$,]", "")) or 0
     if goldAmount >= TARGET_GOLD then
         sendToWebhook({
             type = "lobby",
@@ -131,7 +138,7 @@ end
 -- kiểm tra xem có phải lobby
 local function isLobby()
     local gui = LocalPlayer:FindFirstChild("PlayerGui")
-    return gui and gui:FindFirstChild("GUI") and gui.GUI:FindFirstChild("NewGoldDisplay") ~= nil
+    return gui and gui:FindFirstChild("GUI") and gui.GUI:FindFirstChild("CurrencyDisplay") ~= nil
 end
 
 if isLobby() then
