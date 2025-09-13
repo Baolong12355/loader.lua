@@ -2,16 +2,20 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
--- cấu hình retry
 local MAX_RETRY = 3
-local RETRY_DELAY = 0.5 -- giây
 
--- lấy URL webhook
 local function getWebhookURL()
     return getgenv().webhookConfig and getgenv().webhookConfig.webhookUrl or ""
 end
 
--- gửi webhook với retry
+local function formatTime(seconds)
+    seconds = tonumber(seconds)
+    if not seconds then return "N/A" end
+    local mins = math.floor(seconds / 60)
+    local secs = math.floor(seconds % 60)
+    return string.format("%dm %ds", mins, secs)
+end
+
 local function sendToWebhook(data)
     local url = getWebhookURL()
     if url == "" then return end
@@ -39,8 +43,8 @@ local function sendToWebhook(data)
     })
 
     task.spawn(function()
-        for attempt = 1, MAX_RETRY do
-            local success, _ = pcall(function()
+        for _ = 1, MAX_RETRY do
+            local success = pcall(function()
                 if typeof(http_request) == "function" then
                     http_request({
                         Url = url,
@@ -52,13 +56,11 @@ local function sendToWebhook(data)
                     HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
                 end
             end)
-            if success then break
-            else task.wait(RETRY_DELAY) end
+            if success then break end
         end
     end)
 end
 
--- gửi thông tin lobby
 local function sendLobbyInfo()
     task.spawn(function()
         local gui = LocalPlayer:WaitForChild("PlayerGui", 5)
@@ -77,7 +79,6 @@ local function sendLobbyInfo()
     end)
 end
 
--- loop check vàng lobby
 local function loopCheckLobbyGold()
     local config = getgenv().webhookConfig or {}
     local TARGET_GOLD = config.targetGold
@@ -115,7 +116,6 @@ local function loopCheckLobbyGold()
     end)
 end
 
--- hook game reward
 local function hookGameReward()
     task.spawn(function()
         local handler
@@ -133,7 +133,7 @@ local function hookGameReward()
                     rewards = {
                         Map = data.MapName or "Unknown",
                         Mode = tostring(data.Difficulty or "Unknown"),
-                        Time = data.TimeElapsed and tostring(data.TimeElapsed) or "N/A",
+                        Time = formatTime(data.TimeElapsed),
                         Result = data.Victory and "Victory" or "Defeat",
                         Gold = tostring((data.PlayerNameToGoldMap and data.PlayerNameToGoldMap[name]) or 0),
                         XP = tostring((data.PlayerNameToXPMap and data.PlayerNameToXPMap[name]) or 0),
@@ -152,13 +152,11 @@ local function hookGameReward()
     end)
 end
 
--- kiểm tra lobby
 local function isLobby()
     local gui = LocalPlayer:FindFirstChild("PlayerGui")
     return gui and gui:FindFirstChild("GUI") and gui.GUI:FindFirstChild("CurrencyDisplay") ~= nil
 end
 
--- chạy tất cả
 if isLobby() then
     sendLobbyInfo()
     loopCheckLobbyGold()
