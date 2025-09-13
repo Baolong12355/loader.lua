@@ -4,12 +4,13 @@ local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/rel
 -- Create Window
 local Window = WindUI:CreateWindow({
     Title = "D.O.K (Drone Over Kill)",
-    Author = "D.O.K PANEL",
+    Author = "ngoài anh long còn thằng nào dùng làm 🐶",
     Folder = "DOK",
-    Size = UDim2.fromOffset(580, 460),
+    Size = UDim2.fromOffset(400, 600),
     Transparent = false,
     Theme = "Dark",
-    Resizable = true,
+    Resizable = false,
+    SideBarWidth = 150,
 })
 
 -- Configuration values
@@ -32,10 +33,11 @@ MainTab:Section({
 })
 
 local ShotIntervalInput = MainTab:Input({
-    Title = "Khoảng Cách Bắn (Shot Interval)",
+    Title = "Khoảng Cách Bắn",
     Desc = "Thời gian giữa các phát bắn",
     Value = tostring(Config.DefaultShotInterval),
-    Placeholder = "Nhập số (ví dụ: 0.001)",
+    Placeholder = "0.001",
+    Type = "Input",
     Callback = function(value)
         local num = tonumber(value)
         if num then
@@ -56,10 +58,11 @@ local ShotIntervalInput = MainTab:Input({
 })
 
 local ReloadTimeInput = MainTab:Input({
-    Title = "Thời Gian Nạp Đạn (Reload Time)",
+    Title = "Thời Gian Nạp Đạn",
     Desc = "Thời gian để nạp đạn",
     Value = tostring(Config.ReloadTime),
-    Placeholder = "Nhập số (ví dụ: 0.001)",
+    Placeholder = "0.001",
+    Type = "Input",
     Callback = function(value)
         local num = tonumber(value)
         if num then
@@ -80,10 +83,11 @@ local ReloadTimeInput = MainTab:Input({
 })
 
 local FirerateInput = MainTab:Input({
-    Title = "Hệ Số Tốc Độ Bắn (Firerate)",
+    Title = "Hệ Số Tốc Độ Bắn",
     Desc = "Hệ số nhân tốc độ bắn",
     Value = tostring(Config.CurrentFirerateMultiplier),
-    Placeholder = "Nhập số (ví dụ: 0.001)",
+    Placeholder = "0.001",
+    Type = "Input",
     Callback = function(value)
         local num = tonumber(value)
         if num then
@@ -104,10 +108,11 @@ local FirerateInput = MainTab:Input({
 })
 
 local SpreadInput = MainTab:Input({
-    Title = "Độ Giật Súng (Spread Degrees)",
+    Title = "Độ Giật Súng",
     Desc = "Độ lan tỏa đạn khi bắn",
     Value = tostring(Config.DefaultSpreadDegrees),
-    Placeholder = "Nhập số (ví dụ: 0)",
+    Placeholder = "0",
+    Type = "Input",
     Callback = function(value)
         local num = tonumber(value)
         if num then
@@ -137,7 +142,7 @@ MainTab:Section({
 -- Main Toggle
 local MainToggle = MainTab:Toggle({
     Title = "Kích Hoạt D.O.K",
-    Desc = "Bật/Tắt chế độ sửa đổi vũ khí",
+    Desc = "Bật/Tắt chế độ sửa đổi",
     Type = "Toggle",
     Default = false,
     Callback = function(state)
@@ -202,41 +207,41 @@ GuideTab:Section({
 })
 
 GuideTab:Paragraph({
-    Title = "Bước 1: Thiết Lập Thông Số",
-    Desc = "• Nhập các giá trị số vào các ô tương ứng\n• Số càng nhỏ thì hiệu ứng càng mạnh\n• Có thể điều chỉnh từng thông số riêng biệt",
+    Title = "Bước 1: Thiết Lập",
+    Desc = "• Nhập giá trị số vào các ô\n• Số nhỏ = hiệu ứng mạnh\n• Có thể chỉnh riêng từng cái",
     Color = "Blue",
 })
 
 GuideTab:Paragraph({
     Title = "Bước 2: Kích Hoạt",
-    Desc = "• Bật công tắc 'Kích Hoạt D.O.K' để áp dụng thay đổi\n• Có thể bật/tắt bất cứ lúc nào\n• Thay đổi có hiệu lực ngay lập tức",
+    Desc = "• Bật nút D.O.K để áp dụng\n• Có thể bật/tắt bất cứ lúc nào\n• Hiệu lực ngay lập tức",
     Color = "Green",
 })
 
 GuideTab:Section({
-    Title = "Giải Thích Thông Số",
+    Title = "Thông Số Chi Tiết",
 })
 
 GuideTab:Paragraph({
-    Title = "Khoảng Cách Bắn (Shot Interval)",
-    Desc = "• Điều khiển thời gian giữa các phát bắn\n• Giá trị nhỏ = bắn nhanh hơn\n• ",
+    Title = "Khoảng Cách Bắn",
+    Desc = "• Thời gian giữa các phát bắn\n• Số nhỏ = bắn nhanh hơn\n• Khuyến nghị: 0.001\n• Mặc định: 1.0",
     Color = "White",
 })
 
 GuideTab:Paragraph({
-    Title = "Thời Gian Nạp Đạn (Reload Time)",
-    Desc = "• Thời gian cần để nạp lại đạn\n• Giá trị nhỏ = nạp đạn nhanh hơn\n• ",
+    Title = "Thời Gian Nạp Đạn",
+    Desc = "• Thời gian để nạp lại đạn\n• Số nhỏ = nạp nhanh hơn\n• Khuyến nghị: 0.001\n• Mặc định: 3.0",
     Color = "White",
 })
 
 GuideTab:Paragraph({
-    Title = "Hệ Số Tốc Độ Bắn (Firerate)",
-    Desc = "• Hệ số nhân cho tốc độ bắn súng\n• Giá trị nhỏ = bắn liên tục nhanh hơn\n• ",
+    Title = "Hệ Số Tốc Độ Bắn",
+    Desc = "• Hệ số nhân tốc độ bắn\n• Số nhỏ = bắn liên tục nhanh\n• Khuyến nghị: 0.001\n• Mặc định: 1.0",
     Color = "White",
 })
 
 GuideTab:Paragraph({
-    Title = "Độ Giật Súng (Spread Degrees)",
-    Desc = "• Độ lan tỏa của đạn khi bắn\n• 0 = bắn hoàn toàn chính xác\n• Số càng lớn càng kém chính xác\n• ",
+    Title = "Độ Giật Súng",
+    Desc = "• Độ lan tỏa đạn khi bắn\n• 0 = bắn hoàn toàn chính xác\n• Số lớn = kém chính xác\n• Khuyến nghị: 0",
     Color = "White",
 })
