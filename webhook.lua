@@ -11,13 +11,10 @@ local function getWebhookURL()
     return getgenv().webhookConfig and getgenv().webhookConfig.webhookUrl or ""
 end
 
--- gửi webhook với retry + console log
+-- gửi webhook với retry
 local function sendToWebhook(data)
     local url = getWebhookURL()
-    if url == "" then
-        print("[Webhook] cannot send: url missing")
-        return
-    end
+    if url == "" then return end
 
     local body = HttpService:JSONEncode({
         embeds = {{
@@ -43,8 +40,7 @@ local function sendToWebhook(data)
 
     task.spawn(function()
         for attempt = 1, MAX_RETRY do
-            print("[Webhook] sending attempt " .. attempt .. "...")
-            local success, err = pcall(function()
+            local success, _ = pcall(function()
                 if typeof(http_request) == "function" then
                     http_request({
                         Url = url,
@@ -56,13 +52,8 @@ local function sendToWebhook(data)
                     HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
                 end
             end)
-            if success then
-                print("[Webhook] sent successfully")
-                break
-            else
-                print("[Webhook] failed attempt " .. attempt .. ": " .. tostring(err))
-                task.wait(RETRY_DELAY)
-            end
+            if success then break
+            else task.wait(RETRY_DELAY) end
         end
     end)
 end
@@ -81,7 +72,6 @@ local function sendLobbyInfo()
                 Wins = LocalPlayer:FindFirstChild("leaderstats") and LocalPlayer.leaderstats:FindFirstChild("Wins") and LocalPlayer.leaderstats.Wins.Value or "N/A",
                 Gold = valueText and valueText:IsA("TextLabel") and valueText.Text or "N/A"
             }
-            print("[Lobby] sending lobby info")
             sendToWebhook({type = "lobby", stats = stats})
         end
     end)
@@ -105,7 +95,6 @@ local function loopCheckLobbyGold()
                 if valueText and valueText:IsA("TextLabel") then
                     local goldAmount = tonumber(valueText.Text:gsub("[$,]", "")) or 0
                     if goldAmount >= TARGET_GOLD then
-                        print("[Lobby] target gold reached: " .. goldAmount)
                         sendToWebhook({
                             type = "lobby",
                             stats = {
@@ -115,14 +104,13 @@ local function loopCheckLobbyGold()
                             }
                         })
                         if ENABLE_KICK then
-                            print("[Lobby] kicking player...")
                             LocalPlayer:Kick("đã đạt " .. goldAmount .. " vàng")
                         end
                         break
                     end
                 end
             end
-            task.wait(0.05) -- check cực nhanh
+            task.wait(0.05)
         end
     end)
 end
@@ -157,7 +145,6 @@ local function hookGameReward()
                 for id, count in pairs(powerups) do
                     table.insert(result.rewards.PowerUps, id .. " x" .. tostring(count or 1))
                 end
-                print("[Game] sending game reward")
                 sendToWebhook(result)
             end)
             return old(delay1, delay2, data)
@@ -173,10 +160,8 @@ end
 
 -- chạy tất cả
 if isLobby() then
-    print("[Lobby] detected, sending lobby info and checking gold")
     sendLobbyInfo()
     loopCheckLobbyGold()
 else
-    print("[Game] detected, hooking game reward")
     hookGameReward()
 end
