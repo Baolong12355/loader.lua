@@ -6,11 +6,11 @@ local Window = WindUI:CreateWindow({
     Title = "D.O.K (Drone Over Kill)",
     Author = "ngoài anh long còn thằng nào dùng làm 🐶",
     Folder = "DOK",
-    Size = UDim2.fromOffset(400, 600),
+    Size = UDim2.fromOffset(350, 450),
     Transparent = false,
     Theme = "Dark",
     Resizable = false,
-    SideBarWidth = 150,
+    SideBarWidth = 120,
 })
 
 -- Configuration values
@@ -208,13 +208,13 @@ GuideTab:Section({
 
 GuideTab:Paragraph({
     Title = "Bước 1: Thiết Lập",
-    Desc = "• Nhập giá trị số vào các ô\n• Số nhỏ = hiệu ứng mạnh\n• Có thể chỉnh riêng từng cái",
+    Desc = "Nhập số vào các ô. Số nhỏ = hiệu ứng mạnh",
     Color = "Blue",
 })
 
 GuideTab:Paragraph({
-    Title = "Bước 2: Kích Hoạt",
-    Desc = "• Bật nút D.O.K để áp dụng\n• Có thể bật/tắt bất cứ lúc nào\n• Hiệu lực ngay lập tức",
+    Title = "Bước 2: Kích Hoạt", 
+    Desc = "Bật nút D.O.K để áp dụng thay đổi",
     Color = "Green",
 })
 
@@ -224,24 +224,24 @@ GuideTab:Section({
 
 GuideTab:Paragraph({
     Title = "Khoảng Cách Bắn",
-    Desc = "• Thời gian giữa các phát bắn\n• Số nhỏ = bắn nhanh hơn\n• Khuyến nghị: 0.001\n• Mặc định: 1.0",
+    Desc = "Thời gian giữa các phát bắn. Khuyến nghị: 0.001",
     Color = "White",
 })
 
 GuideTab:Paragraph({
-    Title = "Thời Gian Nạp Đạn",
-    Desc = "• Thời gian để nạp lại đạn\n• Số nhỏ = nạp nhanh hơn\n• Khuyến nghị: 0.001\n• Mặc định: 3.0",
+    Title = "Thời Gian Nạp Đạn", 
+    Desc = "Thời gian để nạp lại đạn. Khuyến nghị: 0.001",
     Color = "White",
 })
 
 GuideTab:Paragraph({
     Title = "Hệ Số Tốc Độ Bắn",
-    Desc = "• Hệ số nhân tốc độ bắn\n• Số nhỏ = bắn liên tục nhanh\n• Khuyến nghị: 0.001\n• Mặc định: 1.0",
+    Desc = "Hệ số nhân tốc độ bắn. Khuyến nghị: 0.001", 
     Color = "White",
 })
 
 GuideTab:Paragraph({
     Title = "Độ Giật Súng",
-    Desc = "• Độ lan tỏa đạn khi bắn\n• 0 = bắn hoàn toàn chính xác\n• Số lớn = kém chính xác\n• Khuyến nghị: 0",
+    Desc = "Độ lan tỏa đạn khi bắn. Khuyến nghị: 0",
     Color = "White",
 })
