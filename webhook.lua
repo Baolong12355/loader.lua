@@ -1,3 +1,5 @@
+repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
+
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
@@ -120,12 +122,12 @@ local function hookGameReward()
     task.spawn(function()
         local handler
         local ok = pcall(function()
-            handler = require(LocalPlayer.PlayerScripts.Client.UserInterfaceHandler:WaitForChild("GameOverRewardsScreenHandler"))
+            handler = require(LocalPlayer.PlayerScripts.Client.UserInterfaceHandler:WaitForChild("GameOverScreenHandler"))
         end)
         if not ok or not handler then return end
 
         local old = handler.DisplayScreen
-        handler.DisplayScreen = function(delay1, delay2, data)
+        handler.DisplayScreen = function(data)
             task.spawn(function()
                 local name = LocalPlayer.Name
                 local result = {
@@ -134,7 +136,7 @@ local function hookGameReward()
                         Map = data.MapName or "Unknown",
                         Mode = tostring(data.Difficulty or "Unknown"),
                         Time = formatTime(data.TimeElapsed),
-                        Wave = tostring(data.LastPassedWave or "N/A"),
+                        Wave = data.LastPassedWave and tostring(data.LastPassedWave) or "N/A",
                         Result = data.Victory and "Victory" or "Defeat",
                         Gold = tostring((data.PlayerNameToGoldMap and data.PlayerNameToGoldMap[name]) or 0),
                         XP = tostring((data.PlayerNameToXPMap and data.PlayerNameToXPMap[name]) or 0),
@@ -148,7 +150,7 @@ local function hookGameReward()
                 end
                 sendToWebhook(result)
             end)
-            return old(delay1, delay2, data)
+            return old(data)
         end
     end)
 end
