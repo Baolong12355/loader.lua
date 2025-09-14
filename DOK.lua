@@ -4,13 +4,21 @@ local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/rel
 -- Create Window
 local Window = WindUI:CreateWindow({
     Title = "D.O.K (Drone Over Kill)",
-    Author = "ngoài anh long còn thằng nào dùng làm 🐶",
+    Author = ".",
     Folder = "DOK",
-    Size = UDim2.fromOffset(300, 350),
+    Size = UDim2.fromOffset(350, 450),
     Transparent = false,
     Theme = "Dark",
     Resizable = false,
     SideBarWidth = 120,
+    
+    -- Key System
+    KeySystem = {
+        Key = { "DOK", "Long", "OVERKILL" },
+        Note = "Nhập key để sử dụng D.O.K",
+        SaveKey = true,
+        URL = "", -- Link lấy key
+    },
 })
 
 -- Configuration values
