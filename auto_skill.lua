@@ -31,8 +31,6 @@ local skipTowerTypes = {
         ["Machine Gunner"] = true
 }
 
--- Removed fastTowers table since we're removing delays
-
 local skipAirTowers = {
         ["Ice Breaker"] = true,
         ["John"] = true,
@@ -42,7 +40,6 @@ local skipAirTowers = {
 }
 
 -- Tracking variables
--- Removed lastUsedTime since we're removing delays
 local mobsterUsedEnemies = {}
 local prevCooldown = {}
 local medicLastUsedTime = {}
@@ -129,21 +126,49 @@ local function getEnemies()
         return result
 end
 
+-- Function to get enemy's progress along their path (UPDATED)
 local function getEnemyPathDistance(enemy)
-        if not enemy or not enemy.GetPathPosition then return 0 end
-        local success, pathPos = pcall(function() return enemy:GetPathPosition() end)
-        if not success then return 0 end
-
-        local totalDistance = 0
-        if enemy.PathHandler and enemy.PathHandler.DistanceTraveled then
-                totalDistance = enemy.PathHandler.DistanceTraveled
-        elseif enemy.PathIndex then
-                totalDistance = enemy.PathIndex * 10
+        if not enemy then return 0 end
+        
+        -- Try multiple methods to get path progress
+        if enemy.MovementHandler then
+                if enemy.MovementHandler.GetPathPercentage then
+                        local success, percentage = pcall(function() 
+                                return enemy.MovementHandler:GetPathPercentage() 
+                        end)
+                        if success and percentage then return percentage end
+                end
+                
+                if enemy.MovementHandler.PathPercentage then
+                        return enemy.MovementHandler.PathPercentage or 0
+                end
+                
+                if enemy.MovementHandler.GetCurrentNode then
+                        local success, node = pcall(function() 
+                                return enemy.MovementHandler:GetCurrentNode() 
+                        end)
+                        if success and node and node.GetPercentageAlongPath then
+                                local success2, percentage = pcall(function()
+                                        return node:GetPercentageAlongPath(1)
+                                end)
+                                if success2 and percentage then return percentage end
+                        end
+                end
+                
+                if enemy.MovementHandler.DistanceTraveled then
+                        return enemy.MovementHandler.DistanceTraveled
+                end
         end
-
-        return totalDistance
+        
+        -- Fallback using path index
+        if enemy.PathIndex then
+                return enemy.PathIndex * 10
+        end
+        
+        return 0
 end
 
+-- UNCHANGED: Keep original logic for getFarthestEnemyInRange
 local function getFarthestEnemyInRange(pos, range, options)
         options = options or {}
         local excludeAir = options.excludeAir or false
@@ -173,11 +198,13 @@ local function getFarthestEnemyInRange(pos, range, options)
         return candidates[1].enemy:GetPosition()
 end
 
+-- UPDATED: Now prioritizes furthest enemy in range for directional towers only
 local function getNearestEnemyInRange(pos, range, options)
         options = options or {}
         local excludeAir = options.excludeAir or false
         local excludeArrows = options.excludeArrows or false
 
+        local candidates = {}
         for _, enemy in ipairs(getEnemies()) do
                 if not enemy.GetPosition then continue end
                 if excludeArrows and enemy.Type == "Arrow" then continue end
@@ -185,11 +212,22 @@ local function getNearestEnemyInRange(pos, range, options)
 
                 local ePos = enemy:GetPosition()
                 if getDistance2D(ePos, pos) <= range then
-                        return ePos
+                        table.insert(candidates, {
+                                enemy = enemy,
+                                position = ePos,
+                                pathDistance = getEnemyPathDistance(enemy)
+                        })
                 end
         end
 
-        return nil
+        if #candidates == 0 then return nil end
+
+        -- Sort by path distance (furthest first) - Only for directional towers
+        table.sort(candidates, function(a, b)
+                return a.pathDistance > b.pathDistance
+        end)
+
+        return candidates[1].position
 end
 
 local function hasSplashDamage(ability)
@@ -260,10 +298,11 @@ local function getEnhancedTarget(pos, towerRange, towerType, ability)
         if not directionalTowerTypes[towerType] then
                 return getFarthestEnemyInRange(pos, effectiveRange, options)
         else
-                return getNearestEnemyInRange(pos, effectiveRange, options)
+                return getNearestEnemyInRange(pos, effectiveRange, options) -- This now also targets furthest
         end
 end
 
+-- UNCHANGED: Special targeting functions that use specific modes (maxhp, etc.) remain the same
 local function findTarget(pos, range, options)
         options = options or {}
         local mode = options.mode or "nearest"
@@ -325,6 +364,7 @@ local function findTarget(pos, range, options)
         return chosen and chosen:GetPosition() or nil
 end
 
+-- UNCHANGED: Mobster targeting uses specific maxhp mode
 local function getMobsterTarget(tower, hash, path)
         local pos = getTowerPos(tower)
         local range = getRange(tower)
@@ -341,6 +381,7 @@ local function getMobsterTarget(tower, hash, path)
         })
 end
 
+-- UNCHANGED: Commander targeting uses specific maxhp mode
 local function getCommanderTarget()
         local candidates = {}
         for _, e in ipairs(getEnemies()) do
@@ -466,9 +507,6 @@ RunService.Heartbeat:Connect(function()
                 if not tower or not tower.AbilityHandler then continue end
                 if skipTowerTypes[tower.Type] then continue end
 
-                -- REMOVED ALL DELAY LOGIC HERE
-                -- No more lastUsedTime checks or delay variables
-
                 local p1, p2 = GetCurrentUpgradeLevels(tower)
                 local pos = getTowerPos(tower)
                 local range = getRange(tower)
@@ -491,7 +529,7 @@ RunService.Heartbeat:Connect(function()
                                 end
                         end
 
-                        -- Enhanced Ghost logic
+                        -- Enhanced Ghost logic - UNCHANGED (uses maxhp mode)
                         if tower.Type == "Ghost" then
                                 if p2 > 2 then
                                         allowUse = false
@@ -507,7 +545,7 @@ RunService.Heartbeat:Connect(function()
                                 end
                         end
 
-                        -- Enhanced Toxicnator logic
+                        -- Enhanced Toxicnator logic - UNCHANGED (uses maxhp mode)
                         if tower.Type == "Toxicnator" then
                                 targetPos = findTarget(pos, range, {
                                         mode = "maxhp",
@@ -518,14 +556,14 @@ RunService.Heartbeat:Connect(function()
                                 break
                         end
 
-                        -- Flame Trooper logic
+                        -- Flame Trooper logic - UPDATED (uses getEnhancedTarget which now targets furthest)
                         if tower.Type == "Flame Trooper" then
                                 targetPos = getEnhancedTarget(pos, 9.5, tower.Type, ability)
                                 if targetPos then SendSkill(hash, index, targetPos) end
                                 break
                         end
 
-                        -- Enhanced Ice Breaker logic
+                        -- Enhanced Ice Breaker logic - UPDATED (uses getEnhancedTarget)
                         if tower.Type == "Ice Breaker" then
                                 if index == 1 then
                                         targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
@@ -537,7 +575,7 @@ RunService.Heartbeat:Connect(function()
                                 break
                         end
 
-                        -- Enhanced Slammer logic
+                        -- Enhanced Slammer logic - UPDATED (uses getEnhancedTarget)
                         if tower.Type == "Slammer" then
                                 local enemyInRange = getEnhancedTarget(pos, range, tower.Type, ability)
                                 if enemyInRange then
@@ -546,7 +584,7 @@ RunService.Heartbeat:Connect(function()
                                 break
                         end
 
-                        -- Enhanced John logic
+                        -- Enhanced John logic - UPDATED (uses getEnhancedTarget)
                         if tower.Type == "John" then
                                 if p1 >= 5 then
                                         targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
@@ -557,7 +595,7 @@ RunService.Heartbeat:Connect(function()
                                 break
                         end
 
-                        -- Enhanced Mobster logic
+                        -- Enhanced Mobster logic - UNCHANGED (uses getMobsterTarget with maxhp mode)
                         if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
                                 if p2 >= 3 and p2 <= 5 then
                                         targetPos = getMobsterTarget(tower, hash, 2)
@@ -569,14 +607,14 @@ RunService.Heartbeat:Connect(function()
                                 break
                         end
 
-                        -- Enhanced Commander logic (skill 3 only)
+                        -- Enhanced Commander logic (skill 3 only) - UNCHANGED (uses getCommanderTarget with maxhp)
                         if tower.Type == "Commander" and index == 3 then
                                 targetPos = getCommanderTarget()
                                 if targetPos then SendSkill(hash, index, targetPos) end
                                 break
                         end
 
-                        -- General targeting for directional towers
+                        -- General targeting for directional towers - UPDATED (uses getEnhancedTarget)
                         local directional = directionalTowerTypes[tower.Type]
                         local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
 
