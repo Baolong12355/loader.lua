@@ -135,12 +135,12 @@ local function hookGameReward()
                     rewards = {
                         Map = data.MapName or "Unknown",
                         Mode = tostring(data.Difficulty or "Unknown"),
-                        Time = formatTime(data.TimeElapsed),
-                        Wave = data.LastPassedWave and tostring(data.LastPassedWave) or "N/A",
                         Result = data.Victory and "Victory" or "Defeat",
+                        Wave = data.LastPassedWave and tostring(data.LastPassedWave) or "N/A",
+                        Time = formatTime(data.TimeElapsed),
                         Gold = tostring((data.PlayerNameToGoldMap and data.PlayerNameToGoldMap[name]) or 0),
-                        XP = tostring((data.PlayerNameToXPMap and data.PlayerNameToXPMap[name]) or 0),
                         Tokens = tostring((data.PlayerNameToTokensMap and data.PlayerNameToTokensMap[name]) or 0),
+                        XP = tostring((data.PlayerNameToXPMap and data.PlayerNameToXPMap[name]) or 0),
                         PowerUps = {}
                     }
                 }
