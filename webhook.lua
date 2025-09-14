@@ -112,7 +112,7 @@ local function loopCheckLobbyGold()
                     end
                 end
             end
-            task.wait(0.5) -- ⬅️ delay 0.25 giây giữa mỗi lần kiểm tra
+            task.wait(0.25)
         end
     end)
 end
@@ -135,6 +135,7 @@ local function hookGameReward()
                         Map = data.MapName or "Unknown",
                         Mode = tostring(data.Difficulty or "Unknown"),
                         Time = formatTime(data.TimeElapsed),
+                        Wave = tostring(data.LastPassedWave or "N/A"),
                         Result = data.Victory and "Victory" or "Defeat",
                         Gold = tostring((data.PlayerNameToGoldMap and data.PlayerNameToGoldMap[name]) or 0),
                         XP = tostring((data.PlayerNameToXPMap and data.PlayerNameToXPMap[name]) or 0),
