@@ -1,34 +1,33 @@
 repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
 
--- getgenv().TDX_Config đã được khai báo ở ngoài
 
 local function tryRun(name, enabled, url)
     if enabled and typeof(url) == "string" and url:match("^https?://") then
-        print("⏳ Loading:", name)
+        print("Loading:", name)
         local ok, result = pcall(function()
             return loadstring(game:HttpGet(url))()
         end)
         if ok then
-            print("✅ Loaded:", name)
+            print("Loaded:", name)
         else
-            warn("❌ Failed:", name, result)
+            warn("Failed:", name, result)
         end
     else
-        print("⏭️ Skipped:", name)
+        print("Skipped:", name)
     end
 end
 
--- Tự động bật Voter nếu có mapvoting
+
 if getgenv().TDX_Config["mapvoting"] ~= nil then
     getgenv().TDX_Config["Voter"] = true
 end
 
--- Tự động bật Loadout nếu có loadout
+
 if getgenv().TDX_Config["loadout"] ~= nil then
     getgenv().TDX_Config["Loadout"] = true
 end
 
--- 📦 Link các module
+
 local base = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/"
 local links = {
     ["x1.5 Speed"]      = base .. "speed.lua",
@@ -43,7 +42,7 @@ local links = {
     ["Voter"]           = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/voter.lua"
 }
 
--- 🔁 Chạy từng module trong thread riêng
+
 spawn(function() tryRun("Return Lobby",    getgenv().TDX_Config["Return Lobby"],    links["Return Lobby"]) end)
 spawn(function() tryRun("x1.5 Speed",     getgenv().TDX_Config["x1.5 Speed"],      links["x1.5 Speed"]) end)
 spawn(function() tryRun("Join Map",       getgenv().TDX_Config["Map"] ~= nil,      links["Join Map"]) end)
@@ -52,7 +51,7 @@ spawn(function() tryRun("Heal",           getgenv().TDX_Config["Heal"],         
 spawn(function() tryRun("Loadout",       getgenv().TDX_Config["Loadout"],         links["Loadout"]) end)
 spawn(function() tryRun("Voter",         getgenv().TDX_Config["Voter"],           links["Voter"]) end)
 
--- 🧠 Macro chạy theo loại
+
 if getgenv().TDX_Config["Macros"] == "run" then
     spawn(function() tryRun("Run Macro", true, links["Run Macro"]) end)
 elseif getgenv().TDX_Config["Macros"] == "record" then
