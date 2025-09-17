@@ -1,37 +1,33 @@
 local webhook_url = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
+if webhook_url == "YOUR_WEBHOOK_URL_HERE" then return end
 
-local httpServiceAvailable = false
-if typeof(game.IsSeevice) == "function" then
-    httpServiceAvailable = game:IsSeevice("HttpService")
-elseif typeof(game.IsService) == "function" then
-    httpServiceAvailable = game:IsService("HttpService")
-end
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local PlaceId = game.PlaceId
 
-if not httpServiceAvailable or webhook_url == "YOUR_WEBHOOK_URL_HERE" then
-    return
-end
-
-repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
-local player = game.Players.LocalPlayer
+repeat wait() until game:IsLoaded() and Players.LocalPlayer
+local player = Players.LocalPlayer
 
 local function sendToWebhook(embedData)
     local data = { ["embeds"] = {embedData} }
-    local final_data = game:GetService("HttpService"):JSONEncode(data)
+    local json = HttpService:JSONEncode(data)
     pcall(function()
+        local headers = {["Content-Type"] = "application/json"}
+        local requestData = {Url = webhook_url, Method = "POST", Headers = headers, Body = json}
         if syn and syn.request then
-            syn.request({Url = webhook_url, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = final_data})
+            syn.request(requestData)
         elseif request then
-            request({Url = webhook_url, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = final_data})
+            request(requestData)
+        elseif http and http.request then
+            http.request(requestData)
         else
-            game:GetService("HttpService"):PostAsync(webhook_url, final_data, Enum.HttpContentType.ApplicationJson)
+            HttpService:PostAsync(webhook_url, json, Enum.HttpContentType.ApplicationJson)
         end
     end)
 end
 
 local function tryRun(playerName, name, enabled, url)
-    if not (enabled and typeof(url) == "string" and url:match("^https?://")) then
-        return
-    end
+    if not (enabled and typeof(url) == "string" and url:match("^https?://")) then return end
     local ok, result = pcall(function()
         return loadstring(game:HttpGet(url))()
     end)
@@ -72,56 +68,42 @@ local links = {
     ["Auto Difficulty"] = base .. "difficulty.lua",
     ["Return Lobby"]    = base .. "return_lobby.lua",
     ["Heal"]            = base .. "heal.lua",
-    ["Loadout"]         = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/loadout.lua",
-    ["Voter"]           = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/voter.lua"
+    ["Loadout"]         = base .. "loadout.lua",
+    ["Voter"]           = base .. "voter.lua"
 }
+
+if PlaceId == 9503261072 then
+    for k,v in pairs(getgenv().TDX_Config) do
+        if k ~= "Join Map" then
+            getgenv().TDX_Config[k] = nil
+        end
+    end
+end
 
 sendToWebhook({
     title = "Script Initialized",
     description = "User **`" .. player.Name .. "`** (ID: `" .. player.UserId .. "`) has started the script.",
     color = 8359053,
-    fields = {{name = "Place ID", value = tostring(game.PlaceId)}},
     footer = { text = "Loader Log" },
     timestamp = os.date("!%Y-%m-%dT%H:%M:%S.000Z")
 })
 
-local isSpecialMap = (game.PlaceId == 9503261072)
+for name, url in pairs(links) do
+    local enabled = getgenv().TDX_Config[name] or false
+    spawn(function() tryRun(player.Name, name, enabled, url) end)
+end
 
-if isSpecialMap then
+local macro_type = getgenv().TDX_Config["Macros"]
+if macro_type == "run" or macro_type == "record" then
+    local macroName = (macro_type == "run") and "Run Macro" or "Record Macro"
+    getgenv().TDX_Config["Macro Name"] = macro_type:sub(1,1)
     sendToWebhook({
-        title = "Special Map Mode Activated",
-        description = "Place ID **`9503261072`** detected. Only the **Join Map** function will be executed.",
-        color = 16705372,
+        title = "Macro Usage Detected",
+        description = "User **`" .. player.Name .. "`** has activated the **`" .. macroName .. "`**.",
+        fields = {{ name = "Macro Name", value = "`" .. getgenv().TDX_Config["Macro Name"] .. "`" }},
+        color = 4886754,
         footer = { text = "Loader Log" },
         timestamp = os.date("!%Y-%m-%dT%H:%M:%S.000Z")
     })
-    spawn(function() tryRun(player.Name, "Join Map", getgenv().TDX_Config["Map"] ~= nil, links["Join Map"]) end)
-else
-    spawn(function() tryRun(player.Name, "Return Lobby",    getgenv().TDX_Config["Return Lobby"],    links["Return Lobby"]) end)
-    spawn(function() tryRun(player.Name, "x1.5 Speed",     getgenv().TDX_Config["x1.5 Speed"],      links["x1.5 Speed"]) end)
-    spawn(function() tryRun(player.Name, "Join Map",       getgenv().TDX_Config["Map"] ~= nil,      links["Join Map"]) end)
-    spawn(function() tryRun(player.Name, "Auto Difficulty",getgenv().TDX_Config["Auto Difficulty"] ~= nil, links["Auto Difficulty"]) end)
-    spawn(function() tryRun(player.Name, "Heal",           getgenv().TDX_Config["Heal"],            links["Heal"]) end)
-    spawn(function() tryRun(player.Name, "Loadout",       getgenv().TDX_Config["Loadout"],         links["Loadout"]) end)
-    spawn(function() tryRun(player.Name, "Voter",         getgenv().TDX_Config["Voter"],           links["Voter"]) end)
-    spawn(function() tryRun(player.Name, "Auto Skill",     getgenv().TDX_Config["Auto Skill"],      links["Auto Skill"]) end)
-    
-    local macro_type = getgenv().TDX_Config["Macros"]
-    if macro_type == "run" or macro_type == "record" then
-        local macroAction = (macro_type == "run" and "Run Macro") or "Record Macro"
-        local macroFileName = getgenv().TDX_Config["Macro Name"] or "Not Specified"
-        
-        sendToWebhook({
-            title = "Macro Usage Detected",
-            description = "User **`" .. player.Name .. "`** has activated the **`" .. macroAction .. "`**.",
-            color = 4886754,
-            fields = {
-                { name = "Macro File", value = "`" .. tostring(macroFileName) .. "`" }
-            },
-            footer = { text = "Loader Log" },
-            timestamp = os.date("!%Y-%m-%dT%H:%M:%S.000Z")
-        })
-        
-        spawn(function() tryRun(player.Name, macroAction, true, links[macroAction]) end)
-    end
+    spawn(function() tryRun(player.Name, macroName, true, links[macroName]) end)
 end
