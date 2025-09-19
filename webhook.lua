@@ -1,7 +1,6 @@
-repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
-
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
 local MAX_RETRY = 3
@@ -22,27 +21,46 @@ local function sendToWebhook(data)
     local url = getWebhookURL()
     if url == "" then return end
 
-    local body = HttpService:JSONEncode({
-        embeds = {{
-            title = data.type == "game" and "Game Result" or "Lobby Info",
-            color = 0x5B9DFF,
-            fields = (function()
-                local fields = {}
-                local function addFields(tab, prefix)
-                    prefix = prefix and (prefix .. " ") or ""
-                    for k, v in pairs(tab) do
-                        if typeof(v) == "table" then
-                            addFields(v, prefix .. k)
-                        else
-                            table.insert(fields, {name = prefix .. tostring(k), value = tostring(v), inline = false})
-                        end
+    local imageUrl
+    if data.type == "game" and data.rewards and data.rewards.Map then
+        local ok, mapData = pcall(function()
+            return require(ReplicatedStorage:WaitForChild("TDX_Shared"):WaitForChild("Common"):WaitForChild("MapData"))
+        end)
+        if ok and mapData then
+            for mapEnum, info in pairs(mapData) do
+                if tostring(mapEnum) == data.rewards.Map then
+                    imageUrl = info.Image
+                    break
+                end
+            end
+        end
+    end
+
+    local embed = {
+        title = data.type == "game" and "Game Result" or "Lobby Info",
+        color = 0x5B9DFF,
+        fields = (function()
+            local fields = {}
+            local function addFields(tab, prefix)
+                prefix = prefix and (prefix .. " ") or ""
+                for k, v in pairs(tab) do
+                    if typeof(v) == "table" then
+                        addFields(v, prefix .. k)
+                    else
+                        table.insert(fields, {name = prefix .. tostring(k), value = tostring(v), inline = false})
                     end
                 end
-                addFields(data.rewards or data.stats or data)
-                return fields
-            end)()
-        }}
-    })
+            end
+            addFields(data.rewards or data.stats or data)
+            return fields
+        end)()
+    }
+
+    if imageUrl and imageUrl ~= "" then
+        embed.image = { url = imageUrl }
+    end
+
+    local body = HttpService:JSONEncode({ embeds = {embed} })
 
     task.spawn(function()
         for _ = 1, MAX_RETRY do
