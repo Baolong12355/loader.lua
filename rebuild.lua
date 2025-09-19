@@ -45,7 +45,7 @@ local function getMaxAttempts()
     if placeMode == "Ashed" then
         return 1
     elseif placeMode == "Rewrite" then
-        return 3
+        return 10
     else
         return 1
     end
