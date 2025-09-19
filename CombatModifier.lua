@@ -1,18 +1,12 @@
--- File: CombatModifier.lua (Để tải lên GitHub)
 local Patcher = {}
 
-function Patcher:Apply(config)
-    local settings = config or {}
-    local shotInterval = settings.shotInterval
-    local reloadTime = settings.reloadTime
-    local firerateMultiplier = settings.firerateMultiplier
-    local spreadDegrees = settings.spreadDegrees
-
-    -- Chỉ áp dụng nếu giá trị là một số (để tránh lỗi)
-    if type(shotInterval) ~= "number" then shotInterval = 0 end
-    if type(reloadTime) ~= "number" then reloadTime = 0 end
-    if type(firerateMultiplier) ~= "number" then firerateMultiplier = 0 end
-    if type(spreadDegrees) ~= "number" then spreadDegrees = 0 end
+function Patcher:Apply()
+    -- Đọc các giá trị trực tiếp từ biến toàn cục (_G)
+    -- Nếu biến không tồn tại, nó sẽ dùng một giá trị mặc định an toàn
+    local shotInterval = _G.CombatMod_ShotInterval or 0
+    local reloadTime = _G.CombatMod_ReloadTime or 0
+    local firerateMultiplier = _G.CombatMod_FirerateMultiplier or 0.001
+    local spreadDegrees = _G.CombatMod_SpreadDegrees or 0
 
     for _, mod in ipairs(getloadedmodules()) do
         if mod.Name == "FirstPersonAttackHandlerClass" then
