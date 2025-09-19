@@ -25,7 +25,7 @@ local defaultConfig = {
     ["PlaceMode"] = "Rewrite", -- Thêm PlaceMode để sử dụng retry logic
     -- SKIP CONFIGURATIONS
     ["SkipTowersAtAxis"] = {},
-    ["SkipTowersByName"] = {"Slammer", "Toxicnator"},
+    ["SkipTowersByName"] = {},
     ["SkipTowersByLine"] = {},
 }
 
