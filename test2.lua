@@ -74,49 +74,29 @@ local function RemoveFromRebuildCache(axisX)
     globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
 end
 
-local activeTowersTable = nil
-local function fetchActiveTowerTable()
-    if activeTowersTable then return activeTowersTable end
-    for i = 1, 10 do
-        local name, value = debug.getupvalue(TowerClass.GetTower, i)
-        if type(value) == "table" then
-            local firstKey, firstTower = next(value)
-            if (firstTower and type(firstTower) == "table" and firstTower.SpawnCFrame and firstTower.Hash) or not firstKey then
-                activeTowersTable = value
-                return value
-            end
-        end
-    end
-    activeTowersTable = TowerClass.GetTowers()
-    return activeTowersTable
-end
-
 task.spawn(function()
-    fetchActiveTowerTable()
     local soldConvertedX = {}
     while true do
-        if activeTowersTable then
-            for x in pairs(soldConvertedX) do
-                local hasConvertedAtX = false
-                for hash, tower in pairs(activeTowersTable) do
-                    if tower.Converted and tower.SpawnCFrame and tower.SpawnCFrame.Position.X == x then
-                        hasConvertedAtX = true
-                        break
-                    end
-                end
-                if not hasConvertedAtX then
-                    soldConvertedX[x] = nil
+        local allTowers = TowerClass.GetTowers()
+        for x in pairs(soldConvertedX) do
+            local hasConvertedAtX = false
+            for hash, tower in pairs(allTowers) do
+                if tower.Converted and tower.SpawnCFrame and tower.SpawnCFrame.Position.X == x then
+                    hasConvertedAtX = true
+                    break
                 end
             end
-
-            for hash, tower in pairs(activeTowersTable) do
-                if tower.Converted and tower.SpawnCFrame then
-                    local x = tower.SpawnCFrame.Position.X
-                    if not soldConvertedX[x] then
-                        soldConvertedX[x] = true
-                        pcall(Remotes.SellTower.FireServer, Remotes.SellTower, hash)
-                        task.wait(globalEnv.TDX_Config.AutoSellConvertDelay or 0.2)
-                    end
+            if not hasConvertedAtX then
+                soldConvertedX[x] = nil
+            end
+        end
+        for hash, tower in pairs(allTowers) do
+            if tower.Converted and tower.SpawnCFrame then
+                local x = tower.SpawnCFrame.Position.X
+                if not soldConvertedX[x] then
+                    soldConvertedX[x] = true
+                    pcall(Remotes.SellTower.FireServer, Remotes.SellTower, hash)
+                    task.wait(globalEnv.TDX_Config.AutoSellConvertDelay or 0.2)
                 end
             end
         end
@@ -125,11 +105,9 @@ task.spawn(function()
 end)
 
 local function GetTowerByAxis(axisX)
-    if activeTowersTable then
-        for hash, tower in pairs(activeTowersTable) do
-            if tower.SpawnCFrame and tower.SpawnCFrame.Position.X == axisX then
-                return hash, tower
-            end
+    for hash, tower in pairs(TowerClass.GetTowers()) do
+        if tower.SpawnCFrame and tower.SpawnCFrame.Position.X == axisX then
+            return hash, tower
         end
     end
     return nil, nil
@@ -183,7 +161,7 @@ local function PlaceTowerRetry(args, axisValue)
         if pcall(Remotes.PlaceTower.InvokeServer, Remotes.PlaceTower, unpack(args)) then
             local startTime = tick()
             repeat RunService.Heartbeat:Wait() until tick() - startTime > 3 or GetTowerByAxis(axisValue)
-            if GetTowerByAxis(axisValue) then 
+            if GetTowerByAxis(axisValue) then
                 RemoveFromRebuildCache(axisValue)
                 return true
             end
@@ -201,16 +179,16 @@ local function UpgradeTowerRetry(axisValue, path)
     AddToRebuildCache(axisValue)
     while attempts < maxAttempts do
         local hash, tower = GetTowerByAxis(axisValue)
-        if not hash then 
-            task.wait() 
+        if not hash then
+            task.wait()
             attempts = attempts + 1
-            continue 
+            continue
         end
         local before = tower.LevelHandler:GetLevelOnPath(path)
         local cost = GetCurrentUpgradeCost(tower, path)
-        if not cost then 
+        if not cost then
             RemoveFromRebuildCache(axisValue)
-            return true 
+            return true
         end
         WaitForCash(cost)
         if pcall(Remotes.TowerUpgradeRequest.FireServer, Remotes.TowerUpgradeRequest, hash, path, 1) then
@@ -218,9 +196,9 @@ local function UpgradeTowerRetry(axisValue, path)
             repeat
                 task.wait(0.1)
                 local _, t = GetTowerByAxis(axisValue)
-                if t and t.LevelHandler:GetLevelOnPath(path) > before then 
+                if t and t.LevelHandler:GetLevelOnPath(path) > before then
                     RemoveFromRebuildCache(axisValue)
-                    return true 
+                    return true
                 end
             until tick() - startTime > 3
         end
@@ -386,7 +364,6 @@ task.spawn(function()
         end)
     end
 
-    fetchActiveTowerTable()
     for i = 1, globalEnv.TDX_Config.MaxConcurrentRebuilds do RebuildWorker() end
     
     local TICK_RATE = 20
@@ -428,10 +405,8 @@ task.spawn(function()
             end
 
             local activeTowersByX = {}
-            if activeTowersTable then
-                for hash, tower in pairs(activeTowersTable) do
-                    if tower.SpawnCFrame then activeTowersByX[tower.SpawnCFrame.Position.X] = true end
-                end
+            for hash, tower in pairs(TowerClass.GetTowers()) do
+                if tower.SpawnCFrame then activeTowersByX[tower.SpawnCFrame.Position.X] = true end
             end
             
             for x, records in pairs(towersByAxis) do
@@ -457,7 +432,7 @@ task.spawn(function()
                                 towerName = towerType, firstPlaceLine = firstPlaceLine
                             })
                             table.sort(jobQueue, function(a, b) 
-                                if a.priority == b.priority then return a.deathTime < b.deathTime end
+                                if a.priority == b.priority then return a.deathTime < b.priority end
                                 return a.priority < b.priority 
                             end)
                         end
@@ -472,6 +447,7 @@ task.spawn(function()
             end
             accumulator = accumulator - STEP
         end
+        
         RunService.Heartbeat:Wait()
     end
 end)
