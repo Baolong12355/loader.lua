@@ -1,683 +1,515 @@
-local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local LocalPlayer = Players.LocalPlayer
-local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
+local player = Players.LocalPlayer
+local cash = player:WaitForChild("leaderstats"):WaitForChild("Cash")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
-local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
-local EnemyClass = require(PlayerScripts.Client.GameClass:WaitForChild("EnemyClass"))
-local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
-local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
+local macroPath = "tdx/macros/recorder_output.json"
 
--- Enhanced tower configurations
-local directionalTowerTypes = {
-        ["Commander"] = { onlyAbilityIndex = 3 },
-        ["Toxicnator"] = true,
-        ["Ghost"] = true,
-        ["Ice Breaker"] = true,
-        ["Mobster"] = true,
-        ["Golden Mobster"] = true,
-        ["Artillery"] = true,
-        ["Golden Mine Layer"] = true,
-        ["Flame Trooper"] = true  -- Added new special tower
-}
-
-local skipTowerTypes = {
-        ["Helicopter"] = true,
-        ["Cryo Helicopter"] = true,
-        ["Medic"] = true,
-        ["Combat Drone"] = true,
-        ["Machine Gunner"] = true  -- Added Machine Gunner to skip list
-}
-
-local fastTowers = {
-        ["Ice Breaker"] = true,
-        ["John"] = true,
-        ["Slammer"] = true,
-        ["Mobster"] = true,
-        ["Golden Mobster"] = true,
-        ["Flame Trooper"] = true  -- Added to fast towers
-}
-
-local skipAirTowers = {
-        ["Ice Breaker"] = true,
-        ["John"] = true,
-        ["Slammer"] = true,
-        ["Mobster"] = true,
-        ["Golden Mobster"] = true
-}
-
--- Enhanced tracking variables
-local lastUsedTime = {}
-local mobsterUsedEnemies = {}
-local prevCooldown = {}
-local medicLastUsedTime = {}
-local medicDelay = 0.5
-
--- New tracking for support towers
-local towerAttackStates = {}  -- Track which towers are currently attacking
-local lastAttackCheck = {}    -- Track last time each tower attacked
-
--- ======== Core utility functions ========
-local function getDistance2D(pos1, pos2)
-    local dx = pos1.X - pos2.X
-    local dz = pos1.Z - pos2.Z
-    return math.sqrt(dx * dx + dz * dz)
+local function getGlobalEnv()
+    if getgenv then return getgenv() end
+    if getfenv then return getfenv() end
+    return _G
 end
 
-local function getTowerPos(tower)
-        local ok, pos = pcall(function() return tower:GetPosition() end)
-        if ok then return pos end
-        if tower.Model and tower.Model:FindFirstChild("Root") then
-                return tower.Model.Root.Position
+local defaultConfig = {
+    ["MaxConcurrentRebuilds"] = 5,
+    ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
+    ["ForceRebuildEvenIfSold"] = false,
+    ["MaxRebuildRetry"] = nil,
+    ["AutoSellConvertDelay"] = 0.2,
+    ["PlaceMode"] = "Rewrite",
+    ["SkipTowersAtAxis"] = {},
+    ["SkipTowersByName"] = {},
+    ["SkipTowersByLine"] = {},
+}
+
+local globalEnv = getGlobalEnv()
+globalEnv.TDX_Config = globalEnv.TDX_Config or {}
+globalEnv.TDX_REBUILDING_TOWERS = globalEnv.TDX_REBUILDING_TOWERS or {}
+
+for key, value in pairs(defaultConfig) do
+    if globalEnv.TDX_Config[key] == nil then
+        globalEnv.TDX_Config[key] = value
+    end
+end
+
+local function getMaxAttempts()
+    local placeMode = globalEnv.TDX_Config.PlaceMode or "Rewrite"
+    if placeMode == "Ashed" then
+        return 1
+    elseif placeMode == "Rewrite" then
+        return 10
+    else
+        return 1
+    end
+end
+
+local function safeReadFile(path)
+    if readfile and isfile and isfile(path) then
+        local ok, res = pcall(readfile, path)
+        if ok then return res end
+    end
+    return nil
+end
+
+local function SafeRequire(path, timeout)
+    timeout = timeout or 5
+    local t0 = tick()
+    while tick() - t0 < timeout do
+        local ok, mod = pcall(require, path)
+        if ok and mod then return mod end
+        RunService.Heartbeat:Wait()
+    end
+    return nil
+end
+
+local TowerClassModule = player:FindFirstChild("PlayerScripts"):FindFirstChild("Client"):FindFirstChild("GameClass"):FindFirstChild("TowerClass")
+local TowerClass = TowerClassModule and SafeRequire(TowerClassModule)
+
+if not TowerClass then
+    return
+end
+
+local function AddToRebuildCache(axisX)
+    globalEnv.TDX_REBUILDING_TOWERS[axisX] = true
+end
+
+local function RemoveFromRebuildCache(axisX)
+    globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil
+end
+
+local activeTowersTable = nil
+local function fetchActiveTowerTable()
+    if activeTowersTable then return activeTowersTable end
+    for i = 1, 10 do
+        local name, value = debug.getupvalue(TowerClass.GetTower, i)
+        if type(value) == "table" then
+            local firstKey, firstTower = next(value)
+            if (firstTower and type(firstTower) == "table" and firstTower.SpawnCFrame and firstTower.Hash) or not firstKey then
+                activeTowersTable = value
+                return value
+            end
         end
-        return nil
+    end
+    activeTowersTable = TowerClass.GetTowers()
+    return activeTowersTable
 end
 
-local function getRange(tower)
-        local ok, result = pcall(function() return TowerClass.GetCurrentRange(tower) end)
-        if ok and typeof(result) == "number" then return result end
-        if tower.Stats and tower.Stats.Radius then return tower.Stats.Radius * 4 end
-        return 0
+task.spawn(function()
+    local soldConvertedX = {}
+    while true do
+        local allTowers = fetchActiveTowerTable()
+        if allTowers then
+            for x in pairs(soldConvertedX) do
+                local hasConvertedAtX = false
+                for hash, tower in pairs(allTowers) do
+                    if tower.Converted == true then
+                        local spawnCFrame = tower.SpawnCFrame
+                        if spawnCFrame and typeof(spawnCFrame) == "CFrame" and spawnCFrame.Position.X == x then
+                            hasConvertedAtX = true
+                            break
+                        end
+                    end
+                end
+                if not hasConvertedAtX then
+                    soldConvertedX[x] = nil
+                end
+            end
+
+            for hash, tower in pairs(allTowers) do
+                if tower.Converted == true then
+                    local spawnCFrame = tower.SpawnCFrame
+                    if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
+                        local x = spawnCFrame.Position.X
+                        if not soldConvertedX[x] then
+                            soldConvertedX[x] = true
+                            pcall(Remotes.SellTower.FireServer, Remotes.SellTower, hash)
+                        end
+                    end
+                end
+            end
+        end
+        RunService.Heartbeat:Wait()
+    end
+end)
+
+local function GetTowerByAxis(axisX)
+    local allTowers = fetchActiveTowerTable()
+    if allTowers then
+        for hash, tower in pairs(allTowers) do
+            local spawnCFrame = tower.SpawnCFrame
+            if spawnCFrame and typeof(spawnCFrame) == "CFrame" and spawnCFrame.Position.X == axisX then
+                return hash, tower
+            end
+        end
+    end
+    return nil, nil
 end
 
-local function GetCurrentUpgradeLevels(tower)
-        local p1, p2 = 0, 0
-        pcall(function() p1 = tower.LevelHandler:GetLevelOnPath(1) or 0 end)
-        pcall(function() p2 = tower.LevelHandler:GetLevelOnPath(2) or 0 end)
-        return p1, p2
+local function WaitForCash(amount)
+    while cash.Value < amount do
+        RunService.Heartbeat:Wait()
+    end
 end
 
-local function isCooldownReady(hash, index, ability)
-        if not ability then return false end
-        local lastCD = (prevCooldown[hash] and prevCooldown[hash][index]) or 0
-        local currentCD = ability.CooldownRemaining or 0
-        if currentCD > lastCD + 0.1 or currentCD > 0 then
-                prevCooldown[hash] = prevCooldown[hash] or {}
-                prevCooldown[hash][index] = currentCD
+local function GetTowerPriority(towerName)
+    for priority, name in ipairs(globalEnv.TDX_Config.PriorityRebuildOrder or {}) do
+        if towerName == name then
+            return priority
+        end
+    end
+    return math.huge
+end
+
+local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
+    local config = globalEnv.TDX_Config
+    if config.SkipTowersAtAxis then
+        for _, skipAxis in ipairs(config.SkipTowersAtAxis) do if axisX == skipAxis then return true end end
+    end
+    if config.SkipTowersByName then
+        for _, skipName in ipairs(config.SkipTowersByName) do if towerName == skipName then return true end end
+    end
+    if config.SkipTowersByLine and firstPlaceLine then
+        for _, skipLine in ipairs(config.SkipTowersByLine) do if firstPlaceLine == skipLine then return true end end
+    end
+    return false
+end
+
+local function GetCurrentUpgradeCost(tower, path)
+    if not tower or not tower.LevelHandler then return nil end
+    if tower.LevelHandler:GetLevelOnPath(path) >= tower.LevelHandler:GetMaxLevel() then return nil end
+    local ok, baseCost = pcall(tower.LevelHandler.GetLevelUpgradeCost, tower.LevelHandler, path, 1)
+    if not ok then return nil end
+    local disc = 0
+    local ok2, d = pcall(function() return tower.BuffHandler and tower.BuffHandler:GetDiscount() or 0 end)
+    if ok2 and typeof(d) == "number" then disc = d end
+    return math.floor(baseCost * (1 - disc))
+end
+
+local function PlaceTowerRetry(args, axisValue)
+    local maxAttempts = getMaxAttempts()
+    local attempts = 0
+    AddToRebuildCache(axisValue)
+    while attempts < maxAttempts do
+        local success = pcall(Remotes.PlaceTower.InvokeServer, Remotes.PlaceTower, unpack(args))
+        if success then
+            local startTime = tick()
+            repeat RunService.Heartbeat:Wait() until tick() - startTime > 3 or GetTowerByAxis(axisValue)
+            if GetTowerByAxis(axisValue) then
+                RemoveFromRebuildCache(axisValue)
+                return true
+            end
+        end
+        attempts = attempts + 1
+        RunService.Heartbeat:Wait()
+    end
+    RemoveFromRebuildCache(axisValue)
+    return false
+end
+
+local function UpgradeTowerRetry(axisValue, path)
+    local maxAttempts = getMaxAttempts()
+    local attempts = 0
+    AddToRebuildCache(axisValue)
+    while attempts < maxAttempts do
+        local hash, tower = GetTowerByAxis(axisValue)
+        if not hash then
+            task.wait()
+            attempts = attempts + 1
+            continue
+        end
+        local beforeLevel = tower.LevelHandler:GetLevelOnPath(path)
+        local cost = GetCurrentUpgradeCost(tower, path)
+        if not cost then
+            RemoveFromRebuildCache(axisValue)
+            return true
+        end
+        WaitForCash(cost)
+        local success = pcall(Remotes.TowerUpgradeRequest.FireServer, Remotes.TowerUpgradeRequest, hash, path, 1)
+        if success then
+            local startTime = tick()
+            repeat
+                task.wait(0.1)
+                local _, t = GetTowerByAxis(axisValue)
+                if t and t.LevelHandler:GetLevelOnPath(path) > beforeLevel then
+                    RemoveFromRebuildCache(axisValue)
+                    return true
+                end
+            until tick() - startTime > 3
+        end
+        attempts = attempts + 1
+        task.wait()
+    end
+    RemoveFromRebuildCache(axisValue)
+    return false
+end
+
+local function ChangeTargetRetry(axisValue, targetType)
+    local maxAttempts = getMaxAttempts()
+    local attempts = 0
+    AddToRebuildCache(axisValue)
+    while attempts < maxAttempts do
+        local hash = GetTowerByAxis(axisValue)
+        if hash then
+            pcall(Remotes.ChangeQueryType.FireServer, Remotes.ChangeQueryType, hash, targetType)
+            RemoveFromRebuildCache(axisValue)
+            return
+        end
+        attempts = attempts + 1
+        task.wait(0.1)
+    end
+    RemoveFromRebuildCache(axisValue)
+end
+
+local function HasSkill(axisValue, skillIndex)
+    local _, tower = GetTowerByAxis(axisValue)
+    if not tower or not tower.AbilityHandler then return false end
+    return tower.AbilityHandler:GetAbilityFromIndex(skillIndex) ~= nil
+end
+
+local function UseMovingSkillRetry(axisValue, skillIndex, location)
+    local maxAttempts = getMaxAttempts()
+    local attempts = 0
+    local TowerUseAbilityRequest = Remotes:FindFirstChild("TowerUseAbilityRequest")
+    if not TowerUseAbilityRequest then return false end
+    local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
+    AddToRebuildCache(axisValue)
+    while attempts < maxAttempts do
+        local hash, tower = GetTowerByAxis(axisValue)
+        if hash and tower and tower.AbilityHandler then
+            local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
+            if not ability then
+                RemoveFromRebuildCache(axisValue)
                 return false
-        end
-        prevCooldown[hash] = prevCooldown[hash] or {}
-        prevCooldown[hash][index] = currentCD
-        return true
-end
-
-local function getDPS(tower)
-        if not tower or not tower.LevelHandler then return 0 end
-        local levelStats = tower.LevelHandler:GetLevelStats()
-        local buffStats = tower.BuffHandler and tower.BuffHandler:GetStatMultipliers() or {}
-        local baseDmg = levelStats.Damage or 0
-        local dmgMultiplier = buffStats.DamageMultiplier or 0
-        local currentDmg = baseDmg * (1 + dmgMultiplier)
-        local reload = tower.GetCurrentReloadTime and tower:GetCurrentReloadTime() or levelStats.ReloadTime or 1
-        return (currentDmg / reload)
-end
-
-local function isBuffedByMedic(tower)
-        if not tower or not tower.BuffHandler or not tower.BuffHandler.ActiveBuffs then return false end
-        for _, buff in pairs(tower.BuffHandler.ActiveBuffs) do
-                local buffName = tostring(buff.Name or "")
-                if buffName:match("^MedicKritz") or buffName:match("^MedicGodMode") then
-                        return true
-                end
-        end
-        return false
-end
-
-local function canReceiveBuff(tower)
-        return tower and not tower.NoBuffs
-end
-
--- ======== Enhanced enemy management ========
-local function getEnemies()
-        local result = {}
-        for _, e in pairs(EnemyClass.GetEnemies()) do
-                if e and e.IsAlive and not e.IsFakeEnemy then
-                        table.insert(result, e)
-                end
-        end
-        return result
-end
-
--- Enhanced pathfinding distance calculation
-local function getEnemyPathDistance(enemy)
-        if not enemy or not enemy.GetPathPosition then return 0 end
-        local success, pathPos = pcall(function() return enemy:GetPathPosition() end)
-        if not success then return 0 end
-
-        -- Calculate distance traveled along path (approximate)
-        local totalDistance = 0
-        if enemy.PathHandler and enemy.PathHandler.DistanceTraveled then
-                totalDistance = enemy.PathHandler.DistanceTraveled
-        elseif enemy.PathIndex then
-                totalDistance = enemy.PathIndex * 10  -- Rough estimate
-        end
-
-        return totalDistance
-end
-
--- Enhanced targeting system with farthest enemy priority
-local function getFarthestEnemyInRange(pos, range, options)
-        options = options or {}
-        local excludeAir = options.excludeAir or false
-        local excludeArrows = options.excludeArrows or false
-
-        local candidates = {}
-        for _, enemy in ipairs(getEnemies()) do
-                if not enemy.GetPosition then continue end
-                if excludeArrows and enemy.Type == "Arrow" then continue end
-                if excludeAir and enemy.IsAirUnit then continue end
-
-                local ePos = enemy:GetPosition()
-                if getDistance2D(ePos, pos) <= range then
-                        table.insert(candidates, {
-                                enemy = enemy,
-                                pathDistance = getEnemyPathDistance(enemy)
-                        })
-                end
-        end
-
-        if #candidates == 0 then return nil end
-
-        -- Sort by path distance (farthest first)
-        table.sort(candidates, function(a, b)
-                return a.pathDistance > b.pathDistance
-        end)
-
-        return candidates[1].enemy:GetPosition()
-end
-
--- Get nearest enemy (for original behavior preservation)
-local function getNearestEnemyInRange(pos, range, options)
-        options = options or {}
-        local excludeAir = options.excludeAir or false
-        local excludeArrows = options.excludeArrows or false
-
-        for _, enemy in ipairs(getEnemies()) do
-                if not enemy.GetPosition then continue end
-                if excludeArrows and enemy.Type == "Arrow" then continue end
-                if excludeAir and enemy.IsAirUnit then continue end
-
-                local ePos = enemy:GetPosition()
-                if getDistance2D(ePos, pos) <= range then
-                        return ePos
-                end
-        end
-
-        return nil
-end
-
--- NEW: Check if ability has splash damage for enhanced targeting
-local function hasSplashDamage(ability)
-        if not ability or not ability.Config then return false end
-        
-        -- Check for splash damage indicators
-        if ability.Config.ProjectileHitData then
-                local hitData = ability.Config.ProjectileHitData
-                if hitData.IsSplash and hitData.SplashRadius and hitData.SplashRadius > 0 then
-                        return true, hitData.SplashRadius
-                end
-        end
-        
-        -- Check for radius effects
-        if ability.Config.HasRadiusEffect and ability.Config.EffectRadius and ability.Config.EffectRadius > 0 then
-                return true, ability.Config.EffectRadius
-        end
-        
-        return false, 0
-end
-
--- NEW: Get effective range for ability (ability range overrides tower range)
-local function getAbilityRange(ability, defaultRange)
-        if not ability or not ability.Config then return defaultRange end
-        
-        local config = ability.Config
-        
-        -- Check for infinite range
-        if config.ManualAimInfiniteRange == true then
-                return math.huge
-        end
-        
-        -- Check for custom manual aim range
-        if config.ManualAimCustomRange and config.ManualAimCustomRange > 0 then
-                return config.ManualAimCustomRange
-        end
-        
-        -- Check for ability-specific range
-        if config.Range and config.Range > 0 then
-                return config.Range
-        end
-        
-        -- Check for custom query data range
-        if config.CustomQueryData and config.CustomQueryData.Range then
-                return config.CustomQueryData.Range
-        end
-        
-        -- Default to tower range
-        return defaultRange
-end
-
--- NEW: Check if ability requires manual aiming
-local function requiresManualAiming(ability)
-        if not ability or not ability.Config then return false end
-        
-        return ability.Config.IsManualAimAtGround == true or 
-               ability.Config.IsManualAimAtPath == true
-end
-
--- ======== Tower attack state tracking ========
-local function updateTowerAttackStates()
-        local ownedTowers = TowerClass.GetTowers() or {}
-        local now = tick()
-
-        for hash, tower in pairs(ownedTowers) do
-                if not tower or not tower.TimeUntilNextAttack then continue end
-
-                local currentTime = tower.TimeUntilNextAttack
-                local lastTime = lastAttackCheck[hash]
-
-                -- If TimeUntilNextAttack just reset (was higher, now lower), tower attacked
-                if lastTime and lastTime > currentTime and currentTime > 0 then
-                        towerAttackStates[hash] = {
-                                isAttacking = true,
-                                lastAttackTime = now,
-                                tower = tower
-                        }
-                end
-
-                lastAttackCheck[hash] = currentTime
-
-                -- Clear attack state if too much time has passed
-                if towerAttackStates[hash] and (now - towerAttackStates[hash].lastAttackTime) > 3 then
-                        towerAttackStates[hash] = nil
-                end
-        end
-end
-
-local function hasAttackingTowersInRange(checkTower, range)
-        local checkPos = getTowerPos(checkTower)
-        if not checkPos then return false end
-
-        for hash, attackState in pairs(towerAttackStates) do
-                if hash == checkTower.Hash then continue end  -- Skip self
-                if not attackState.isAttacking then continue end
-
-                local otherPos = getTowerPos(attackState.tower)
-                if otherPos and getDistance2D(checkPos, otherPos) <= range then
-                        return true
-                end
-        end
-
-        return false
-end
-
--- ======== Enhanced targeting functions ========
-local function getEnhancedTarget(pos, towerRange, towerType, ability)
-        local options = {
-                excludeAir = skipAirTowers[towerType] or false,
-                excludeArrows = true
-        }
-
-        -- Get the actual range for this ability (may override tower range)
-        local effectiveRange = getAbilityRange(ability, towerRange)
-
-        -- NEW: Enhanced logic for splash abilities
-        if ability then
-                local isSplash, splashRadius = hasSplashDamage(ability)
-                local isManualAim = requiresManualAiming(ability)
-                
-                -- If it's a splash ability or requires manual aiming, target farthest enemy
-                if isSplash or isManualAim then
-                        return getFarthestEnemyInRange(pos, effectiveRange, options)
-                end
-        end
-
-        -- For regular towers (non-special), always use farthest enemy
-        if not directionalTowerTypes[towerType] then
-                return getFarthestEnemyInRange(pos, effectiveRange, options)
-        else
-                -- For special towers, use nearest enemy to preserve original behavior
-                return getNearestEnemyInRange(pos, effectiveRange, options)
-        end
-end
-
-local function findTarget(pos, range, options)
-        options = options or {}
-        local mode = options.mode or "nearest"
-        local excludeAir = options.excludeAir or false
-        local excludeArrows = options.excludeArrows or false
-        local usedEnemies = options.usedEnemies
-        local markUsed = options.markUsed or false
-
-        local candidates = {}
-        for _, enemy in ipairs(getEnemies()) do
-                if not enemy.GetPosition then continue end
-                if excludeArrows and enemy.Type == "Arrow" then continue end
-                if excludeAir and enemy.IsAirUnit then continue end
-
-                local ePos = enemy:GetPosition()
-                if getDistance2D(ePos, pos) > range then continue end
-
-                if usedEnemies then
-                        local id = tostring(enemy)
-                        if usedEnemies[id] then continue end
-                end
-
-                table.insert(candidates, enemy)
-        end
-
-        if #candidates == 0 then return nil end
-
-        local chosen = nil
-        if mode == "nearest" then
-                chosen = candidates[1]
-        elseif mode == "maxhp" then
-                local maxHP = -1
-                for _, enemy in ipairs(candidates) do
-                        if enemy.HealthHandler then
-                                local hp = enemy.HealthHandler:GetMaxHealth()
-                                if hp > maxHP then
-                                        maxHP = hp
-                                        chosen = enemy
-                                end
-                        end
-                end
-        elseif mode == "random_weighted" then
-                table.sort(candidates, function(a, b)
-                        local hpA = a.HealthHandler and a.HealthHandler:GetMaxHealth() or 0
-                        local hpB = b.HealthHandler and b.HealthHandler:GetMaxHealth() or 0
-                        return hpA > hpB
+            end
+            local cooldown = ability.CooldownRemaining or 0
+            if cooldown > 0 then task.wait(cooldown + 0.1) end
+            local success = false
+            if location == "no_pos" then
+                success = pcall(function()
+                    if useFireServer then TowerUseAbilityRequest:FireServer(hash, skillIndex)
+                    else TowerUseAbilityRequest:InvokeServer(hash, skillIndex) end
                 end)
-                if math.random(1, 10) <= 3 then
-                        chosen = candidates[1]
+            else
+                local x, y, z = location:match("([^,%s]+),%s*([^,%s]+),%s*([^,%s]+)")
+                if x and y and z then
+                    local pos = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
+                    success = pcall(function()
+                        if useFireServer then TowerUseAbilityRequest:FireServer(hash, skillIndex, pos)
+                        else TowerUseAbilityRequest:InvokeServer(hash, skillIndex, pos) end
+                    end)
+                end
+            end
+            if success then
+                RemoveFromRebuildCache(axisValue)
+                return true
+            end
+        end
+        attempts = attempts + 1
+        task.wait(0.1)
+    end
+    RemoveFromRebuildCache(axisValue)
+    return false
+end
+
+local function RebuildTowerSequence(records)
+    local placeRecord, lastTargetRecord, lastMovingRecord
+    local upgradeRecords = {}
+
+    for _, record in ipairs(records) do
+        local entry = record.entry
+        if entry.TowerPlaced then placeRecord = record
+        elseif entry.TowerUpgraded then table.insert(upgradeRecords, record)
+        elseif entry.TowerTargetChange then lastTargetRecord = record
+        elseif entry.towermoving then lastMovingRecord = record
+        end
+    end
+    
+    local rebuildSuccess = true
+    if placeRecord then
+        local entry = placeRecord.entry
+        local vecTab = {}
+        for coord in entry.TowerVector:gmatch("[^,%s]+") do table.insert(vecTab, tonumber(coord)) end
+        if #vecTab == 3 then
+            local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
+            local args = {tonumber(entry.TowerA1), entry.TowerPlaced, pos, tonumber(entry.Rotation or 0)}
+            WaitForCash(entry.TowerPlaceCost or 0)
+            if not PlaceTowerRetry(args, pos.X) then
+                rebuildSuccess = false
+            end
+        else
+            rebuildSuccess = false
+        end
+    end
+
+    if rebuildSuccess then
+        table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
+        for _, record in ipairs(upgradeRecords) do
+            local entry = record.entry
+            if not UpgradeTowerRetry(tonumber(entry.TowerUpgraded), entry.UpgradePath) then
+                rebuildSuccess = false
+                break
+            end
+        end
+    end
+
+    if rebuildSuccess then
+        task.wait(0.1)
+        if lastMovingRecord then
+            task.spawn(function()
+                local entry = lastMovingRecord.entry
+                local axisValue = tonumber(entry.towermoving)
+                while not HasSkill(axisValue, entry.skillindex) do
+                    RunService.Heartbeat:Wait()
+                end
+                UseMovingSkillRetry(axisValue, entry.skillindex, entry.location)
+            end)
+        end
+        if lastTargetRecord then
+            local entry = lastTargetRecord.entry
+            ChangeTargetRetry(tonumber(entry.TowerTargetChange), entry.TargetWanted)
+        end
+    end
+
+    return rebuildSuccess
+end
+
+task.spawn(function()
+    local towersByAxisBlueprint = {}
+    local soldTowersX = {}
+    local rebuildAttempts = {}
+    
+    local deadTowerTracker = { deadTowers = {}, nextDeathId = 1 }
+
+    local function recordTowerDeath(x)
+        if not deadTowerTracker.deadTowers[x] then
+            deadTowerTracker.deadTowers[x] = { deathTime = tick(), deathId = deadTowerTracker.nextDeathId }
+            deadTowerTracker.nextDeathId = deadTowerTracker.nextDeathId + 1
+        end
+    end
+
+    local function clearTowerDeath(x)
+        deadTowerTracker.deadTowers[x] = nil
+    end
+
+    local jobQueue = {}
+    local activeJobs = {}
+
+    local function RebuildWorker()
+        task.spawn(function()
+            while true do
+                if #jobQueue > 0 then
+                    local job = table.remove(jobQueue, 1)
+                    local x = job.x
+                    if not ShouldSkipTower(x, job.towerName, job.firstPlaceLine) then
+                        if RebuildTowerSequence(job.records) then
+                            rebuildAttempts[x] = 0
+                            clearTowerDeath(x)
+                        end
+                    else
+                        rebuildAttempts[x] = 0
+                        clearTowerDeath(x)
+                    end
+                    activeJobs[x] = nil
                 else
-                        chosen = candidates[math.random(1, #candidates)]
+                    RunService.Heartbeat:Wait()
                 end
-        end
-
-        if chosen and markUsed and usedEnemies then
-                usedEnemies[tostring(chosen)] = true
-        end
-
-        return chosen and chosen:GetPosition() or nil
-end
-
--- ======== Specialized targeting functions ========
-local function getMobsterTarget(tower, hash, path)
-        local pos = getTowerPos(tower)
-        local range = getRange(tower)
-
-        mobsterUsedEnemies[hash] = mobsterUsedEnemies[hash] or {}
-        local usedEnemies = (path == 2) and mobsterUsedEnemies[hash] or nil
-
-        return findTarget(pos, range, {
-                mode = "maxhp",
-                excludeAir = true,
-                excludeArrows = true,
-                usedEnemies = usedEnemies,
-                markUsed = (path == 2)
-        })
-end
-
-local function getCommanderTarget()
-        local candidates = {}
-        for _, e in ipairs(getEnemies()) do
-                if not e.IsAirUnit and e.Type ~= "Arrow" then 
-                        table.insert(candidates, e) 
-                end
-        end
-
-        if #candidates == 0 then return nil end
-
-        table.sort(candidates, function(a, b)
-                local hpA = a.HealthHandler and a.HealthHandler:GetMaxHealth() or 0
-                local hpB = b.HealthHandler and b.HealthHandler:GetMaxHealth() or 0
-                return hpA > hpB
+            end
         end)
-
-        local chosen
-        if math.random(1, 10) <= 3 then
-                chosen = candidates[1]
-        else
-                chosen = candidates[math.random(1, #candidates)]
+    end
+    
+    local function buildDataFromMacro()
+        local content = safeReadFile(macroPath)
+        if not content then return nil, nil end
+        local success, allActions = pcall(HttpService.JSONDecode, HttpService, content)
+        if not success then return nil, nil end
+        
+        local blueprint, soldList = {}, {}
+        
+        for i, entry in ipairs(allActions) do
+            local x
+            if entry.TowerPlaced then x = tonumber(entry.TowerVector:match("([^,]+)"))
+            elseif entry.TowerUpgraded then x = tonumber(entry.TowerUpgraded)
+            elseif entry.TowerTargetChange then x = tonumber(entry.TowerTargetChange)
+            elseif entry.towermoving then x = tonumber(entry.towermoving)
+            end
+            if x then
+                if not blueprint[x] then blueprint[x] = {} end
+                table.insert(blueprint[x], {line = i, entry = entry})
+            end
+            if entry.SellTower then soldList[tonumber(entry.SellTower)] = true end
         end
+        return blueprint, soldList
+    end
 
-        return chosen and chosen:GetPosition() or nil
-end
+    towersByAxisBlueprint, soldTowersX = buildDataFromMacro()
+    if not towersByAxisBlueprint then return end
+    fetchActiveTowerTable()
 
-local function getBestMedicTarget(medicTower, ownedTowers)
-        local medicPos = getTowerPos(medicTower)
-        local medicRange = getRange(medicTower)
-        local bestHash, bestDPS = nil, -1
-
-        for hash, tower in pairs(ownedTowers) do
-                if tower == medicTower then continue end
-                if canReceiveBuff(tower) and not isBuffedByMedic(tower) then
-                        local towerPos = getTowerPos(tower)
-                        if towerPos and getDistance2D(towerPos, medicPos) <= medicRange then
-                                local dps = getDPS(tower)
-                                if dps > bestDPS then
-                                        bestDPS = dps
-                                        bestHash = hash
-                                end
-                        end
+    for i = 1, globalEnv.TDX_Config.MaxConcurrentRebuilds do
+        RebuildWorker()
+    end
+    
+    local TICK_RATE = 20
+    local STEP = 1 / TICK_RATE
+    local lastTime = os.clock()
+    local accumulator = 0
+    
+    while true do
+        local currentTime = os.clock()
+        accumulator = accumulator + (currentTime - lastTime)
+        lastTime = currentTime
+        
+        while accumulator >= STEP do
+            local currentTowers = fetchActiveTowerTable()
+            local activeTowersByX = {}
+            if currentTowers then
+                for hash, tower in pairs(currentTowers) do
+                    local cf = tower.SpawnCFrame
+                    if cf then activeTowersByX[cf.Position.X] = true end
                 end
-        end
-        return bestHash
-end
+            end
 
-local function SendSkill(hash, index, pos, targetHash)
-        if useFireServer then
-                TowerUseAbilityRequest:FireServer(hash, index, pos, targetHash)
-        else
-                TowerUseAbilityRequest:InvokeServer(hash, index, pos, targetHash)
-        end
-end
-
--- ======== ENHANCED MAIN LOOP ========
-RunService.Heartbeat:Connect(function()
-        local now = tick()
-        local ownedTowers = TowerClass.GetTowers() or {}
-
-        -- Update tower attack states for support tower logic
-        updateTowerAttackStates()
-
-        for hash, tower in pairs(ownedTowers) do
-                if not tower or not tower.AbilityHandler then continue end
-
-                -- Enhanced Medic logic with attack state checking
-                if tower.Type == "Medic" then
-                        local _, p2 = GetCurrentUpgradeLevels(tower)
-                        if p2 >= 4 then
-                                if medicLastUsedTime[hash] and now - medicLastUsedTime[hash] < medicDelay then continue end
-
-                                local medicRange = getRange(tower)
-                                -- Only use skill if there are attacking towers in range
-                                if hasAttackingTowersInRange(tower, medicRange) then
-                                        for index = 1, 3 do
-                                                local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-                                                if not isCooldownReady(hash, index, ability) then continue end
-                                                local targetHash = getBestMedicTarget(tower, ownedTowers)
-                                                if targetHash then
-                                                        SendSkill(hash, index, nil, targetHash)
-                                                        medicLastUsedTime[hash] = now
-                                                        break
-                                                end
-                                        end
-                                end
+            for x, records in pairs(towersByAxisBlueprint) do
+                if not activeTowersByX[x] and not soldTowersX[x] and not activeJobs[x] then
+                    recordTowerDeath(x)
+                    local towerType, firstPlaceLine
+                    for _, record in ipairs(records) do
+                        if record.entry.TowerPlaced then 
+                            towerType = record.entry.TowerPlaced
+                            firstPlaceLine = record.line
+                            break
                         end
-                        continue
+                    end
+                    if towerType then
+                        rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                        local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
+                        if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                            activeJobs[x] = true
+                            local priority = GetTowerPriority(towerType)
+                            table.insert(jobQueue, { 
+                                x = x, 
+                                records = records, 
+                                priority = priority,
+                                deathTime = deadTowerTracker.deadTowers[x] and deadTowerTracker.deadTowers[x].deathTime or tick(),
+                                towerName = towerType,
+                                firstPlaceLine = firstPlaceLine
+                            })
+                            table.sort(jobQueue, function(a, b) 
+                                if a.priority == b.priority then return a.deathTime < b.deathTime end
+                                return a.priority < b.priority 
+                            end)
+                        end
+                    end
                 end
-
-                if skipTowerTypes[tower.Type] then continue end
-
-                local delay = fastTowers[tower.Type] and 0.1 or 0.2
-                if lastUsedTime[hash] and now - lastUsedTime[hash] < delay then continue end
-                lastUsedTime[hash] = now
-
-                local p1, p2 = GetCurrentUpgradeLevels(tower)
-                local pos = getTowerPos(tower)
-                local range = getRange(tower)
-
-                for index = 1, 3 do
-                        local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-                        if not isCooldownReady(hash, index, ability) then continue end
-
-                        local targetPos = nil
-                        local allowUse = true
-                        local hasSkillRange = false
-
-                        -- Check if ability has range (from ability config)
-                        if ability and ability.Config then
-                                hasSkillRange = ability.Config.Range ~= nil and ability.Config.Range > 0
-                        end
-
-                        -- Enhanced Jet Trooper logic (skip skill 1, only use skill 2)
-                        if tower.Type == "Jet Trooper" then
-                                if index == 1 then
-                                        allowUse = false  -- Always skip skill 1
-                                elseif index == 2 then
-                                        allowUse = true   -- Only use skill 2
-                                else
-                                        allowUse = false  -- Skip any other skills
-                                end
-                        end
-
-                        -- Enhanced Ghost logic
-                        if tower.Type == "Ghost" then
-                                if p2 > 2 then
-                                        allowUse = false
-                                        break
-                                else
-                                        targetPos = findTarget(pos, math.huge, {
-                                                mode = "maxhp",
-                                                excludeArrows = true,
-                                                excludeAir = false
-                                        })
-                                        if targetPos then SendSkill(hash, index, targetPos) end
-                                        break
-                                end
-                        end
-
-                        -- Enhanced Toxicnator logic
-                        if tower.Type == "Toxicnator" then
-                                targetPos = findTarget(pos, range, {
-                                        mode = "maxhp",
-                                        excludeArrows = false,
-                                        excludeAir = false
-                                })
-                                if targetPos then SendSkill(hash, index, targetPos) end
-                                break
-                        end
-
-                        -- NEW: Flame Trooper logic
-                        if tower.Type == "Flame Trooper" then
-                                targetPos = getEnhancedTarget(pos, 9.5, tower.Type, ability)
-                                if targetPos then SendSkill(hash, index, targetPos) end
-                                break -- Skip general logic
-                        end
-
-                        -- Enhanced Ice Breaker logic
-                        if tower.Type == "Ice Breaker" then
-                                if index == 1 then
-                                        targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                        if targetPos then SendSkill(hash, index, targetPos) end
-                                elseif index == 2 then
-                                        targetPos = getEnhancedTarget(pos, 8, tower.Type, ability)
-                                        if targetPos then SendSkill(hash, index, targetPos) end
-                                end
-                                break -- Skip general logic
-                        end
-
-                        -- Enhanced Slammer logic
-                        if tower.Type == "Slammer" then
-                                local enemyInRange = getEnhancedTarget(pos, range, tower.Type, ability)
-                                if enemyInRange then
-                                        SendSkill(hash, index, enemyInRange)
-                                end
-                                break -- Skip general logic
-                        end
-
-                        -- Enhanced John logic
-                        if tower.Type == "John" then
-                                if p1 >= 5 then
-                                        targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                else
-                                        targetPos = getEnhancedTarget(pos, 4.5, tower.Type, ability)
-                                end
-                                if targetPos then SendSkill(hash, index, targetPos) end
-                                break -- Skip general logic
-                        end
-
-                        -- Enhanced Mobster logic
-                        if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
-                                if p2 >= 3 and p2 <= 5 then
-                                        targetPos = getMobsterTarget(tower, hash, 2)
-                                        if targetPos then SendSkill(hash, index, targetPos) end
-                                elseif p1 >= 4 and p1 <= 5 then
-                                        targetPos = getMobsterTarget(tower, hash, 1)
-                                        if targetPos then SendSkill(hash, index, targetPos) end
-                                end
-                                break -- Skip general logic
-                        end
-
-                        -- Enhanced Commander logic (skill 3 only)
-                        if tower.Type == "Commander" and index == 3 then
-                                targetPos = getCommanderTarget()
-                                if targetPos then SendSkill(hash, index, targetPos) end
-                                break -- Skip general logic
-                        end
-
-                        -- MODIFIED: EDJ logic (skill 1 only) - Removed enemy range check
-                        if tower.Type == "EDJ" and index == 1 then
-                                local edjRange = getRange(tower)
-                                if hasAttackingTowersInRange(tower, edjRange) then
-                                        SendSkill(hash, index)
-                                end
-                                break -- Skip general logic
-                        end
-
-                        -- MODIFIED: Commander skill 1 logic - Removed enemy range check
-                        if tower.Type == "Commander" and index == 1 then
-                                local commanderRange = getRange(tower)
-                                if hasAttackingTowersInRange(tower, commanderRange) then
-                                        SendSkill(hash, index)
-                                end
-                                -- Continue to check other skills (don't break)
-                        end
-
-                        -- General targeting for directional towers
-                        local directional = directionalTowerTypes[tower.Type]
-                        local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
-                        
-                        -- NEW: Also check if ability requires manual aiming (needs pos)
-                        if ability and requiresManualAiming(ability) then
-                                sendWithPos = true
-                        end
-
-                        if not targetPos and sendWithPos and allowUse then
-                                -- NEW: Use enhanced targeting system
-                                targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                if not targetPos then allowUse = false end
-                        end
-
-                        -- For non-directional regular towers, ensure they target farthest enemy
-                        if not sendWithPos and not directional and allowUse then
-                                local hasEnemies = getFarthestEnemyInRange(pos, range, {
-                                        excludeAir = skipAirTowers[tower.Type] or false,
-                                        excludeArrows = true
-                                })
-                                if not hasEnemies then allowUse = false end
-                        end
-
-                        -- Execute skill if conditions are met
-                        if allowUse then
-                                if sendWithPos and targetPos then
-                                        SendSkill(hash, index, targetPos)
-                                elseif not sendWithPos then
-                                        SendSkill(hash, index)
-                                end
-                        end
-                end
+            end
+            
+            accumulator = accumulator - STEP
         end
+        
+        RunService.Heartbeat:Wait()
+    end
 end)
