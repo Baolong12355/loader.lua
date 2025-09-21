@@ -19,7 +19,7 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["MaxConcurrentRebuilds"] = 5,
+    ["MaxConcurrentRebuilds"] = 120,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
