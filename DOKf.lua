@@ -48,9 +48,7 @@ end
 FirstPersonHandler.Stop = function(...)
     _G.CurrentFPSControlledTower = nil
     _G.AutoAttackRunning = false
-    if FirstPersonAttackManager and typeof(FirstPersonAttackManager.ToggleTryAttacking) == "function" then
-        FirstPersonAttackManager.ToggleTryAttacking(false)
-    end
+    FirstPersonAttackManager.ToggleTryAttacking(false)
     hasNoEnemySet = false
     return original_FirstPersonHandler_Stop(...)
 end
@@ -72,19 +70,18 @@ local function getEnemyPathProgress(enemy)
     return 0
 end
 
+-- HÀM MỚI: Kiểm tra xem người chơi có sở hữu Combat Drone không
 local function LocalPlayerHasCombatDrone()
-    if not (TowerClass and typeof(TowerClass.GetTowers) == "function") then return false end
-    
-    local success, allTowers = pcall(TowerClass.GetTowers)
-    if not success or not allTowers then return false end
-
+    local allTowers = TowerClass.GetTowers()
+    if not allTowers then return false end
     for _, tower in pairs(allTowers) do
         if tower and tower.OwnedByLocalPlayer and tower.Type == "Combat Drone" then
-            return true
+            return true -- Tìm thấy, trả về true và thoát
         end
     end
-    return false
+    return false -- Không tìm thấy
 end
+
 
 FirstPersonAttackHandlerClass._Attack = function(self)
     local currentTower = _G.CurrentFPSControlledTower
@@ -141,18 +138,13 @@ FirstPersonAttackHandlerClass._Attack = function(self)
 end
 
 RunService.Heartbeat:Connect(function()
-    -- KIỂM TRA AN TOÀN: Đảm bảo module game đã sẵn sàng trước khi sử dụng
-    if not (TowerClass and typeof(TowerClass.GetTowers) == "function") then
-        return
-    end
-
     if ENABLED_SPLASH then
-        local success, allTowers = pcall(TowerClass.GetTowers)
-        if success and allTowers then
+        local allTowers = TowerClass.GetTowers()
+        if allTowers then
             for _, tower in pairs(allTowers) do
                 if tower and tower.Type == "Combat Drone" and tower.LevelHandler then
-                    local statsSuccess, levelStats = pcall(function() return tower.LevelHandler:GetLevelStats() end)
-                    if statsSuccess and levelStats then
+                    local success, levelStats = pcall(function() return tower.LevelHandler:GetLevelStats() end)
+                    if success and levelStats then
                         levelStats.IsSplash = true
                         levelStats.SplashRadius = NEW_SPLASH_RADIUS
                     end
@@ -161,10 +153,13 @@ RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- === LOGIC CẬP NHẬT ===
+    -- Chỉ chạy logic FPS nếu người chơi thực sự sở hữu một Combat Drone
     if not LocalPlayerHasCombatDrone() then
         return
     end
 
+    -- Bắt đầu logic dành riêng cho chế độ FPS
     if not _G.AutoAttackRunning or not _G.CurrentFPSControlledTower then
         return
     end
@@ -177,14 +172,12 @@ RunService.Heartbeat:Connect(function()
         end
     end
 
-    if FirstPersonAttackManager and typeof(FirstPersonAttackManager.ToggleTryAttacking) == "function" then
-        if foundEnemy then
-            FirstPersonAttackManager.ToggleTryAttacking(true)
-            hasNoEnemySet = false
-        elseif not hasNoEnemySet then
-            FirstPersonAttackManager.ToggleTryAttacking(false)
-            hasNoEnemySet = true
-        end
+    if foundEnemy then
+        FirstPersonAttackManager.ToggleTryAttacking(true)
+        hasNoEnemySet = false
+    elseif not hasNoEnemySet then
+        FirstPersonAttackManager.ToggleTryAttacking(false)
+        hasNoEnemySet = true
     end
 
     if _G.CurrentFPSControlledTower.Type == "Combat Drone" then
@@ -204,8 +197,7 @@ RunService.Heartbeat:Connect(function()
         end
 
         if desiredWeaponIndex ~= currentWeaponIndex then
-            -- KIỂM TRA AN TOÀN: Đảm bảo vũ khí có tồn tại trước khi chuyển
-            if FirstPersonAttackManager and typeof(FirstPersonAttackManager.GetAttackHandlerData) == "function" and FirstPersonAttackManager.GetAttackHandlerData(desiredWeaponIndex) then
+            if FirstPersonAttackManager.GetAttackHandlerData(desiredWeaponIndex) then
                 local SetIndexRemote = RemotesFolder:WaitForChild("TowerFirstPersonSetIndex")
                 SetIndexRemote:FireServer(_G.CurrentFPSControlledTower.Hash, desiredWeaponIndex)
                 currentWeaponIndex = desiredWeaponIndex
@@ -214,21 +206,16 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
-if NetworkingHandler and typeof(NetworkingHandler.GetEvent) == "function" then
-    local event = NetworkingHandler.GetEvent("GameStateChanged")
-    if event and typeof(event.AttachCallback) == "function" then
-        event:AttachCallback(function(state)
-            if state == GameStates.GameOver or state == GameStates.Victory then
-                if _G.AutoAttackRunning and _G.CurrentFPSControlledTower then
-                    FirstPersonHandler.Stop()
-                end
-            end
-        end)
+NetworkingHandler.GetEvent("GameStateChanged"):AttachCallback(function(state)
+    if state == GameStates.GameOver or state == GameStates.Victory then
+        if _G.AutoAttackRunning and _G.CurrentFPSControlledTower then
+            FirstPersonHandler.Stop()
+        end
     end
-end
+end)
 
 for _, mod in ipairs(getloadedmodules()) do
-    if mod and mod.Name == "FirstPersonAttackHandlerClass" then
+    if mod.Name == "FirstPersonAttackHandlerClass" then
         local ModuleTable = require(mod)
         if ModuleTable and ModuleTable.New then
             local oldNew = ModuleTable.New
@@ -241,7 +228,7 @@ for _, mod in ipairs(getloadedmodules()) do
                 return obj
             end
         end
-    elseif mod and mod.Name == "FirstPersonCameraHandler" then
+    elseif mod.Name == "FirstPersonCameraHandler" then
         local cameraMod = require(mod)
         if cameraMod then
             if cameraMod.CameraShake then
