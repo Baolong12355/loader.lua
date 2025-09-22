@@ -19,31 +19,35 @@ local FirstPersonHandler = require(FirstPersonHandlerFolder)
 local FirstPersonAttackManager = require(FirstPersonAttackManagerFolder)
 local FirstPersonAttackHandlerClass = require(FirstPersonAttackManagerFolder:WaitForChild("FirstPersonAttackHandlerClass"))
 
+local SetIndexRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerFirstPersonSetIndex")
+
 local original_FirstPersonHandler_Begin = FirstPersonHandler.Begin
 local original_FirstPersonHandler_Stop = FirstPersonHandler.Stop
 local original_AttackHandler_Attack = FirstPersonAttackHandlerClass._Attack
 
-_G.CurrentFPSControlledTower = nil
+local controlledTower = nil
 _G.AutoAttackRunning = false
-local currentWeaponIndex = 1
+local currentWeaponIndex = 2
 local hasNoEnemySet = false
 local NEW_SPLASH_RADIUS = 9999
 local SPLASH_ENABLED = true
 
 FirstPersonHandler.Begin = function(towerInstance)
-    _G.CurrentFPSControlledTower = towerInstance
-    _G.AutoAttackRunning = true
-    currentWeaponIndex = 1
-    hasNoEnemySet = false
+    if towerInstance and towerInstance.Type == "Combat Drone" then
+        controlledTower = towerInstance
+        _G.AutoAttackRunning = true
+        currentWeaponIndex = 2
+        hasNoEnemySet = false
+    end
     return original_FirstPersonHandler_Begin(towerInstance)
 end
 
-FirstPersonHandler.Stop = function()
-    _G.CurrentFPSControlledTower = nil
+FirstPersonHandler.Stop = function(...)
+    controlledTower = nil
     _G.AutoAttackRunning = false
     FirstPersonAttackManager.ToggleTryAttacking(false)
     hasNoEnemySet = false
-    return original_FirstPersonHandler_Stop()
+    return original_FirstPersonHandler_Stop(...)
 end
 
 local function getEnemyPathProgress(enemy)
@@ -88,27 +92,27 @@ RunService.Heartbeat:Connect(function()
         end
     end
 
-    if not _G.CurrentFPSControlledTower then
+    if not controlledTower then
         return
     end
 
-    local desiredWeaponIndex = 1
+    local desiredWeaponIndex = 2
     for _, enemy in pairs(EnemyClass.GetEnemies()) do
         if enemy and enemy.IsAlive and enemy.DamageReductionTable then
             for _, reductionInfo in ipairs(enemy.DamageReductionTable) do
                 if reductionInfo.DamageType == Enums.DamageTypes.Explosive and reductionInfo.Multiplier <= 0.5 then
-                    desiredWeaponIndex = 2
+                    desiredWeaponIndex = 1
                     break
                 end
             end
-            if desiredWeaponIndex == 2 then
+            if desiredWeaponIndex == 1 then
                 break
             end
         end
     end
 
     if desiredWeaponIndex ~= currentWeaponIndex then
-        FirstPersonHandler.SwitchAttackHandler(desiredWeaponIndex)
+        SetIndexRemote:FireServer(controlledTower.Hash, desiredWeaponIndex)
         currentWeaponIndex = desiredWeaponIndex
     end
 
@@ -153,7 +157,7 @@ task.spawn(function()
             end
         end
 
-        local isCurrentlyActive = _G.CurrentFPSControlledTower ~= nil
+        local isCurrentlyActive = controlledTower ~= nil
 
         if shouldActivate and not isCurrentlyActive and FirstPersonHandler.CanBegin() then
             FirstPersonHandler.Begin(combatDrone)
@@ -164,7 +168,7 @@ task.spawn(function()
 end)
 
 FirstPersonAttackHandlerClass._Attack = function(self)
-    local currentTower = _G.CurrentFPSControlledTower
+    local currentTower = controlledTower
     if not (currentTower and currentTower.DirectControlHandler and currentTower.DirectControlHandler:IsActive()) then
         return original_AttackHandler_Attack(self)
     end
@@ -232,9 +236,9 @@ for _, mod in ipairs(getloadedmodules()) do
             local oldNew = ModuleTable.New
             ModuleTable.New = function(...)
                 local obj = oldNew(...)
-                obj.DefaultShotInterval = 0.001
+                obj.DefaultShotInterval = 0
                 obj.ReloadTime = 0.001
-                obj.CurrentFirerateMultiplier = 0.001
+                obj.CurrentFirerateMultiplier = 0.000001
                 obj.DefaultSpreadDegrees = 0
                 return obj
             end
