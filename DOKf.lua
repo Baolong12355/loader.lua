@@ -177,29 +177,29 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 
-	if _G.WaveConfig then
-		local interface = PlayerGui:FindFirstChild("Interface")
-		if interface then
-			local gameInfoBar = interface:FindFirstChild("GameInfoBar")
-			if gameInfoBar then
-				local waveText = gameInfoBar.Wave.WaveText
-				local timeText = gameInfoBar.TimeLeft.TimeLeftText
-				if waveText and timeText then
-					local waveName = waveText.Text
-					local currentTime = timeText.Text
-					local targetTime = _G.WaveConfig[waveName]
-					if targetTime and targetTime > 0 then
-						local mins = math.floor(targetTime / 100)
-						local secs = targetTime % 100
-						local targetTimeStr = string.format("%02d:%02d", mins, secs)
-						if currentTime == targetTimeStr then
-							ReplicatedStorage.Remotes.SkipWaveVoteCast:FireServer(true)
-						end
-					end
-					if waveName == "Wave 201" then
-						FirstPersonHandler.Stop()
+	-- auto enable FPS mode nếu có enemy
+	if not _G.CurrentFPSControlledTower then
+		for _, tower in pairs(TowerClass.GetTowers()) do
+			if tower and tower.Type == "Combat Drone" then
+				for _, enemy in pairs(EnemyClass.GetEnemies()) do
+					if enemy and enemy.IsAlive and enemy:FirstPersonTargetable() then
+						FirstPersonHandler.Begin(tower)
+						break
 					end
 				end
+				break
+			end
+		end
+	end
+
+	-- auto stop khi wave = 201
+	local interface = PlayerGui:FindFirstChild("Interface")
+	if interface then
+		local gameInfoBar = interface:FindFirstChild("GameInfoBar")
+		if gameInfoBar then
+			local waveText = gameInfoBar.Wave.WaveText
+			if waveText and waveText.Text == "Wave 201" then
+				FirstPersonHandler.Stop()
 			end
 		end
 	end
