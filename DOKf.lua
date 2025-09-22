@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local CommonFolder = ReplicatedStorage:WaitForChild("TDX_Shared"):WaitForChild("Common")
 local ClientFolder = PlayerScripts:WaitForChild("Client")
@@ -18,6 +19,8 @@ local EnemyClass = require(GameClassFolder:WaitForChild("EnemyClass"))
 local FirstPersonHandler = require(FirstPersonHandlerFolder)
 local FirstPersonAttackManager = require(FirstPersonAttackManagerFolder)
 local FirstPersonAttackHandlerClass = require(FirstPersonAttackManagerFolder:WaitForChild("FirstPersonAttackHandlerClass"))
+local NetworkingHandler = require(CommonFolder:WaitForChild("NetworkingHandler"))
+local GameStates = Enums.GameStates
 
 local SetIndexRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerFirstPersonSetIndex")
 
@@ -33,6 +36,10 @@ local NEW_SPLASH_RADIUS = 9999
 local SPLASH_ENABLED = true
 
 FirstPersonHandler.Begin = function(towerInstance)
+    if shouldStopFPS() then
+        return
+    end
+    
     if towerInstance and towerInstance.Type == "Combat Drone" then
         controlledTower = towerInstance
         _G.AutoAttackRunning = true
@@ -48,6 +55,23 @@ FirstPersonHandler.Stop = function(...)
     FirstPersonAttackManager.ToggleTryAttacking(false)
     hasNoEnemySet = false
     return original_FirstPersonHandler_Stop(...)
+end
+
+local function getWaveNumber()
+    local interface = PlayerGui:FindFirstChild("Interface")
+    if interface then
+        local gameInfoBar = interface:FindFirstChild("GameInfoBar")
+        if gameInfoBar and gameInfoBar.Wave and gameInfoBar.Wave.WaveText then
+            local waveText = gameInfoBar.Wave.WaveText.Text
+            return tonumber(waveText:match("(%d+)"))
+        end
+    end
+    return nil
+end
+
+local function shouldStopFPS()
+    local waveNumber = getWaveNumber()
+    return waveNumber and waveNumber >= 201
 end
 
 local function getEnemyPathProgress(enemy)
@@ -72,6 +96,11 @@ local function getEnemyPathProgress(enemy)
 end
 
 RunService.Heartbeat:Connect(function()
+    if shouldStopFPS() and controlledTower then
+        FirstPersonHandler.Stop()
+        return
+    end
+
     if SPLASH_ENABLED then
         local allTowers = TowerClass.GetTowers()
         if allTowers then
@@ -81,6 +110,12 @@ RunService.Heartbeat:Connect(function()
                         local success, levelStats = pcall(function()
                             return tower.LevelHandler:GetLevelStats()
                         end)
+
+NetworkingHandler.GetEvent("GameStateChanged"):AttachCallback(function(state)
+    if state == GameStates.GameOver and controlledTower then
+        FirstPersonHandler.Stop()
+    end
+end)
 
                         if success and levelStats then
                             levelStats.IsSplash = true
@@ -139,6 +174,13 @@ end)
 
 task.spawn(function()
     while task.wait(1.5) do
+        if shouldStopFPS() then
+            if controlledTower then
+                FirstPersonHandler.Stop()
+            end
+            continue
+        end
+
         local combatDrone = nil
         for _, tower in pairs(TowerClass.GetTowers()) do
             if tower.Type == "Combat Drone" then
@@ -238,7 +280,7 @@ for _, mod in ipairs(getloadedmodules()) do
                 local obj = oldNew(...)
                 obj.DefaultShotInterval = 0
                 obj.ReloadTime = 0.001
-                obj.CurrentFirerateMultiplier = 0.000001
+                obj.CurrentFirerateMultiplier = 0.0000001
                 obj.DefaultSpreadDegrees = 0
                 return obj
             end
