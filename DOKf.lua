@@ -64,7 +64,8 @@ local function getWaveNumber()
             local gameInfoBar = interface:FindFirstChild("GameInfoBar")
             if gameInfoBar and gameInfoBar.Wave and gameInfoBar.Wave.WaveText then
                 local waveText = gameInfoBar.Wave.WaveText.Text
-                return tonumber(waveText:match("(%d+)"))
+                -- Extract number from "WAVE 1", "WAVE 201", etc.
+                return tonumber(waveText:match("WAVE (%d+)"))
             end
         end
         return nil
