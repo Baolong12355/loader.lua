@@ -254,7 +254,7 @@ local function PlaceTowerRetry(args, axisValue, towerName)
         if success then
             local startTime = tick()
             repeat 
-                task.wait(0.1)
+                task.wait(0.3)
             until tick() - startTime > 3 or GetTowerByAxis(axisValue)
             if GetTowerByAxis(axisValue) then 
                 RemoveFromRebuildCache(axisValue)
@@ -295,7 +295,7 @@ local function UpgradeTowerRetry(axisValue, path)
         if success then
             local startTime = tick()
             repeat
-                task.wait(0.1)
+                task.wait(0.2)
                 local _, t = GetTowerByAxis(axisValue)
                 if t and t.LevelHandler:GetLevelOnPath(path) > before then 
                     RemoveFromRebuildCache(axisValue)
