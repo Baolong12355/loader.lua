@@ -13,15 +13,15 @@ local FirstPersonHandlerFolder = UserInputHandlerFolder:WaitForChild("FirstPerso
 local FirstPersonAttackManagerFolder = FirstPersonHandlerFolder:WaitForChild("FirstPersonAttackManager")
 local CommonFolder = ReplicatedStorage.TDX_Shared:WaitForChild("Common")
 
-local GameClass = require(GameClassFolder)
 local TowerClass = require(GameClassFolder:WaitForChild("TowerClass"))
 local FirstPersonHandler = require(FirstPersonHandlerFolder)
 local FirstPersonAttackManager = require(FirstPersonAttackManagerFolder)
 local FirstPersonAttackHandlerClass = require(FirstPersonAttackManagerFolder:WaitForChild("FirstPersonAttackHandlerClass"))
 local EnemyClass = require(GameClassFolder:WaitForChild("EnemyClass"))
 local ProjectileHandler = require(GameClassFolder:WaitForChild("ProjectileHandler"))
-local GameStates = require(CommonFolder:WaitForChild("Enums")).GameStates
+local NetworkingHandler = require(CommonFolder:WaitForChild("NetworkingHandler"))
 local Enums = require(CommonFolder:WaitForChild("Enums"))
+local SetIndexRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerFirstPersonSetIndex")
 
 local NEW_SPLASH_RADIUS = 9999
 local original_FirstPersonHandler_Begin = FirstPersonHandler.Begin
@@ -29,6 +29,7 @@ local original_FirstPersonHandler_Stop = FirstPersonHandler.Stop
 
 _G.CurrentFPSControlledTower = nil
 local hasNoEnemySet = false
+local currentWeaponIndex = 1
 local isHooked = false
 
 local function ApplyHooks()
@@ -125,12 +126,6 @@ RunService.Heartbeat:Connect(function()
         pcall(function() uiWaveText = PlayerGui.Interface.GameInfoBar.Wave.WaveText end)
         return
     end
-
-    local currentGame = GameClass.GetCurrentGame()
-    if currentGame and currentGame:GetState() == GameStates.GameOver then
-        if _G.CurrentFPSControlledTower then FirstPersonHandler.Stop() end
-        return
-    end
     
     if uiWaveText and string.upper(uiWaveText.Text) == "WAVE 201" and _G.CurrentFPSControlledTower then
         FirstPersonHandler.Stop()
@@ -169,10 +164,9 @@ RunService.Heartbeat:Connect(function()
         end
         
         local desiredWeaponIndex = hasResistantEnemy and 1 or 2
-        local success, currentWeaponIndex = pcall(function() return debug.getupvalue(FirstPersonAttackManager.SwitchAttackHandler, 2) end)
+        local success, currentWeaponIndexVal = pcall(function() return debug.getupvalue(FirstPersonAttackManager.SwitchAttackHandler, 2) end)
         
-        if success and currentWeaponIndex and desiredWeaponIndex ~= currentWeaponIndex then
-            -- THAY ĐỔI QUAN TRỌNG: Gọi hàm chính của game thay vì RemoteEvent
+        if success and currentWeaponIndexVal and desiredWeaponIndex ~= currentWeaponIndexVal then
             FirstPersonHandler.SwitchAttackHandler(desiredWeaponIndex)
         end
     end
@@ -184,6 +178,14 @@ RunService.Heartbeat:Connect(function()
 
     if foundEnemy then FirstPersonAttackManager.ToggleTryAttacking(true); hasNoEnemySet = false
     elseif not hasNoEnemySet then FirstPersonAttackManager.ToggleTryAttacking(false); hasNoEnemySet = true end
+end)
+
+NetworkingHandler.GetEvent("GameStateChanged"):AttachCallback(function(state)
+	if state == "EndScreen" then
+		if _G.CurrentFPSControlledTower then
+            FirstPersonHandler.Stop()
+        end
+	end
 end)
 
 task.spawn(function()
