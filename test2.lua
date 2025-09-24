@@ -19,10 +19,10 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["MaxConcurrentRebuilds"] = 5,
+    ["MaxConcurrentRebuilds"] = 999,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster", "XWM Turret"},
     ["ForceRebuildEvenIfSold"] = false,
-    ["MaxRebuildRetry"] = 5, -- Giới hạn số lần thử lại để tránh vòng lặp vô tận
+    ["MaxRebuildRetry"] = nili, -- Giới hạn số lần thử lại để tránh vòng lặp vô tận
     ["PlaceMode"] = "Rewrite",
     ["VerificationDelay"] = 1.5, -- Thời gian chờ (giây) trước khi luồng kiểm tra chạy
     ["SkipTowersAtAxis"] = {},
