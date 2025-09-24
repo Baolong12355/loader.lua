@@ -30,7 +30,6 @@ local original_FirstPersonHandler_Stop = FirstPersonHandler.Stop
 
 _G.CurrentFPSControlledTower = nil
 local hasNoEnemySet = false
-local currentWeaponIndex = 1
 local isHooked = false
 
 local function ApplyHooks()
@@ -109,7 +108,6 @@ end
 FirstPersonHandler.Begin = function(towerInstance)
     ApplyHooks() 
     _G.CurrentFPSControlledTower = towerInstance
-    currentWeaponIndex = 1
     return original_FirstPersonHandler_Begin(towerInstance)
 end
 
@@ -158,18 +156,26 @@ RunService.Heartbeat:Connect(function()
     end)
 
     if canSwitchWeapons then
-        local desiredWeaponIndex = 2
+        local hasResistantEnemy = false
         for _, enemy in pairs(EnemyClass.GetEnemies()) do
             if enemy and enemy.IsAlive and enemy.DamageReductionTable then
                 for _, reductionInfo in ipairs(enemy.DamageReductionTable) do
-                    if reductionInfo.DamageType == Enums.DamageTypes.Explosive and reductionInfo.Multiplier and reductionInfo.Multiplier <= 0.5 then desiredWeaponIndex = 1; break end
+                    if reductionInfo.DamageType == Enums.DamageTypes.Explosive and reductionInfo.Multiplier and reductionInfo.Multiplier <= 0.5 then
+                        hasResistantEnemy = true
+                        break
+                    end
                 end
             end
-            if desiredWeaponIndex == 1 then break end
+            if hasResistantEnemy then break end
         end
-        if desiredWeaponIndex ~= currentWeaponIndex then SetIndexRemote:FireServer(_G.CurrentFPSControlledTower.Hash, desiredWeaponIndex); currentWeaponIndex = desiredWeaponIndex end
-    elseif currentWeaponIndex ~= 1 then
-        SetIndexRemote:FireServer(_G.CurrentFPSControlledTower.Hash, 1); currentWeaponIndex = 1
+        
+        local desiredWeaponIndex = hasResistantEnemy and 1 or 2
+        
+        local success, currentWeaponIndex = pcall(function() return debug.getupvalue(FirstPersonAttackManager.SwitchAttackHandler, 2) end)
+        
+        if success and currentWeaponIndex and desiredWeaponIndex ~= currentWeaponIndex then
+            SetIndexRemote:FireServer(_G.CurrentFPSControlledTower.Hash, desiredWeaponIndex)
+        end
     end
 
     local foundEnemy = false
@@ -182,7 +188,7 @@ RunService.Heartbeat:Connect(function()
 end)
 
 task.spawn(function()
-    while task.wait(0,5) do
+    while task.wait(0.5) do
         local isCurrentlyActive = _G.CurrentFPSControlledTower ~= nil
         local shouldBeActive = false
         for _, enemy in pairs(EnemyClass.GetEnemies()) do
@@ -194,12 +200,9 @@ task.spawn(function()
             for _, tower in pairs(TowerClass.GetTowers()) do
                 if tower.Type == "Combat Drone" and tower.OwnedByLocalPlayer then combatDrone = tower; break end
             end
-            if combatDrone then
+            if combatDrone and FirstPersonHandler.CanBegin() then
                 local success, ability = pcall(function() return combatDrone.AbilityHandler:GetAbilityFromIndex(1) end)
-                if success and ability then
-                    local canUse, _ = pcall(function() return ability:CanUse() end)
-                    if canUse then ability:Use() end
-                end
+                if success and ability and ability:CanUse() then ability:Use() end
             end
         elseif not shouldBeActive and isCurrentlyActive then
             FirstPersonHandler.Stop()
