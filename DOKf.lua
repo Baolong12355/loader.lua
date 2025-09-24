@@ -13,13 +13,14 @@ local FirstPersonHandlerFolder = UserInputHandlerFolder:WaitForChild("FirstPerso
 local FirstPersonAttackManagerFolder = FirstPersonHandlerFolder:WaitForChild("FirstPersonAttackManager")
 local CommonFolder = ReplicatedStorage.TDX_Shared:WaitForChild("Common")
 
+local GameClass = require(GameClassFolder)
 local TowerClass = require(GameClassFolder:WaitForChild("TowerClass"))
 local FirstPersonHandler = require(FirstPersonHandlerFolder)
 local FirstPersonAttackManager = require(FirstPersonAttackManagerFolder)
 local FirstPersonAttackHandlerClass = require(FirstPersonAttackManagerFolder:WaitForChild("FirstPersonAttackHandlerClass"))
 local EnemyClass = require(GameClassFolder:WaitForChild("EnemyClass"))
 local ProjectileHandler = require(GameClassFolder:WaitForChild("ProjectileHandler"))
-local NetworkingHandler = require(CommonFolder:WaitForChild("NetworkingHandler"))
+local GameStates = require(CommonFolder:WaitForChild("Enums")).GameStates
 local Enums = require(CommonFolder:WaitForChild("Enums"))
 local SetIndexRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerFirstPersonSetIndex")
 
@@ -29,8 +30,33 @@ local original_FirstPersonHandler_Stop = FirstPersonHandler.Stop
 
 _G.CurrentFPSControlledTower = nil
 local hasNoEnemySet = false
-local currentWeaponIndex = 1
 local isHooked = false
+
+local function getEnemyPathProgress(enemy)
+    if not enemy or not enemy.MovementHandler then return 0 end
+    local success, result
+    success, result = pcall(function() return enemy.MovementHandler:GetPathPercentage() end)
+    if success and result then return result end
+    if enemy.MovementHandler.PathPercentage then return enemy.MovementHandler.PathPercentage end
+    success, result = pcall(function() return enemy.MovementHandler:GetCurrentNode():GetPercentageAlongPath(1) end)
+    if success and result then return result end
+    return 0
+end
+
+local function getFurthestEnemy()
+    local furthestEnemy = nil
+    local maxProgress = -1
+    for _, enemy in pairs(EnemyClass.GetEnemies()) do
+        if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then
+            local progress = getEnemyPathProgress(enemy)
+            if progress > maxProgress then
+                maxProgress = progress
+                furthestEnemy = enemy
+            end
+        end
+    end
+    return furthestEnemy
+end
 
 local function ApplyHooks()
     if isHooked then return end
@@ -43,13 +69,8 @@ local function ApplyHooks()
             return original_AttackHandler_Attack(self)
         end
         local towerPosition = currentTower:GetTorsoPosition() or currentTower:GetPosition()
-        local furthestEnemy = nil; local maxProgress = -1
-        for _, enemy in pairs(EnemyClass.GetEnemies()) do
-            if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then
-                local pathProgress = (pcall(function() return enemy.MovementHandler:GetPathPercentage() end) and enemy.MovementHandler:GetPathPercentage() or 0)
-                if pathProgress > maxProgress then maxProgress = pathProgress; furthestEnemy = enemy end
-            end
-        end
+        local furthestEnemy = getFurthestEnemy()
+        
         if furthestEnemy then
             local targetPosition, hitPart
             local headPart = furthestEnemy.Character and furthestEnemy.Character.GetHead and furthestEnemy.Character:GetHead()
@@ -69,13 +90,7 @@ local function ApplyHooks()
     local original_NewProjectile = ProjectileHandler.NewProjectile
     ProjectileHandler.NewProjectile = function(initData)
         if _G.CurrentFPSControlledTower and initData and initData.OriginHash == _G.CurrentFPSControlledTower.Hash then
-            local furthestEnemy = nil; local maxProgress = -1
-            for _, enemy in pairs(EnemyClass.GetEnemies()) do
-                if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then
-                    local pathProgress = (pcall(function() return enemy.MovementHandler:GetPathPercentage() end) and enemy.MovementHandler:GetPathPercentage() or 0)
-                    if pathProgress > maxProgress then maxProgress = pathProgress; furthestEnemy = enemy end
-                end
-            end
+            local furthestEnemy = getFurthestEnemy()
             if furthestEnemy then
                 initData.TargetHash = furthestEnemy.Hash; initData.TargetEntityClass = "Enemy"; initData.OverrideGoalPosition = furthestEnemy:GetTorsoPosition(); initData.ForceTrackCharacter = true
             end
@@ -124,6 +139,12 @@ local uiWaveText = nil
 RunService.Heartbeat:Connect(function()
     if not uiWaveText then
         pcall(function() uiWaveText = PlayerGui.Interface.GameInfoBar.Wave.WaveText end)
+        return
+    end
+
+    local currentGame = GameClass.GetCurrentGame()
+    if currentGame and currentGame:GetState() == GameStates.GameOver then
+        if _G.CurrentFPSControlledTower then FirstPersonHandler.Stop() end
         return
     end
     
@@ -180,16 +201,8 @@ RunService.Heartbeat:Connect(function()
     elseif not hasNoEnemySet then FirstPersonAttackManager.ToggleTryAttacking(false); hasNoEnemySet = true end
 end)
 
-NetworkingHandler.GetEvent("GameStateChanged"):AttachCallback(function(state)
-	if state == "EndScreen" then
-		if _G.CurrentFPSControlledTower then
-            FirstPersonHandler.Stop()
-        end
-	end
-end)
-
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(1.5) do
         local isCurrentlyActive = _G.CurrentFPSControlledTower ~= nil
         local shouldBeActive = false
         for _, enemy in pairs(EnemyClass.GetEnemies()) do
