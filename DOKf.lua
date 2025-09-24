@@ -22,6 +22,7 @@ local EnemyClass = require(GameClassFolder:WaitForChild("EnemyClass"))
 local ProjectileHandler = require(GameClassFolder:WaitForChild("ProjectileHandler"))
 local GameStates = require(CommonFolder:WaitForChild("Enums")).GameStates
 local Enums = require(CommonFolder:WaitForChild("Enums"))
+local SetIndexRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerFirstPersonSetIndex")
 
 local NEW_SPLASH_RADIUS = 9999
 local original_FirstPersonHandler_Begin = FirstPersonHandler.Begin
@@ -29,8 +30,21 @@ local original_FirstPersonHandler_Stop = FirstPersonHandler.Stop
 
 _G.CurrentFPSControlledTower = nil
 local hasNoEnemySet = false
-local currentWeaponIndex = 1
 local isHooked = false
+
+local function getFurthestEnemy()
+    local furthestEnemy, maxDistance = nil, -1
+    for _, enemy in pairs(EnemyClass.GetEnemies()) do
+        if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then
+            local success, distance = pcall(function() return enemy.MovementHandler.PathHandler.DistanceTraveled end)
+            if success and distance and distance > maxDistance then
+                maxDistance = distance
+                furthestEnemy = enemy
+            end
+        end
+    end
+    return furthestEnemy
+end
 
 local function ApplyHooks()
     if isHooked then return end
@@ -38,62 +52,37 @@ local function ApplyHooks()
 
     local original_AttackHandler_Attack = FirstPersonAttackHandlerClass._Attack
     FirstPersonAttackHandlerClass._Attack = function(self)
-        local currentTower = _G.CurrentFPSControlledTower
-        if not (currentTower and currentTower.DirectControlHandler and currentTower.DirectControlHandler:IsActive()) then
-            return original_AttackHandler_Attack(self)
-        end
-        local towerPosition = currentTower:GetTorsoPosition() or currentTower:GetPosition()
-        local furthestEnemy = nil
-        local maxProgress = -1
-        for _, enemy in pairs(EnemyClass.GetEnemies()) do
-            if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then
-                local pathProgress = (pcall(function() return enemy.MovementHandler:GetPathPercentage() end) and enemy.MovementHandler:GetPathPercentage() or 0)
-                if pathProgress > maxProgress then
-                    maxProgress = pathProgress
-                    furthestEnemy = enemy
-                end
-            end
-        end
-        if furthestEnemy then
-            local targetPosition, hitPart
-            local headPart = furthestEnemy.Character and furthestEnemy.Character.GetHead and furthestEnemy.Character:GetHead()
-            if headPart then
-                targetPosition = headPart.Position
-                hitPart = headPart
-            else
-                targetPosition = furthestEnemy:GetTorsoPosition() or furthestEnemy:GetPosition()
-                hitPart = furthestEnemy.Character and furthestEnemy.Character:GetTorso()
-            end
-            if hitPart and targetPosition then
-                local hitNormal = (targetPosition - towerPosition).Unit
-                if self.IsProjectile then
-                    self:_AttackProjectile(hitPart, targetPosition, hitNormal)
-                else
-                    self:_AttackHitscan(hitPart, targetPosition, hitNormal)
-                end
-                self:_BurstAttackHandling()
-                FirstPersonHandler.Attacked(self.Index, self.UseAbilityName, self.AttackConfig.NoTriggerClientTowerAttacked)
+        pcall(function()
+            local currentTower = _G.CurrentFPSControlledTower
+            if not (currentTower and currentTower.DirectControlHandler and currentTower.DirectControlHandler:IsActive()) then
+                original_AttackHandler_Attack(self)
                 return
             end
-        end
-        return original_AttackHandler_Attack(self)
+            local towerPosition = currentTower:GetTorsoPosition() or currentTower:GetPosition()
+            local furthestEnemy = getFurthestEnemy()
+            if furthestEnemy then
+                local targetPosition, hitPart
+                local headPart = furthestEnemy.Character and furthestEnemy.Character.GetHead and furthestEnemy.Character:GetHead()
+                if headPart then targetPosition = headPart.Position; hitPart = headPart
+                else targetPosition = furthestEnemy:GetTorsoPosition() or furthestEnemy:GetPosition(); hitPart = furthestEnemy.Character and furthestEnemy.Character:GetTorso() end
+                if hitPart and targetPosition then
+                    local hitNormal = (targetPosition - towerPosition).Unit
+                    if self.IsProjectile then self:_AttackProjectile(hitPart, targetPosition, hitNormal) else self:_AttackHitscan(hitPart, targetPosition, hitNormal) end
+                    self:_BurstAttackHandling()
+                    FirstPersonHandler.Attacked(self.Index, self.UseAbilityName, self.AttackConfig.NoTriggerClientTowerAttacked)
+                end
+            else
+                original_AttackHandler_Attack(self)
+            end
+        end)
     end
     
     local original_NewProjectile = ProjectileHandler.NewProjectile
     ProjectileHandler.NewProjectile = function(initData)
         if _G.CurrentFPSControlledTower and initData and initData.OriginHash == _G.CurrentFPSControlledTower.Hash then
-            local furthestEnemy = nil; local maxProgress = -1
-            for _, enemy in pairs(EnemyClass.GetEnemies()) do
-                if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then
-                    local pathProgress = (pcall(function() return enemy.MovementHandler:GetPathPercentage() end) and enemy.MovementHandler:GetPathPercentage() or 0)
-                    if pathProgress > maxProgress then maxProgress = pathProgress; furthestEnemy = enemy end
-                end
-            end
+            local furthestEnemy = getFurthestEnemy()
             if furthestEnemy then
-                initData.TargetHash = furthestEnemy.Hash
-                initData.TargetEntityClass = "Enemy"
-                initData.OverrideGoalPosition = furthestEnemy:GetTorsoPosition()
-                initData.ForceTrackCharacter = true
+                initData.TargetHash = furthestEnemy.Hash; initData.TargetEntityClass = "Enemy"; initData.OverrideGoalPosition = furthestEnemy:GetTorsoPosition(); initData.ForceTrackCharacter = true
             end
         end
         return original_NewProjectile(initData)
@@ -106,15 +95,8 @@ local function ApplyHooks()
                 if ModuleTable and ModuleTable.New then
                     local oldNew = ModuleTable.New
                     ModuleTable.New = function(...)
-                        local obj = oldNew(...)
-                        obj.DefaultShotInterval = 0.001
-                        obj.ReloadTime = 0.001
-                        obj.CurrentFirerateMultiplier = 0.001
-                        obj.DefaultSpreadDegrees = 0
-                        obj.DamageType = Enums.DamageTypes.Toxic 
-                        if obj.AttackConfig and obj.AttackConfig.DamageData and obj.AttackConfig.DamageData.StunData then
-                            obj.AttackConfig.DamageData.StunData.StunDuration = 99999999
-                        end
+                        local obj = oldNew(...); obj.DefaultShotInterval = 0.001; obj.ReloadTime = 0.001; obj.CurrentFirerateMultiplier = 0.001; obj.DefaultSpreadDegrees = 0; obj.DamageType = Enums.DamageTypes.Toxic 
+                        if obj.AttackConfig and obj.AttackConfig.DamageData and obj.AttackConfig.DamageData.StunData then obj.AttackConfig.DamageData.StunData.StunDuration = 99999999 end
                         return obj
                     end
                 end
@@ -122,10 +104,7 @@ local function ApplyHooks()
         elseif mod.Name == "FirstPersonCameraHandler" then
             pcall(function()
                 local cameraMod = require(mod)
-                if cameraMod then
-                    if cameraMod.CameraShake then cameraMod.CameraShake = function() end end
-                    if cameraMod.ApplyRecoil then cameraMod.ApplyRecoil = function() end end
-                end
+                if cameraMod then if cameraMod.CameraShake then cameraMod.CameraShake = function() end end; if cameraMod.ApplyRecoil then cameraMod.ApplyRecoil = function() end end end
             end)
         end
     end
@@ -134,7 +113,6 @@ end
 FirstPersonHandler.Begin = function(towerInstance)
     ApplyHooks() 
     _G.CurrentFPSControlledTower = towerInstance
-    currentWeaponIndex = 1
     return original_FirstPersonHandler_Begin(towerInstance)
 end
 
@@ -149,82 +127,52 @@ end
 local uiWaveText = nil
 
 RunService.Heartbeat:Connect(function()
-    if not uiWaveText then
-        pcall(function() uiWaveText = PlayerGui.Interface.GameInfoBar.Wave.WaveText end)
-        return
-    end
-
-    local currentGame = GameClass.GetCurrentGame()
-    if currentGame and currentGame:GetState() == GameStates.GameOver then
-        if _G.CurrentFPSControlledTower then FirstPersonHandler.Stop() end
-        return
-    end
-    
-    if uiWaveText and string.upper(uiWaveText.Text) == "WAVE 201" and _G.CurrentFPSControlledTower then
-        FirstPersonHandler.Stop()
-        return
-    end
-
     pcall(function()
+        if not uiWaveText then
+            local gameInfoBar = PlayerGui:FindFirstChild("Interface"):FindFirstChild("GameInfoBar")
+            if gameInfoBar then uiWaveText = gameInfoBar.Wave.WaveText end
+            return
+        end
+        local currentGame = GameClass.GetCurrentGame()
+        if (currentGame and currentGame:GetState() == GameStates.GameOver) or (uiWaveText and string.upper(uiWaveText.Text) == "WAVE 201") then
+            if _G.CurrentFPSControlledTower then FirstPersonHandler.Stop() end
+            return
+        end
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower and tower.Type == "Combat Drone" and tower.OwnedByLocalPlayer and tower.LevelHandler then
                 local levelStats = tower.LevelHandler:GetLevelStats()
-                if levelStats then
-                    levelStats.IsSplash = true
-                    levelStats.SplashRadius = NEW_SPLASH_RADIUS
-                end
+                if levelStats then levelStats.IsSplash = true; levelStats.SplashRadius = NEW_SPLASH_RADIUS end
             end
         end
-    end)
-
-    if not _G.CurrentFPSControlledTower then return end
-
-    local canSwitchWeapons = false
-    pcall(function()
+        if not _G.CurrentFPSControlledTower then return end
+        local canSwitchWeapons = false
         local levelStats = _G.CurrentFPSControlledTower.LevelHandler:GetLevelStats()
-        if levelStats and levelStats.FirstPersonConfig and levelStats.FirstPersonConfig.AttackConfigs and #levelStats.FirstPersonConfig.AttackConfigs > 1 then
-            canSwitchWeapons = true
-        end
-    end)
-
-    if canSwitchWeapons then
-        local desiredWeaponIndex = 2
-        for _, enemy in pairs(EnemyClass.GetEnemies()) do
-            if enemy and enemy.IsAlive and enemy.DamageReductionTable then
-                for _, reductionInfo in ipairs(enemy.DamageReductionTable) do
-                    if reductionInfo.DamageType == Enums.DamageTypes.Explosive and reductionInfo.Multiplier and reductionInfo.Multiplier <= 0.5 then
-                        desiredWeaponIndex = 1
-                        break
+        if levelStats and levelStats.FirstPersonConfig and levelStats.FirstPersonConfig.AttackConfigs and #levelStats.FirstPersonConfig.AttackConfigs > 1 then canSwitchWeapons = true end
+        if canSwitchWeapons then
+            local hasResistantEnemy = false
+            for _, enemy in pairs(EnemyClass.GetEnemies()) do
+                if enemy and enemy.IsAlive and enemy.DamageReductionTable then
+                    for _, reductionInfo in ipairs(enemy.DamageReductionTable) do
+                        if reductionInfo.DamageType == Enums.DamageTypes.Explosive and reductionInfo.DamageReduction and reductionInfo.DamageReduction >= 0.5 then
+                            hasResistantEnemy = true; break
+                        end
                     end
                 end
+                if hasResistantEnemy then break end
             end
-            if desiredWeaponIndex == 1 then break end
+            local desiredWeaponIndex = hasResistantEnemy and 1 or 2
+            local success, currentWeaponIndexVal = pcall(function() return debug.getupvalue(FirstPersonAttackManager.SwitchAttackHandler, 2) end)
+            if success and currentWeaponIndexVal and desiredWeaponIndex ~= currentWeaponIndexVal then
+                FirstPersonHandler.SwitchAttackHandler(desiredWeaponIndex)
+            end
         end
-        
-        if desiredWeaponIndex ~= currentWeaponIndex then
-            FirstPersonHandler.SwitchAttackHandler(desiredWeaponIndex)
-            currentWeaponIndex = desiredWeaponIndex
+        local foundEnemy = false
+        for _, enemy in pairs(EnemyClass.GetEnemies()) do
+            if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then foundEnemy = true; break end
         end
-    elseif currentWeaponIndex ~= 1 then
-        FirstPersonHandler.SwitchAttackHandler(1)
-        currentWeaponIndex = 1
-    end
-
-    local foundEnemy = false
-    for _, enemy in pairs(EnemyClass.GetEnemies()) do
-        if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then
-            foundEnemy = true
-            break
-        end
-    end
-
-    if foundEnemy then
-        FirstPersonAttackManager.ToggleTryAttacking(true)
-        hasNoEnemySet = false
-    elseif not hasNoEnemySet then
-        FirstPersonAttackManager.ToggleTryAttacking(false)
-        hasNoEnemySet = true
-    end
+        if foundEnemy then FirstPersonAttackManager.ToggleTryAttacking(true); hasNoEnemySet = false
+        elseif not hasNoEnemySet then FirstPersonAttackManager.ToggleTryAttacking(false); hasNoEnemySet = true end
+    end)
 end)
 
 task.spawn(function()
@@ -232,27 +180,16 @@ task.spawn(function()
         local isCurrentlyActive = _G.CurrentFPSControlledTower ~= nil
         local shouldBeActive = false
         for _, enemy in pairs(EnemyClass.GetEnemies()) do
-            if enemy and enemy.IsAlive and not enemy.IsFakeEnemy then
-                shouldBeActive = true
-                break
-            end
+            if enemy and enemy.IsAlive and not enemy.IsFakeEnemy then shouldBeActive = true; break end
         end
-
         if shouldBeActive and not isCurrentlyActive then
             local combatDrone = nil
             for _, tower in pairs(TowerClass.GetTowers()) do
-                if tower.Type == "Combat Drone" and tower.OwnedByLocalPlayer then
-                    combatDrone = tower
-                    break
-                end
+                if tower.Type == "Combat Drone" and tower.OwnedByLocalPlayer then combatDrone = tower; break end
             end
-            
             if combatDrone and FirstPersonHandler.CanBegin() then
                 local success, ability = pcall(function() return combatDrone.AbilityHandler:GetAbilityFromIndex(1) end)
-                if success and ability then
-                    local canUse, _ = pcall(function() return ability:CanUse() end)
-                    if canUse then ability:Use() end
-                end
+                if success and ability and ability:CanUse() then ability:Use() end
             end
         elseif not shouldBeActive and isCurrentlyActive then
             FirstPersonHandler.Stop()
