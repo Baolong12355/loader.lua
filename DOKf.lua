@@ -153,7 +153,7 @@ RunService.Heartbeat:Connect(function()
             for _, enemy in pairs(EnemyClass.GetEnemies()) do
                 if enemy and enemy.IsAlive and enemy.DamageReductionTable then
                     for _, reductionInfo in ipairs(enemy.DamageReductionTable) do
-                        if reductionInfo.DamageType == Enums.DamageTypes.Explosive and reductionInfo.DamageReduction and reductionInfo.DamageReduction >= 0.5 then
+                        if reductionInfo.DamageType == Enums.DamageTypes.Explosive and reductionInfo.DamageReduction and reductionInfo.DamageReduction >= 0.8 then
                             hasResistantEnemy = true; break
                         end
                     end
