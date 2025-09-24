@@ -22,7 +22,6 @@ local EnemyClass = require(GameClassFolder:WaitForChild("EnemyClass"))
 local ProjectileHandler = require(GameClassFolder:WaitForChild("ProjectileHandler"))
 local GameStates = require(CommonFolder:WaitForChild("Enums")).GameStates
 local Enums = require(CommonFolder:WaitForChild("Enums"))
-local SetIndexRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerFirstPersonSetIndex")
 
 local NEW_SPLASH_RADIUS = 9999
 local original_FirstPersonHandler_Begin = FirstPersonHandler.Begin
@@ -170,11 +169,11 @@ RunService.Heartbeat:Connect(function()
         end
         
         local desiredWeaponIndex = hasResistantEnemy and 1 or 2
-        
         local success, currentWeaponIndex = pcall(function() return debug.getupvalue(FirstPersonAttackManager.SwitchAttackHandler, 2) end)
         
         if success and currentWeaponIndex and desiredWeaponIndex ~= currentWeaponIndex then
-            SetIndexRemote:FireServer(_G.CurrentFPSControlledTower.Hash, desiredWeaponIndex)
+            -- THAY ĐỔI QUAN TRỌNG: Gọi hàm chính của game thay vì RemoteEvent
+            FirstPersonHandler.SwitchAttackHandler(desiredWeaponIndex)
         end
     end
 
