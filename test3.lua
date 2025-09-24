@@ -4,11 +4,10 @@ local PlayerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
 
 -- Cấu hình hệ thống
 local Config = {
-    DelayKiemTra = 0.05, -- thời gian chờ giữa mỗi lần kiểm tra (giây)
-    CheDoDebug = true
+    CheDoDebug = true -- hiển thị log debug
 }
 
--- Kiểm tra xem _G.WaveConfig đã được cấu hình chưa
+-- Kiểm tra _G.WaveConfig
 if not _G.WaveConfig or type(_G.WaveConfig) ~= "table" then
     error("Vui lòng gán bảng _G.WaveConfig trước khi chạy script!")
 end
@@ -20,75 +19,44 @@ local function debugPrint(...)
     end
 end
 
--- Chờ GameInfoBar xuất hiện (vô hạn)
-local function waitForGameInfoBar()
-    debugPrint("Đang chờ GameInfoBar...")
-    while true do
-        local interface = PlayerGui:FindFirstChild("Interface")
-        if interface then
-            local gameInfoBar = interface:FindFirstChild("GameInfoBar")
-            if gameInfoBar then
-                debugPrint("Đã tìm thấy GameInfoBar!")
-                return gameInfoBar
-            end
-        end
-        task.wait(1)
+-- Tham chiếu đến RemoteEvent
+local SkipEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("SkipWaveVoteCast")
+local TDX_Shared = ReplicatedStorage:WaitForChild("TDX_Shared")
+local Common = TDX_Shared:WaitForChild("Common")
+local NetworkingHandler = require(Common:WaitForChild("NetworkingHandler"))
+
+-- Lắng nghe khi server cho phép vote skip
+NetworkingHandler.GetEvent("SkipWaveVoteStateUpdate"):AttachCallback(function(data)
+    if not data.VotingEnabled then return end
+
+    local waveText = PlayerGui.Interface.GameInfoBar.Wave.WaveText.Text
+    local waveName = string.upper(waveText) -- chuẩn hóa WAVE
+
+    local configValue = _G.WaveConfig[waveName]
+
+    if configValue == 0 then
+        debugPrint("Wave", waveName, "không skip (cấu hình 0).")
+        return
     end
-end
 
--- Khởi tạo UI
-local function initUI()
-    local gameInfoBar = waitForGameInfoBar()
-    return {
-        waveText = gameInfoBar.Wave.WaveText,
-        timeText = gameInfoBar.TimeLeft.TimeLeftText,
-        skipEvent = ReplicatedStorage.Remotes.SkipWaveVoteCast
-    }
-end
+    if configValue == "now" or configValue == "i" then
+        debugPrint("Skip wave ngay lập tức:", waveName)
+        SkipEvent:FireServer(true)
+    elseif tonumber(configValue) then
+        -- Convert số thành "mm:ss"
+        local number = tonumber(configValue)
+        local mins = math.floor(number / 100)
+        local secs = number % 100
+        local targetTimeStr = string.format("%02d:%02d", mins, secs)
 
--- Chuyển số thành chuỗi thời gian "mm:ss"
-local function convertToTimeFormat(number)
-    local mins = math.floor(number / 100)
-    local secs = number % 100
-    return string.format("%02d:%02d", mins, secs)
-end
-
--- Hàm chính
-local function main()
-    debugPrint("Khởi động Auto Skip...")
-    local ui = initUI()
-    local skippedWaves = {}
-
-    while task.wait(Config.DelayKiemTra) do
-        local waveName = ui.waveText.Text
-        local currentTime = ui.timeText.Text
-        local configValue = _G.WaveConfig[waveName]
-
-        if configValue ~= nil and not skippedWaves[waveName] then
-            -- Không skip nếu giá trị là 0
-            if configValue == 0 then
-                skippedWaves[waveName] = true
-                debugPrint("Wave", waveName, "được cấu hình KHÔNG skip.")
-            elseif tostring(configValue) == "now" or tostring(configValue) == "i" then
-                -- Skip ngay lập tức nếu là "now" hoặc "i"
-                debugPrint("Skip wave ngay lập tức:", waveName)
-                ui.skipEvent:FireServer(true)
-                skippedWaves[waveName] = true
-            elseif tonumber(configValue) then
-                -- Skip khi đến đúng thời gian chỉ định
-                local targetTimeStr = convertToTimeFormat(tonumber(configValue))
-                if currentTime == targetTimeStr then
-                    debugPrint("Đang skip wave:", waveName, "| Thời gian:", currentTime)
-                    ui.skipEvent:FireServer(true)
-                    skippedWaves[waveName] = true
-                end
-            else
-                debugPrint("Cảnh báo: giá trị không hợp lệ cho wave", waveName)
-                skippedWaves[waveName] = true
-            end
+        local currentTime = PlayerGui.Interface.GameInfoBar.TimeLeft.TimeLeftText.Text
+        if currentTime == targetTimeStr then
+            debugPrint("Đang skip wave:", waveName, "| Thời gian:", currentTime)
+            SkipEvent:FireServer(true)
         end
+    else
+        debugPrint("Cảnh báo: giá trị không hợp lệ cho wave", waveName)
     end
-end
+end)
 
--- Chạy
-main()
+debugPrint("Auto Skip đã sẵn sàng!")
