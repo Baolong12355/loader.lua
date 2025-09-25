@@ -1,5 +1,4 @@
---- START OF FILE rebuild.lua (Fixed Initialization Race Condition) ---
-
+-- START OF FILE rebuild.lua (with debugging)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -28,6 +27,7 @@ local defaultConfig = {
     ["SkipTowersAtAxis"] = {},
     ["SkipTowersByName"] = {},
     ["SkipTowersByLine"] = {},
+    ["EnableDebug"] = true, -- BẬT/TẮT DEBUG TẠI ĐÂY
 }
 
 local globalEnv = getGlobalEnv()
@@ -39,6 +39,14 @@ for key, value in pairs(defaultConfig) do
         globalEnv.TDX_Config[key] = value
     end
 end
+
+-- ================= DEBUGGING FUNCTION =================
+local function DebugLog(category, message)
+    if globalEnv.TDX_Config.EnableDebug then
+        print(string.format("[REBUILDER DEBUG | %s] [%s]: %s", os.date("%H:%M:%S"), category, message))
+    end
+end
+-- ======================================================
 
 local function getMaxAttempts()
     local placeMode = globalEnv.TDX_Config.PlaceMode or "Rewrite"
@@ -78,7 +86,10 @@ local function LoadTowerClass()
 end
 
 local TowerClass = LoadTowerClass()
-if not TowerClass then error("Không thể load TowerClass!") end
+if not TowerClass then
+    DebugLog("CRITICAL", "Không thể load TowerClass!")
+    error("Không thể load TowerClass!")
+end
 
 local function AddToRebuildCache(axisX) globalEnv.TDX_REBUILDING_TOWERS[axisX] = true end
 local function RemoveFromRebuildCache(axisX) globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil end
@@ -87,6 +98,7 @@ task.spawn(function()
     while task.wait(0.5) do
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower.Converted == true then
+                DebugLog("AUTO-SELL", string.format("Tower tại X=%.2f bị biến đổi, đang bán...", tower.SpawnCFrame.Position.X))
                 pcall(function() Remotes.SellTower:FireServer(hash) end)
                 task.wait(0.1)
             end
@@ -110,24 +122,25 @@ local function GetTowerByAxis(axisX)
     return GetTowerHashBySpawnX(axisX)
 end
 
--- CẬP NHẬT: Hàm chờ mới để đảm bảo tower đã sẵn sàng
 local function WaitForTowerInitialization(axisX, timeout)
     timeout = timeout or 5
     local startTime = tick()
     while tick() - startTime < timeout do
         local hash, tower = GetTowerByAxis(axisX)
-        -- Chờ cho đến khi tower tồn tại VÀ LevelHandler (để nâng cấp) đã được khởi tạo
         if hash and tower and tower.LevelHandler then
             return hash, tower
         end
         task.wait()
     end
-    return nil, nil -- Hết thời gian chờ
+    return nil, nil
 end
 
 local function WaitForCash(amount)
-    while cash.Value < amount do
-        RunService.Heartbeat:Wait()
+    if cash.Value < amount then
+        DebugLog("CASH-WAIT", string.format("Đang chờ %.0f cash (hiện có %.0f)", amount, cash.Value))
+        while cash.Value < amount do
+            RunService.Heartbeat:Wait()
+        end
     end
 end
 
@@ -142,9 +155,18 @@ end
 
 local function ShouldSkipTower(axisX, towerName, firstPlaceLine)
     local config = globalEnv.TDX_Config
-    if config.SkipTowersAtAxis and table.find(config.SkipTowersAtAxis, axisX) then return true end
-    if config.SkipTowersByName and table.find(config.SkipTowersByName, towerName) then return true end
-    if config.SkipTowersByLine and firstPlaceLine and table.find(config.SkipTowersByLine, firstPlaceLine) then return true end
+    if config.SkipTowersAtAxis and table.find(config.SkipTowersAtAxis, axisX) then 
+        DebugLog("SKIP", string.format("Bỏ qua tower tại X=%.2f do cấu hình SkipTowersAtAxis.", axisX))
+        return true 
+    end
+    if config.SkipTowersByName and table.find(config.SkipTowersByName, towerName) then 
+        DebugLog("SKIP", string.format("Bỏ qua tower '%s' tại X=%.2f do cấu hình SkipTowersByName.", towerName, axisX))
+        return true 
+    end
+    if config.SkipTowersByLine and firstPlaceLine and table.find(config.SkipTowersByLine, firstPlaceLine) then 
+        DebugLog("SKIP", string.format("Bỏ qua tower tại X=%.2f (dòng %d) do cấu hình SkipTowersByLine.", axisX, firstPlaceLine))
+        return true 
+    end
     return false
 end
 
@@ -164,21 +186,24 @@ local function PlaceTowerRetry(args, axisValue, towerName)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
     AddToRebuildCache(axisValue)
+    DebugLog("PLACE", string.format("Bắt đầu đặt tower '%s' tại X=%.2f.", towerName, axisValue))
     while attempts < maxAttempts do
         pcall(function()
             Remotes.PlaceTower:InvokeServer(unpack(args))
         end)
-        
-        -- CẬP NHẬT: Dùng hàm chờ mới để đảm bảo tower sẵn sàng hoàn toàn sau khi đặt
+
         local _, tower = WaitForTowerInitialization(axisValue, 3)
         if tower then
+            DebugLog("PLACE-SUCCESS", string.format("Đặt thành công '%s' tại X=%.2f sau %d lần thử.", towerName, axisValue, attempts + 1))
             RemoveFromRebuildCache(axisValue)
             return true
         end
-        
+
         attempts = attempts + 1
+        DebugLog("PLACE-RETRY", string.format("Thử lại đặt tower tại X=%.2f (lần %d/%d).", axisValue, attempts, maxAttempts))
         task.wait()
     end
+    DebugLog("PLACE-FAIL", string.format("Đặt thất bại '%s' tại X=%.2f sau %d lần thử.", towerName, axisValue, maxAttempts))
     RemoveFromRebuildCache(axisValue)
     return false
 end
@@ -188,9 +213,9 @@ local function UpgradeTowerRetry(axisValue, path)
     local attempts = 0
     AddToRebuildCache(axisValue)
     while attempts < maxAttempts do
-        -- CẬP NHẬT: Chờ tower sẵn sàng trước khi cố gắng nâng cấp
         local hash, tower = WaitForTowerInitialization(axisValue)
-        if not hash then 
+        if not hash then
+            DebugLog("UPGRADE-RETRY", string.format("Không tìm thấy tower tại X=%.2f để nâng cấp. Thử lại... (%d/%d)", axisValue, attempts + 1, maxAttempts))
             task.wait() 
             attempts = attempts + 1
             continue 
@@ -198,27 +223,32 @@ local function UpgradeTowerRetry(axisValue, path)
         local before = tower.LevelHandler:GetLevelOnPath(path)
         local cost = GetCurrentUpgradeCost(tower, path)
         if not cost then 
+            DebugLog("UPGRADE-SUCCESS", string.format("Tower tại X=%.2f đã đạt cấp tối đa cho đường %d.", axisValue, path))
             RemoveFromRebuildCache(axisValue)
             return true 
         end
+        DebugLog("UPGRADE", string.format("Bắt đầu nâng cấp tower tại X=%.2f (Path %d, Level %d -> %d, Cost: %d).", axisValue, path, before, before + 1, cost))
         WaitForCash(cost)
         pcall(function()
             Remotes.TowerUpgradeRequest:FireServer(hash, path, 1)
         end)
-        
+
         local startTime = tick()
         repeat
             task.wait(0.1)
             local _, t = GetTowerByAxis(axisValue)
             if t and t.LevelHandler and t.LevelHandler:GetLevelOnPath(path) > before then 
+                DebugLog("UPGRADE-SUCCESS", string.format("Nâng cấp thành công tower tại X=%.2f (Path %d, Level %d).", axisValue, path, t.LevelHandler:GetLevelOnPath(path)))
                 RemoveFromRebuildCache(axisValue)
                 return true 
             end
         until tick() - startTime > 3
-        
+
         attempts = attempts + 1
+        DebugLog("UPGRADE-RETRY", string.format("Nâng cấp chưa xác nhận tại X=%.2f. Thử lại... (%d/%d)", axisValue, attempts, maxAttempts))
         task.wait()
     end
+    DebugLog("UPGRADE-FAIL", string.format("Nâng cấp thất bại tại X=%.2f sau %d lần thử.", axisValue, maxAttempts))
     RemoveFromRebuildCache(axisValue)
     return false
 end
@@ -227,24 +257,25 @@ local function ChangeTargetRetry(axisValue, targetType)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
     AddToRebuildCache(axisValue)
+    DebugLog("TARGET", string.format("Bắt đầu đổi mục tiêu cho tower tại X=%.2f thành %d.", axisValue, targetType))
     while attempts < maxAttempts do
         local hash = GetTowerByAxis(axisValue)
         if hash then
             pcall(function()
                 Remotes.ChangeQueryType:FireServer(hash, targetType)
             end)
+            DebugLog("TARGET-SUCCESS", string.format("Gửi yêu cầu đổi mục tiêu cho tower tại X=%.2f.", axisValue))
             RemoveFromRebuildCache(axisValue)
             return
         end
         attempts = attempts + 1
         task.wait(0.1)
     end
+    DebugLog("TARGET-FAIL", string.format("Không tìm thấy tower tại X=%.2f để đổi mục tiêu.", axisValue))
     RemoveFromRebuildCache(axisValue)
 end
 
--- CẬP NHẬT: Sửa đổi để sử dụng hàm chờ mới
 local function HasSkill(axisValue, skillIndex)
-    -- Chờ tower sẵn sàng để đảm bảo AbilityHandler tồn tại
     local hash, tower = WaitForTowerInitialization(axisValue)
     if not hash or not tower or not tower.AbilityHandler then
         return false
@@ -253,32 +284,39 @@ local function HasSkill(axisValue, skillIndex)
     return ability ~= nil
 end
 
--- CẬP NHẬT: Sửa đổi để sử dụng hàm chờ mới
 local function UseMovingSkillRetry(axisValue, skillIndex, location)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
     local TowerUseAbilityRequest = Remotes:FindFirstChild("TowerUseAbilityRequest")
-    if not TowerUseAbilityRequest then return false end
+    if not TowerUseAbilityRequest then 
+        DebugLog("SKILL-FAIL", "Không tìm thấy RemoteEvent 'TowerUseAbilityRequest'.")
+        return false 
+    end
     local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
     AddToRebuildCache(axisValue)
+    DebugLog("SKILL", string.format("Bắt đầu sử dụng kỹ năng #%d cho tower tại X=%.2f.", skillIndex, axisValue))
 
     while attempts < maxAttempts do
-        -- Chờ tower sẵn sàng trước khi cố gắng dùng skill
         local hash, tower = WaitForTowerInitialization(axisValue)
         if hash and tower then
             if not tower.AbilityHandler then
+                DebugLog("SKILL-FAIL", string.format("Tower tại X=%.2f không có AbilityHandler.", axisValue))
                 RemoveFromRebuildCache(axisValue)
                 return false
             end
 
             local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
             if not ability then
+                DebugLog("SKILL-FAIL", string.format("Không tìm thấy kỹ năng #%d cho tower tại X=%.2f.", skillIndex, axisValue))
                 RemoveFromRebuildCache(axisValue)
                 return false
             end
 
             local cooldown = ability.CooldownRemaining or 0
-            if cooldown > 0 then task.wait(cooldown + 0.1) end
+            if cooldown > 0 then 
+                DebugLog("SKILL-WAIT", string.format("Kỹ năng #%d đang hồi (%.1fs). Đang chờ...", skillIndex, cooldown))
+                task.wait(cooldown + 0.1) 
+            end
 
             local success = false
             if location == "no_pos" then
@@ -297,13 +335,16 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
                 end
             end
             if success then
+                DebugLog("SKILL-SUCCESS", string.format("Sử dụng thành công kỹ năng #%d cho tower tại X=%.2f.", skillIndex, axisValue))
                 RemoveFromRebuildCache(axisValue)
                 return true
             end
         end
         attempts = attempts + 1
+        DebugLog("SKILL-RETRY", string.format("Thử lại dùng kỹ năng tại X=%.2f (lần %d/%d).", axisValue, attempts, maxAttempts))
         task.wait(0.1)
     end
+    DebugLog("SKILL-FAIL", string.format("Sử dụng kỹ năng thất bại tại X=%.2f sau %d lần thử.", axisValue, maxAttempts))
     RemoveFromRebuildCache(axisValue)
     return false
 end
@@ -331,12 +372,16 @@ local function RebuildTowerSequence(records)
                 rebuildSuccess = false
             end
         end
+    else
+        DebugLog("SEQUENCE-ERROR", "Không tìm thấy bản ghi 'Place' cho chuỗi xây dựng lại.")
+        rebuildSuccess = false -- Không có bản ghi đặt trụ thì không thể tiếp tục
     end
 
     if rebuildSuccess and #movingRecords > 0 then
         task.spawn(function()
             local lastMovingRecord = movingRecords[#movingRecords]
             local entry = lastMovingRecord.entry
+            DebugLog("SEQUENCE-SKILL", string.format("Chờ để sử dụng kỹ năng di chuyển cho tower tại X=%.2f.", entry.towermoving))
             while not HasSkill(entry.towermoving, entry.skillindex) do
                 RunService.Heartbeat:Wait()
             end
@@ -364,6 +409,7 @@ local function RebuildTowerSequence(records)
         end
     end
 
+    DebugLog("SEQUENCE-COMPLETE", string.format("Chuỗi xây dựng lại hoàn tất với kết quả: %s.", tostring(rebuildSuccess)))
     return rebuildSuccess
 end
 
@@ -385,6 +431,7 @@ task.spawn(function()
             while true do
                 if #jobQueue > 0 then
                     local job = table.remove(jobQueue, 1)
+                    DebugLog("WORKER", string.format("Worker bắt đầu xử lý job cho tower '%s' tại X=%.2f.", job.towerName, job.x))
                     if not ShouldSkipTower(job.x, job.towerName, job.firstPlaceLine) then
                         if RebuildTowerSequence(job.records) then
                             rebuildAttempts[job.x] = 0
@@ -395,6 +442,7 @@ task.spawn(function()
                         clearTowerDeath(job.x)
                     end
                     activeJobs[job.x] = nil
+                    DebugLog("WORKER", string.format("Worker hoàn thành job cho X=%.2f.", job.x))
                 else
                     RunService.Heartbeat:Wait()
                 end
@@ -402,6 +450,7 @@ task.spawn(function()
         end)
     end
 
+    DebugLog("INIT", string.format("Khởi tạo %d workers.", globalEnv.TDX_Config.MaxConcurrentRebuilds))
     for i = 1, globalEnv.TDX_Config.MaxConcurrentRebuilds do RebuildWorker() end
 
     while true do
@@ -409,6 +458,7 @@ task.spawn(function()
         if macroContent and #macroContent > 10 then
             local macroHash = #macroContent .. "|" .. macroContent:sub(1, 50)
             if macroHash ~= lastMacroHash then
+                DebugLog("MACRO", "Phát hiện thay đổi trong tệp macro. Đang tải lại...")
                 lastMacroHash = macroHash
                 local ok, macro = pcall(HttpService.JSONDecode, HttpService, macroContent)
                 if ok and type(macro) == "table" then
@@ -425,6 +475,9 @@ task.spawn(function()
                             table.insert(towersByAxis[x], {line = i, entry = entry})
                         end
                     end
+                    DebugLog("MACRO", string.format("Tải thành công macro. Tìm thấy dữ liệu cho %d vị trí tower.", #towersByAxis))
+                else
+                    DebugLog("MACRO-ERROR", "Lỗi khi phân tích cú pháp JSON từ tệp macro.")
                 end
             end
         end
@@ -439,7 +492,7 @@ task.spawn(function()
         local jobsAdded = false
         for x, records in pairs(towersByAxis) do
             if not globalEnv.TDX_Config.ForceRebuildEvenIfSold and soldAxis[x] then
-                -- Skip
+                -- Bỏ qua vì tower đã được bán trong macro
             elseif not existingTowersCache[x] then
                 if not activeJobs[x] then
                     recordTowerDeath(x)
@@ -455,6 +508,7 @@ task.spawn(function()
                         rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
                         local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
                         if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                            DebugLog("MAIN-LOOP", string.format("Phát hiện tower '%s' bị thiếu tại X=%.2f. Thêm vào hàng đợi xây dựng lại.", towerType, x))
                             activeJobs[x] = true
                             table.insert(jobQueue, { 
                                 x = x, records = records, priority = GetTowerPriority(towerType),
@@ -462,6 +516,8 @@ task.spawn(function()
                                 towerName = towerType, firstPlaceLine = firstPlaceLine
                             })
                             jobsAdded = true
+                        else
+                            DebugLog("MAIN-LOOP", string.format("Đã đạt giới hạn thử lại cho tower tại X=%.2f. Sẽ không xây lại nữa.", x))
                         end
                     end
                 end
@@ -470,13 +526,18 @@ task.spawn(function()
                 if activeJobs[x] then
                     activeJobs[x] = nil
                     for i = #jobQueue, 1, -1 do
-                        if jobQueue[i].x == x then table.remove(jobQueue, i); break end
+                        if jobQueue[i].x == x then 
+                            DebugLog("MAIN-LOOP", string.format("Tower tại X=%.2f đã tồn tại. Xóa job đang chờ khỏi hàng đợi.", x))
+                            table.remove(jobQueue, i); 
+                            break 
+                        end
                     end
                 end
             end
         end
 
         if jobsAdded and #jobQueue > 1 then
+            DebugLog("QUEUE", "Sắp xếp lại hàng đợi theo độ ưu tiên và thời gian bị phá hủy.")
             table.sort(jobQueue, function(a, b) 
                 if a.priority == b.priority then return a.deathTime < b.deathTime end
                 return a.priority < b.priority 
