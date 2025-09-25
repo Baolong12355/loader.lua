@@ -1,4 +1,4 @@
--- START OF FILE rebuild.lua (v1.2 - Fixed nil call error)
+-- START OF FILE rebuild.lua (v1.3 - Patched Upgrade Confirmation Logic)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -7,7 +7,7 @@ local player = Players.LocalPlayer
 local cash = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
-local macroPath = "tdx/macros/endless.json"
+local macroPath = "tdx/macros/recorder_output.json"
 
 -- Universal compatibility functions
 local function getGlobalEnv()
@@ -18,7 +18,7 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["MaxConcurrentRebuilds"] = 5, -- Giảm giá trị này nếu gặp vấn đề về hiệu năng
+    ["MaxConcurrentRebuilds"] = 5, -- Giảm giá trị này nếu gặp vấn đề về hiệu năng hoặc mạng lag
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
@@ -54,7 +54,7 @@ local function SuperDebugLog(category, message)
 end
 -- ======================================================
 
--- ================= HELPER FUNCTIONS (FIX) =============
+-- ================= HELPER FUNCTIONS ===================
 local function getTableKeys(tbl)
     local keys = {}
     if type(tbl) ~= "table" then return keys end
@@ -234,50 +234,67 @@ local function PlaceTowerRetry(args, axisValue, towerName)
     return false
 end
 
+-- =================================================================
+-- HÀM UPGRADE ĐÃ ĐƯỢC SỬA LỖI
+-- =================================================================
 local function UpgradeTowerRetry(axisValue, path)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
     AddToRebuildCache(axisValue)
+
     while attempts < maxAttempts do
-        local hash, tower = WaitForTowerInitialization(axisValue)
-        if not hash then
-            DebugLog("UPGRADE-RETRY", string.format("Không tìm thấy tower tại X=%.2f để nâng cấp. Thử lại... (%d/%d)", axisValue, attempts + 1, maxAttempts))
-            task.wait() 
+        -- Bước 1: Chờ và lấy thông tin tower
+        local hash, tower = WaitForTowerInitialization(axisValue, 3) 
+        if not tower then
+            DebugLog("UPGRADE-ERROR", string.format("Không tìm thấy tower tại X=%.2f để nâng cấp (Lần thử %d/%d)", axisValue, attempts + 1, maxAttempts))
             attempts = attempts + 1
-            continue 
+            task.wait(0.5)
+            goto continue -- Sử dụng goto để nhảy đến cuối vòng lặp và thử lại
         end
-        local before = tower.LevelHandler:GetLevelOnPath(path)
+
+        local levelBefore = tower.LevelHandler:GetLevelOnPath(path)
+        
+        -- Bước 2: Kiểm tra xem có cần nâng cấp không và lấy chi phí
         local cost = GetCurrentUpgradeCost(tower, path)
         if not cost then 
-            DebugLog("UPGRADE-SUCCESS", string.format("Tower tại X=%.2f đã đạt cấp tối đa cho đường %d.", axisValue, path))
+            DebugLog("UPGRADE-DONE", string.format("Tower tại X=%.2f đã đạt cấp tối đa (Path %d).", axisValue, path))
             RemoveFromRebuildCache(axisValue)
-            return true 
+            return true -- Thành công, vì đã max level
         end
-        DebugLog("UPGRADE", string.format("Bắt đầu nâng cấp tower tại X=%.2f (Path %d, Level %d -> %d, Cost: %d).", axisValue, path, before, before + 1, cost))
+
+        DebugLog("UPGRADE-ATTEMPT", string.format("Thử nâng cấp tower tại X=%.2f (Path %d, Level %d -> %d, Cost: %d) [Lần %d/%d]", axisValue, path, levelBefore, levelBefore + 1, cost, attempts + 1, maxAttempts))
+
+        -- Bước 3: Chờ tiền và gửi yêu cầu nâng cấp
         WaitForCash(cost)
-        pcall(function()
-            Remotes.TowerUpgradeRequest:FireServer(hash, path, 1)
-        end)
+        pcall(function() Remotes.TowerUpgradeRequest:FireServer(hash, path, 1) end)
 
+        -- Bước 4: Vòng lặp xác nhận (quan trọng nhất)
+        local confirmationTimeout = 5 -- Tăng thời gian chờ lên 5 giây
         local startTime = tick()
-        repeat
-            task.wait(0.1)
-            local _, t = GetTowerByAxis(axisValue)
-            if t and t.LevelHandler and t.LevelHandler:GetLevelOnPath(path) > before then 
-                DebugLog("UPGRADE-SUCCESS", string.format("Nâng cấp thành công tower tại X=%.2f (Path %d, Level %d).", axisValue, path, t.LevelHandler:GetLevelOnPath(path)))
+        while tick() - startTime < confirmationTimeout do
+            local _, currentTower = GetTowerByAxis(axisValue) 
+            if currentTower and currentTower.LevelHandler and currentTower.LevelHandler:GetLevelOnPath(path) > levelBefore then
+                DebugLog("UPGRADE-SUCCESS", string.format("Xác nhận nâng cấp thành công tại X=%.2f (Path %d, Level %d)", axisValue, path, currentTower.LevelHandler:GetLevelOnPath(path)))
                 RemoveFromRebuildCache(axisValue)
-                return true 
+                return true -- Đây là điểm thoát duy nhất khi thành công
             end
-        until tick() - startTime > 3
-
+            task.wait(0.1)
+        end
+        
+        -- Bước 5: Nếu xác nhận thất bại, ghi log và để vòng lặp chạy lại
+        DebugLog("UPGRADE-RETRY", string.format("Không nhận được xác nhận nâng cấp cho tower tại X=%.2f sau %d giây. Đang thử lại...", axisValue, confirmationTimeout))
         attempts = attempts + 1
-        DebugLog("UPGRADE-RETRY", string.format("Nâng cấp chưa xác nhận tại X=%.2f. Thử lại... (%d/%d)", axisValue, attempts, maxAttempts))
-        task.wait()
+        task.wait(0.2) -- Chờ một chút trước khi thử lại
+
+        ::continue:: -- Nhãn cho goto
     end
-    DebugLog("UPGRADE-FAIL", string.format("Nâng cấp thất bại tại X=%.2f sau %d lần thử.", axisValue, maxAttempts))
+    
+    -- Nếu tất cả các lần thử đều thất bại
+    DebugLog("UPGRADE-FAIL", string.format("Nâng cấp thất bại hoàn toàn tại X=%.2f sau %d lần thử.", axisValue, maxAttempts))
     RemoveFromRebuildCache(axisValue)
     return false
 end
+-- =================================================================
 
 local function ChangeTargetRetry(axisValue, targetType)
     local maxAttempts = getMaxAttempts()
