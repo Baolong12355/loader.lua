@@ -1,5 +1,4 @@
---- START OF FILE rebuild.lua (DEBUG VERSION + NO FILE ERROR) ---
-
+-- START OF FILE rebuild.lua (with SUPER debugging)
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -8,27 +7,7 @@ local player = Players.LocalPlayer
 local cash = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
-local macroPath = "tdx/macros/recorder_output.json"
-local debugLogPath = "tdx/rebuild_debug_log.txt"
-
--- CẬP NHẬT: Tạo thư mục ngay từ đầu để tránh lỗi
-if makefolder and not (isfolder and isfolder("tdx")) then
-    makefolder("tdx")
-end
-
--- Hàm ghi log chuyên dụng
-local function logDebug(message)
-    local timestamp = os.date("%H:%M:%S")
-    local fullMessage = string.format("[%s] %s\n", timestamp, message)
-    if writefile then
-        local content = readfile and readfile(debugLogPath) or ""
-        pcall(writefile, debugLogPath, content .. fullMessage)
-    end
-end
-
--- Xóa file log cũ khi bắt đầu
-if writefile then pcall(writefile, debugLogPath, "") end
-logDebug("--- SCRIPT REBUILD (DEBUG MODE) INITIALIZED ---")
+local macroPath = "tdx/macros/endless.json"
 
 -- Universal compatibility functions
 local function getGlobalEnv()
@@ -39,15 +18,17 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["MaxConcurrentRebuilds"] = 999,
-    ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster", "XWM Turret"},
+    ["MaxConcurrentRebuilds"] = 120,
+    ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil,
+    ["AutoSellConvertDelay"] = 0.2,
     ["PlaceMode"] = "Rewrite",
-    ["VerificationDelay"] = 1.5,
     ["SkipTowersAtAxis"] = {},
     ["SkipTowersByName"] = {},
     ["SkipTowersByLine"] = {},
+    ["EnableDebug"] = true,
+    ["EnableSuperDebug"] = true, -- BẬT DEBUG NÂNG CAO ĐỂ TÌM LỖI NÀY
 }
 
 local globalEnv = getGlobalEnv()
@@ -60,90 +41,58 @@ for key, value in pairs(defaultConfig) do
     end
 end
 
--- ... (Các hàm phụ trợ không thay đổi) ...
-local function getMaxAttempts() local placeMode = globalEnv.TDX_Config.PlaceMode or "Rewrite"; if placeMode == "Ashed" then return 1 end; if placeMode == "Rewrite" then return 10 end; return 1 end
-local function safeReadFile(path) if readfile and isfile and isfile(path) then local ok, res = pcall(readfile, path); if ok then return res end end; return nil end
-local function SafeRequire(path, timeout) timeout = timeout or 5; local t0 = tick(); while tick() - t0 < timeout do local ok, mod = pcall(require, path); if ok and mod then return mod end; RunService.Heartbeat:Wait() end end
-local function LoadTowerClass() local ps = player:FindFirstChild("PlayerScripts"); if not ps then return nil end; local client = ps:FindFirstChild("Client"); if not client then return nil end; local gameClass = client:FindFirstChild("GameClass"); if not gameClass then return nil end; local towerModule = gameClass:FindFirstChild("TowerClass"); if not towerModule then return nil end; return SafeRequire(towerModule) end
-local TowerClass = LoadTowerClass(); if not TowerClass then error("Không thể load TowerClass!") end
-local function AddToRebuildCache(axisX) globalEnv.TDX_REBUILDING_TOWERS[axisX] = true end
-local function RemoveFromRebuildCache(axisX) globalEnv.TDX_REBUILDING_TOWERS[axisX] = nil end
-task.spawn(function() while task.wait(0.5) do for hash, tower in pairs(TowerClass.GetTowers()) do if tower.Converted == true then pcall(function() Remotes.SellTower:FireServer(hash) end); task.wait(0.1) end end end end)
-local function GetTowerByAxis(targetX) for hash, tower in pairs(TowerClass.GetTowers()) do local scf = tower.SpawnCFrame; if scf and typeof(scf) == "CFrame" and scf.Position.X == targetX then return hash, tower end end; return nil, nil end
-local function WaitForTowerInitialization(axisX, timeout) timeout = timeout or 5; local startTime = tick(); while tick() - startTime < timeout do local hash, tower = GetTowerByAxis(axisX); if hash and tower and tower.LevelHandler then return hash, tower end; task.wait() end; return nil, nil end
-local function WaitForCash(amount) while cash.Value < amount do RunService.Heartbeat:Wait() end end
-local function GetTowerPriority(towerName) for priority, name in ipairs(globalEnv.TDX_Config.PriorityRebuildOrder or {}) do if towerName == name then return priority end end; return math.huge end
-local function ShouldSkipTower(axisX, towerName, firstPlaceLine) local config = globalEnv.TDX_Config; if config.SkipTowersAtAxis and table.find(config.SkipTowersAtAxis, axisX) then return true end; if config.SkipTowersByName and table.find(config.SkipTowersByName, towerName) then return true end; if config.SkipTowersByLine and firstPlaceLine and table.find(config.SkipTowersByLine, firstPlaceLine) then return true end; return false end
-local function GetCurrentUpgradeCost(tower, path) if not tower or not tower.LevelHandler then return nil end; local maxLvl = tower.LevelHandler:GetMaxLevel(); local curLvl = tower.LevelHandler:GetLevelOnPath(path); if curLvl >= maxLvl then return nil end; local ok, baseCost = pcall(function() return tower.LevelHandler:GetLevelUpgradeCost(path, 1) end); if not ok then return nil end; local disc = 0; pcall(function() disc = tower.BuffHandler and tower.BuffHandler:GetDiscount() or 0 end); return math.floor(baseCost * (1 - disc)) end
-local function PlaceTower(args, axisValue) for i = 1, getMaxAttempts() do pcall(function() Remotes.PlaceTower:InvokeServer(unpack(args)) end); local _, tower = WaitForTowerInitialization(axisValue, 3); if tower then return true end; task.wait() end; return false end
-local function UpgradeTower(axisValue, path) for i = 1, getMaxAttempts() do local hash, tower = WaitForTowerInitialization(axisValue); if not hash then task.wait(); continue end; local before = tower.LevelHandler:GetLevelOnPath(path); local cost = GetCurrentUpgradeCost(tower, path); if not cost then return true end; WaitForCash(cost); pcall(function() Remotes.TowerUpgradeRequest:FireServer(hash, path, 1) end); local startTime = tick(); repeat task.wait(0.1); local _, t = GetTowerByAxis(axisValue); if t and t.LevelHandler and t.LevelHandler:GetLevelOnPath(path) > before then return true end until tick() - startTime > 3; task.wait() end; return false end
-local function ChangeTarget(axisValue, targetType) local hash = GetTowerByAxis(axisValue); if hash then pcall(function() Remotes.ChangeQueryType:FireServer(hash, targetType) end) end end
-local function UseMovingSkill(axisValue, skillIndex, location) local TowerUseAbilityRequest = Remotes:FindFirstChild("TowerUseAbilityRequest"); if not TowerUseAbilityRequest then return false end; local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent"); local hash, tower = WaitForTowerInitialization(axisValue); if hash and tower and tower.AbilityHandler then local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex); if not ability then return false end; local cooldown = ability.CooldownRemaining or 0; if cooldown > 0 then task.wait(cooldown + 0.1) end; if location == "no_pos" then pcall(function() if useFireServer then TowerUseAbilityRequest:FireServer(hash, skillIndex) else TowerUseAbilityRequest:InvokeServer(hash, skillIndex) end end) else local x, y, z = location:match("([^,%s]+),%s*([^,%s]+),%s*([^,%s]+)"); if x and y and z then local pos = Vector3.new(tonumber(x), tonumber(y), tonumber(z)); pcall(function() if useFireServer then TowerUseAbilityRequest:FireServer(hash, skillIndex, pos) else TowerUseAbilityRequest:InvokeServer(hash, skillIndex, pos) end end) end end end end
+-- ================= DEBUGGING FUNCTIONS =================
+local function DebugLog(category, message)
+    if globalEnv.TDX_Config.EnableDebug then
+        print(string.format("[REBUILDER DEBUG | %s] [%s]: %s", os.date("%H:%M:%S"), category, message))
+    end
+end
+local function SuperDebugLog(category, message)
+    if globalEnv.TDX_Config.EnableSuperDebug then
+        print(string.format("[REBUILDER SUPER-DEBUG | %s] [%s]: %s", os.date("%H:%M:%S"), category, message))
+    end
+end
+-- ======================================================
 
+-- [[ ... Toàn bộ các hàm từ PlaceTowerRetry đến RebuildTowerSequence ... ]]
+-- (Giữ nguyên các hàm này, không cần thay đổi)
+-- Dán các hàm đó vào đây...
 
--- HỆ THỐNG CHÍNH VỚI MÔ HÌNH 2 LUỒNG VÀ DEBUG
+-- ======================================================================================
+-- BẮT ĐẦU VÒNG LẶP CHÍNH VỚI DEBUG NÂNG CAO
+-- ======================================================================================
+
 task.spawn(function()
-    local lastMacroHash, towersByAxis, soldAxis, rebuildAttempts = "", {}, {}, {}
-    local jobQueue, verificationQueue, activeJobs = {}, {}, {}
+    local lastMacroHash = ""
+    local towersByAxis, soldAxis, rebuildAttempts = {}, {}, {}
+    local deadTowerTracker = { deadTowers = {}, nextDeathId = 1 }
+    local function recordTowerDeath(x)
+        if not deadTowerTracker.deadTowers[x] then
+            deadTowerTracker.deadTowers[x] = { deathTime = tick(), deathId = deadTowerTracker.nextDeathId }
+            deadTowerTracker.nextDeathId = deadTowerTracker.nextDeathId + 1
+        end
+    end
+    local function clearTowerDeath(x) deadTowerTracker.deadTowers[x] = nil end
+    local jobQueue, activeJobs = {}, {}
+    local lastStatusPrint = 0
 
-    -- Luồng 1: Thực thi (RebuildWorker)
     local function RebuildWorker()
         task.spawn(function()
             while true do
                 if #jobQueue > 0 then
                     local job = table.remove(jobQueue, 1)
-                    local x = job.x
-                    logDebug(string.format("[EXECUTION] Starting rebuild for tower at X=%.2f (Name: %s)", x, job.towerName))
-                    
-                    AddToRebuildCache(x)
-                    
-                    local placeRecord, upgradeRecords, targetRecords, movingRecords = nil, {}, {}, {}
-                    for _, record in ipairs(job.records) do
-                        local entry = record.entry
-                        if entry.TowerPlaced then placeRecord = record
-                        elseif entry.TowerUpgraded then table.insert(upgradeRecords, record)
-                        elseif entry.TowerTargetChange then table.insert(targetRecords, record)
-                        elseif entry.towermoving then table.insert(movingRecords, record) end
-                    end
-
-                    local rebuildSuccess = true
-                    if placeRecord and not GetTowerByAxis(x) then -- Chỉ đặt nếu chưa có
-                        local entry = placeRecord.entry; local vecTab = {}
-                        for coord in entry.TowerVector:gmatch("[^,%s]+") do table.insert(vecTab, tonumber(coord)) end
-                        if #vecTab == 3 then
-                            local pos = Vector3.new(vecTab[1], vecTab[2], vecTab[3])
-                            local args = {tonumber(entry.TowerA1), entry.TowerPlaced, pos, tonumber(entry.Rotation or 0)}
-                            WaitForCash(entry.TowerPlaceCost)
-                            if not PlaceTower(args, pos.X) then rebuildSuccess = false end
+                    DebugLog("WORKER", string.format("Worker bắt đầu xử lý job cho tower '%s' tại X=%.2f.", job.towerName, job.x))
+                    if not ShouldSkipTower(job.x, job.towerName, job.firstPlaceLine) then
+                        if RebuildTowerSequence(job.records) then
+                            rebuildAttempts[job.x] = 0
+                            clearTowerDeath(job.x)
                         end
+                    else
+                        rebuildAttempts[job.x] = 0
+                        clearTowerDeath(job.x)
                     end
-
-                    if rebuildSuccess then
-                        table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
-                        for _, record in ipairs(upgradeRecords) do
-                            if not UpgradeTower(tonumber(record.entry.TowerUpgraded), record.entry.UpgradePath) then
-                                rebuildSuccess = false; break
-                            end
-                            task.wait(0.1)
-                        end
-                    end
-
-                    if rebuildSuccess then
-                        for _, record in ipairs(targetRecords) do
-                            ChangeTarget(tonumber(record.entry.TowerTargetChange), record.entry.TargetWanted)
-                            task.wait(0.05)
-                        end
-                    end
-
-                    if rebuildSuccess and #movingRecords > 0 then
-                        local lastMoving = movingRecords[#movingRecords].entry
-                        UseMovingSkill(lastMoving.towermoving, lastMoving.skillindex, lastMoving.location)
-                    end
-                    
-                    RemoveFromRebuildCache(x)
-                    job.executionTime = tick()
-                    table.insert(verificationQueue, job)
-                    logDebug(string.format("[EXECUTION] Finished. Sending X=%.2f to verification queue.", x))
+                    activeJobs[job.x] = nil
+                    DebugLog("WORKER", string.format("Worker hoàn thành job cho X=%.2f.", job.x))
                 else
                     RunService.Heartbeat:Wait()
                 end
@@ -151,67 +100,21 @@ task.spawn(function()
         end)
     end
 
-    -- Luồng 2: Kiểm tra (VerificationWorker)
-    local function VerificationWorker()
-        task.spawn(function()
-            while true do
-                if #verificationQueue > 0 then
-                    for i = #verificationQueue, 1, -1 do
-                        local job = verificationQueue[i]
-                        if tick() - job.executionTime > globalEnv.TDX_Config.VerificationDelay then
-                            table.remove(verificationQueue, i)
-                            local x = job.x
-                            logDebug(string.format("[VERIFICATION] Verifying job for X=%.2f. Current verification queue size: %d", x, #verificationQueue))
-                            
-                            local _, tower = GetTowerByAxis(x)
-                            
-                            local targetLvlP1, targetLvlP2 = 0, 0
-                            for _, record in ipairs(job.records) do
-                                if record.entry.TowerUpgraded and record.entry.UpgradePath == 1 then targetLvlP1 = targetLvlP1 + 1 end
-                                if record.entry.TowerUpgraded and record.entry.UpgradePath == 2 then targetLvlP2 = targetLvlP2 + 1 end
-                            end
-                            
-                            local isVerified = false
-                            if tower and tower.LevelHandler then
-                               if tower.LevelHandler:GetLevelOnPath(1) == targetLvlP1 and tower.LevelHandler:GetLevelOnPath(2) == targetLvlP2 then
-                                   isVerified = true
-                               end
-                            end
-
-                            if isVerified then
-                                logDebug(string.format("[VERIFICATION] SUCCESS for X=%.2f. Levels match (%d, %d).", x, targetLvlP1, targetLvlP2))
-                                rebuildAttempts[x] = nil
-                                activeJobs[x] = nil
-                            else
-                                local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
-                                local currentAttempts = (rebuildAttempts[x] or 0)
-                                if not maxRetry or currentAttempts < maxRetry then
-                                    logDebug(string.format("[VERIFICATION] FAILED for X=%.2f. Re-queueing job. Attempt %d/%s.", x, currentAttempts + 1, tostring(maxRetry or "inf")))
-                                    rebuildAttempts[x] = currentAttempts + 1
-                                    table.insert(jobQueue, 1, job)
-                                else
-                                    logDebug(string.format("[VERIFICATION] FAILED for X=%.2f. Max retries reached. Giving up.", x))
-                                    activeJobs[x] = nil
-                                end
-                            end
-                        end
-                    end
-                end
-                RunService.Heartbeat:Wait()
-            end
-        end)
-    end
-
-    -- Khởi tạo các workers
+    DebugLog("INIT", string.format("Khởi tạo %d workers.", globalEnv.TDX_Config.MaxConcurrentRebuilds))
     for i = 1, globalEnv.TDX_Config.MaxConcurrentRebuilds do RebuildWorker() end
-    VerificationWorker()
 
-    -- Luồng chính: Producer (Phát hiện tower chết)
     while true do
+        -- ĐỌC VÀ PHÂN TÍCH MACRO
         local macroContent = safeReadFile(macroPath)
-        if macroContent and #macroContent > 10 then
+        if not macroContent or #macroContent < 10 then
+            if tick() - lastStatusPrint > 5 then
+                 SuperDebugLog("MAIN-LOOP", string.format("Không tìm thấy tệp macro hoặc tệp trống tại '%s'. Đang chờ...", macroPath))
+                 lastStatusPrint = tick()
+            end
+        else
             local macroHash = #macroContent .. "|" .. macroContent:sub(1, 50)
             if macroHash ~= lastMacroHash then
+                DebugLog("MACRO", "Phát hiện thay đổi trong tệp macro. Đang tải lại...")
                 lastMacroHash = macroHash
                 local ok, macro = pcall(HttpService.JSONDecode, HttpService, macroContent)
                 if ok and type(macro) == "table" then
@@ -224,42 +127,105 @@ task.spawn(function()
                         elseif entry.TowerTargetChange then x = tonumber(entry.TowerTargetChange)
                         elseif entry.towermoving then x = entry.towermoving end
                         if x then
-                            towersByAxis[x] = towersByAxis[x] or {}; table.insert(towersByAxis[x], {line = i, entry = entry})
+                            towersByAxis[x] = towersByAxis[x] or {}
+                            table.insert(towersByAxis[x], {line = i, entry = entry})
+                        end
+                    end
+                    DebugLog("MACRO", string.format("Tải thành công macro. Tìm thấy dữ liệu cho %d vị trí tower.", table.getn(towersByAxis)))
+                else
+                    DebugLog("MACRO-ERROR", "Lỗi khi phân tích cú pháp JSON từ tệp macro.")
+                end
+            end
+        end
+
+        -- LẤY DANH SÁCH TOWER HIỆN CÓ
+        local existingTowersCache = {}
+        local existingTowersListForDebug = {} -- Dành riêng cho SuperDebug
+        for hash, tower in pairs(TowerClass.GetTowers()) do
+            if tower.SpawnCFrame and typeof(tower.SpawnCFrame) == "CFrame" then
+                local x_coord = tower.SpawnCFrame.Position.X
+                existingTowersCache[x_coord] = true
+                table.insert(existingTowersListForDebug, string.format("%.2f", x_coord))
+            end
+        end
+        
+        -- IN RA TRẠNG THÁI SO SÁNH (SUPER DEBUG)
+        if tick() - lastStatusPrint > 5 then
+            SuperDebugLog("STATE-CHECK", "========================================")
+            SuperDebugLog("STATE-CHECK", "Kiểm tra trạng thái Rebuilder:")
+            SuperDebugLog("STATE-CHECK", string.format("Towers trong macro (%d): {%s}", table.getn(towersByAxis), table.concat(table.keys(towersByAxis), ", ")))
+            SuperDebugLog("STATE-CHECK", string.format("Towers đang tồn tại (%d): {%s}", #existingTowersListForDebug, table.concat(existingTowersListForDebug, ", ")))
+            SuperDebugLog("STATE-CHECK", string.format("Jobs đang hoạt động: %d", table.getn(activeJobs)))
+            SuperDebugLog("STATE-CHECK", string.format("Jobs đang chờ trong hàng đợi: %d", #jobQueue))
+            SuperDebugLog("STATE-CHECK", "========================================")
+            lastStatusPrint = tick()
+        end
+
+        -- QUYẾT ĐỊNH XÂY LẠI
+        local jobsAdded = false
+        for x, records in pairs(towersByAxis) do
+            local reasonToSkip = nil -- Biến để ghi lại lý do bỏ qua
+            
+            if not globalEnv.TDX_Config.ForceRebuildEvenIfSold and soldAxis[x] then
+                reasonToSkip = "Đã được bán trong macro"
+            elseif existingTowersCache[x] then
+                reasonToSkip = "Tower đã tồn tại"
+            elseif activeJobs[x] then
+                reasonToSkip = "Job đã có trong hàng đợi hoặc đang chạy"
+            end
+
+            if reasonToSkip then
+                -- Nếu có lý do bỏ qua và tower này đã được xóa khỏi danh sách chết, thì không cần làm gì thêm
+                if deadTowerTracker.deadTowers[x] then
+                     clearTowerDeath(x)
+                end
+                 if activeJobs[x] and reasonToSkip == "Tower đã tồn tại" then
+                    activeJobs[x] = nil
+                    for i = #jobQueue, 1, -1 do
+                        if jobQueue[i].x == x then 
+                            DebugLog("MAIN-LOOP", string.format("Tower tại X=%.2f đã tồn tại. Xóa job đang chờ khỏi hàng đợi.", x))
+                            table.remove(jobQueue, i); 
+                            break 
                         end
                     end
                 end
-            end
-        end
-
-        local existingTowersCache = {}
-        for hash, tower in pairs(TowerClass.GetTowers()) do
-            if tower.SpawnCFrame and typeof(tower.SpawnCFrame) == "CFrame" then
-                existingTowersCache[tower.SpawnCFrame.Position.X] = true
-            end
-        end
-
-        local jobsAdded = false
-        for x, records in pairs(towersByAxis) do
-            if not activeJobs[x] and not (globalEnv.TDX_Config.ForceRebuildEvenIfSold == false and soldAxis[x]) and not existingTowersCache[x] then
+            else
+                -- Không có lý do để bỏ qua -> đây là tower cần xây lại
+                recordTowerDeath(x)
                 local towerType, firstPlaceLine = nil, nil
                 for _, record in ipairs(records) do
-                    if record.entry.TowerPlaced then
-                        towerType, firstPlaceLine = record.entry.TowerPlaced, record.line; break
+                    if record.entry.TowerPlaced then 
+                        towerType = record.entry.TowerPlaced
+                        firstPlaceLine = record.line
+                        break
                     end
                 end
-                if towerType and not ShouldSkipTower(x, towerType, firstPlaceLine) then
-                    logDebug(string.format("[PRODUCER] Detected dead tower at X=%.2f (Name: %s). Creating job.", x, towerType))
-                    activeJobs[x] = true
-                    table.insert(jobQueue, {
-                        x = x, records = records, priority = GetTowerPriority(towerType),
-                        deathTime = tick(), towerName = towerType, firstPlaceLine = firstPlaceLine
-                    })
-                    jobsAdded = true
+                
+                if towerType then
+                    rebuildAttempts[x] = (rebuildAttempts[x] or 0) + 1
+                    local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
+                    if not maxRetry or rebuildAttempts[x] <= maxRetry then
+                        DebugLog("JOB-ADD", string.format("Phát hiện tower '%s' bị thiếu tại X=%.2f. Thêm vào hàng đợi.", towerType, x))
+                        activeJobs[x] = true
+                        table.insert(jobQueue, { 
+                            x = x, records = records, priority = GetTowerPriority(towerType),
+                            deathTime = deadTowerTracker.deadTowers[x].deathTime,
+                            towerName = towerType, firstPlaceLine = firstPlaceLine
+                        })
+                        jobsAdded = true
+                    else
+                         if not activeJobs[x] then -- Chỉ log 1 lần
+                            DebugLog("JOB-SKIP", string.format("Đã đạt giới hạn thử lại cho tower tại X=%.2f. Sẽ không xây lại nữa.", x))
+                            activeJobs[x] = true -- Đánh dấu để không thêm lại
+                         end
+                    end
                 end
             end
         end
 
+        -- SẮP XẾP HÀNG ĐỢI
         if jobsAdded and #jobQueue > 1 then
+            DebugLog("QUEUE", "Sắp xếp lại hàng đợi theo độ ưu tiên và thời gian bị phá hủy.")
             table.sort(jobQueue, function(a, b) 
                 if a.priority == b.priority then return a.deathTime < b.deathTime end
                 return a.priority < b.priority 
