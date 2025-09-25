@@ -8,14 +8,12 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
 local macroPath = "tdx/macros/recorder_output.json"
 
--- Universal compatibility functions
 local function getGlobalEnv()
     if getgenv then return getgenv() end
     if getfenv then return getfenv() end
     return _G
 end
 
--- Cấu hình mặc định
 local defaultConfig = {
     ["MaxConcurrentRebuilds"] = 120,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster"},
@@ -96,7 +94,7 @@ local function GetTowerHashBySpawnX(targetX)
     for hash, tower in pairs(TowerClass.GetTowers()) do
         local spawnCFrame = tower.SpawnCFrame
         if spawnCFrame and typeof(spawnCFrame) == "CFrame" then
-            if math.abs(spawnCFrame.Position.X - targetX) < 0.1 then
+            if spawnCFrame.Position.X == targetX then
                 return hash, tower, spawnCFrame.Position
             end
         end
@@ -108,24 +106,22 @@ local function GetTowerByAxis(axisX)
     return GetTowerHashBySpawnX(axisX)
 end
 
--- CẬP NHẬT: Hàm chờ mới để đảm bảo tower đã sẵn sàng
 local function WaitForTowerInitialization(axisX, timeout)
     timeout = timeout or 5
     local startTime = tick()
     while tick() - startTime < timeout do
         local hash, tower = GetTowerByAxis(axisX)
-        -- Chờ cho đến khi tower tồn tại VÀ LevelHandler (để nâng cấp) đã được khởi tạo
         if hash and tower and tower.LevelHandler then
             return hash, tower
         end
         task.wait()
     end
-    return nil, nil -- Hết thời gian chờ
+    return nil, nil
 end
 
 local function WaitForCash(amount)
     while cash.Value < amount do
-        RunService.Heartbeat:Wait()
+        RunService.RenderStepped:Wait()
     end
 end
 
@@ -166,14 +162,11 @@ local function PlaceTowerRetry(args, axisValue, towerName)
         pcall(function()
             Remotes.PlaceTower:InvokeServer(unpack(args))
         end)
-
-        -- CẬP NHẬT: Dùng hàm chờ mới để đảm bảo tower sẵn sàng hoàn toàn sau khi đặt
         local _, tower = WaitForTowerInitialization(axisValue, 3)
         if tower then
             RemoveFromRebuildCache(axisValue)
             return true
         end
-
         attempts = attempts + 1
         task.wait()
     end
@@ -186,34 +179,31 @@ local function UpgradeTowerRetry(axisValue, path)
     local attempts = 0
     AddToRebuildCache(axisValue)
     while attempts < maxAttempts do
-        -- CẬP NHẬT: Chờ tower sẵn sàng trước khi cố gắng nâng cấp
         local hash, tower = WaitForTowerInitialization(axisValue)
-        if not hash then 
-            task.wait() 
+        if not hash then
+            task.wait()
             attempts = attempts + 1
-            continue 
+            continue
         end
         local before = tower.LevelHandler:GetLevelOnPath(path)
         local cost = GetCurrentUpgradeCost(tower, path)
-        if not cost then 
+        if not cost then
             RemoveFromRebuildCache(axisValue)
-            return true 
+            return true
         end
         WaitForCash(cost)
         pcall(function()
             Remotes.TowerUpgradeRequest:FireServer(hash, path, 1)
         end)
-
         local startTime = tick()
         repeat
             task.wait(0.1)
             local _, t = GetTowerByAxis(axisValue)
-            if t and t.LevelHandler and t.LevelHandler:GetLevelOnPath(path) > before then 
+            if t and t.LevelHandler and t.LevelHandler:GetLevelOnPath(path) > before then
                 RemoveFromRebuildCache(axisValue)
-                return true 
+                return true
             end
         until tick() - startTime > 3
-
         attempts = attempts + 1
         task.wait()
     end
@@ -240,9 +230,7 @@ local function ChangeTargetRetry(axisValue, targetType)
     RemoveFromRebuildCache(axisValue)
 end
 
--- CẬP NHẬT: Sửa đổi để sử dụng hàm chờ mới
 local function HasSkill(axisValue, skillIndex)
-    -- Chờ tower sẵn sàng để đảm bảo AbilityHandler tồn tại
     local hash, tower = WaitForTowerInitialization(axisValue)
     if not hash or not tower or not tower.AbilityHandler then
         return false
@@ -251,7 +239,6 @@ local function HasSkill(axisValue, skillIndex)
     return ability ~= nil
 end
 
--- CẬP NHẬT: Sửa đổi để sử dụng hàm chờ mới
 local function UseMovingSkillRetry(axisValue, skillIndex, location)
     local maxAttempts = getMaxAttempts()
     local attempts = 0
@@ -259,25 +246,20 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
     if not TowerUseAbilityRequest then return false end
     local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
     AddToRebuildCache(axisValue)
-
     while attempts < maxAttempts do
-        -- Chờ tower sẵn sàng trước khi cố gắng dùng skill
         local hash, tower = WaitForTowerInitialization(axisValue)
         if hash and tower then
             if not tower.AbilityHandler then
                 RemoveFromRebuildCache(axisValue)
                 return false
             end
-
             local ability = tower.AbilityHandler:GetAbilityFromIndex(skillIndex)
             if not ability then
                 RemoveFromRebuildCache(axisValue)
                 return false
             end
-
             local cooldown = ability.CooldownRemaining or 0
             if cooldown > 0 then task.wait(cooldown + 0.1) end
-
             local success = false
             if location == "no_pos" then
                 success = pcall(function()
@@ -315,7 +297,6 @@ local function RebuildTowerSequence(records)
         elseif entry.TowerTargetChange then table.insert(targetRecords, record)
         elseif entry.towermoving then table.insert(movingRecords, record) end
     end
-
     local rebuildSuccess = true
     if placeRecord then
         local entry = placeRecord.entry
@@ -330,7 +311,6 @@ local function RebuildTowerSequence(records)
             end
         end
     end
-
     if rebuildSuccess and #movingRecords > 0 then
         task.spawn(function()
             local lastMovingRecord = movingRecords[#movingRecords]
@@ -341,7 +321,6 @@ local function RebuildTowerSequence(records)
             UseMovingSkillRetry(entry.towermoving, entry.skillindex, entry.location)
         end)
     end
-
     if rebuildSuccess then
         table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
         for _, record in ipairs(upgradeRecords) do
@@ -353,7 +332,6 @@ local function RebuildTowerSequence(records)
             task.wait(0.1)
         end
     end
-
     if rebuildSuccess then
         for _, record in ipairs(targetRecords) do
             local entry = record.entry
@@ -361,7 +339,6 @@ local function RebuildTowerSequence(records)
             task.wait(0.05)
         end
     end
-
     return rebuildSuccess
 end
 
@@ -377,7 +354,6 @@ task.spawn(function()
     end
     local function clearTowerDeath(x) deadTowerTracker.deadTowers[x] = nil end
     local jobQueue, activeJobs = {}, {}
-
     local function RebuildWorker()
         task.spawn(function()
             while true do
@@ -399,9 +375,7 @@ task.spawn(function()
             end
         end)
     end
-
     for i = 1, globalEnv.TDX_Config.MaxConcurrentRebuilds do RebuildWorker() end
-
     while true do
         local macroContent = safeReadFile(macroPath)
         if macroContent and #macroContent > 10 then
@@ -426,24 +400,21 @@ task.spawn(function()
                 end
             end
         end
-
         local existingTowersCache = {}
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower.SpawnCFrame and typeof(tower.SpawnCFrame) == "CFrame" then
                 existingTowersCache[tower.SpawnCFrame.Position.X] = true
             end
         end
-
         local jobsAdded = false
         for x, records in pairs(towersByAxis) do
             if not globalEnv.TDX_Config.ForceRebuildEvenIfSold and soldAxis[x] then
-                -- Skip
             elseif not existingTowersCache[x] then
                 if not activeJobs[x] then
                     recordTowerDeath(x)
                     local towerType, firstPlaceLine = nil, nil
                     for _, record in ipairs(records) do
-                        if record.entry.TowerPlaced then 
+                        if record.entry.TowerPlaced then
                             towerType = record.entry.TowerPlaced
                             firstPlaceLine = record.line
                             break
@@ -454,7 +425,7 @@ task.spawn(function()
                         local maxRetry = globalEnv.TDX_Config.MaxRebuildRetry
                         if not maxRetry or rebuildAttempts[x] <= maxRetry then
                             activeJobs[x] = true
-                            table.insert(jobQueue, { 
+                            table.insert(jobQueue, {
                                 x = x, records = records, priority = GetTowerPriority(towerType),
                                 deathTime = deadTowerTracker.deadTowers[x].deathTime,
                                 towerName = towerType, firstPlaceLine = firstPlaceLine
@@ -473,14 +444,12 @@ task.spawn(function()
                 end
             end
         end
-
         if jobsAdded and #jobQueue > 1 then
-            table.sort(jobQueue, function(a, b) 
+            table.sort(jobQueue, function(a, b)
                 if a.priority == b.priority then return a.deathTime < b.deathTime end
-                return a.priority < b.priority 
+                return a.priority < b.priority
             end)
         end
-
-        RunService.Heartbeat:Wait()
+        RunService.RenderStepped:Wait()
     end
 end)
