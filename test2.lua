@@ -24,11 +24,11 @@ end
 -- Cấu hình mặc định
 local defaultConfig = {
     ["MaxConcurrentRebuilds"] = 9999,
-    ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster", "XWM Turret"},
+    ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster", "Combat Drone"},
     ["ForceRebuildEvenIfSold"] = false,
     ["MaxRebuildRetry"] = nil, -- Chỉnh thành nil để thử lại vô hạn
     ["PlaceMode"] = "Rewrite",
-    ["VerificationDelay"] = 1.5,
+    ["VerificationDelay"] = 1,
     ["SkipTowersAtAxis"] = {},
     ["SkipTowersByName"] = {},
     ["SkipTowersByLine"] = {},
