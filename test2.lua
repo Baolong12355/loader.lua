@@ -8,7 +8,7 @@ local player = Players.LocalPlayer
 local cash = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
-local macroPath = "tdx/macros/recorder_output.json"
+local macroPath = "tdx/macros/endless.json"
 
 -- Universal compatibility functions
 local function getGlobalEnv()
