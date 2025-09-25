@@ -7,7 +7,7 @@ local player = Players.LocalPlayer
 local cash = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
-local macroPath = "tdx/macros/recorder_output.json"
+local macroPath = "tdx/macros/endless.json"
 
 -- Universal compatibility functions
 local function getGlobalEnv() if getgenv then return getgenv() end if getfenv then return getfenv() end return _G end
@@ -31,7 +31,6 @@ local globalEnv = getGlobalEnv()
 globalEnv.TDX_Config = globalEnv.TDX_Config or {}
 for key, value in pairs(defaultConfig) do if globalEnv.TDX_Config[key] == nil then globalEnv.TDX_Config[key] = value end end
 
--- ================= DEBUGGING & HELPER FUNCTIONS =================
 local function DebugLog(category, message) if globalEnv.TDX_Config.EnableDebug then print(string.format("[REBUILDER DEBUG | %s] [%s]: %s", os.date("%H:%M:%S"), category, message)) end end
 local function SuperDebugLog(category, message) if globalEnv.TDX_Config.EnableSuperDebug then print(string.format("[REBUILDER SUPER-DEBUG | %s] [%s]: %s", os.date("%H:%M:%S"), category, message)) end end
 local function getTableKeys(tbl) local keys = {} if type(tbl) ~= "table" then return keys end for k, _ in pairs(tbl) do table.insert(keys, tostring(k)) end return keys end
