@@ -1,5 +1,3 @@
---- START OF FILE runnertest.lua (Fully Updated & Patched) ---
-
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -72,7 +70,7 @@ local function SafeRequire(path, timeout)
     while tick() - startTime < timeout do
         local success, result = pcall(function() return require(path) end)
         if success and result then return result end
-        RunService.Heartbeat:Wait()
+        RunService.RenderStepped:Wait()
     end
     return nil
 end
@@ -100,7 +98,7 @@ task.spawn(function()
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower.Converted == true then
                 pcall(function() Remotes.SellTower:FireServer(hash) end)
-                task.wait(0.1)
+                task.wait(globalEnv.TDX_Config.MacroStepDelay)
             end
         end
     end
@@ -128,7 +126,7 @@ local function WaitForTowerInitialization(axisX, timeout)
         if hash and tower and tower.LevelHandler then
             return hash, tower
         end
-        task.wait()
+        RunService.RenderStepped:Wait()
     end
     return nil, nil
 end
@@ -185,7 +183,7 @@ local function SellAllTowers(skipList)
     for hash, tower in pairs(TowerClass.GetTowers()) do
         if not skipMap[tower.Type] then
             pcall(function() Remotes.SellTower:FireServer(hash) end)
-            task.wait(globalEnv.TDX_Config.SellAllDelay or 0.1)
+            task.wait(globalEnv.TDX_Config.MacroStepDelay)
         end
     end
 end
@@ -203,16 +201,16 @@ local function GetCurrentUpgradeCost(tower, path)
 end
 
 local function WaitForCash(amount)
-    while cashStat.Value < amount do RunService.Heartbeat:Wait() end
+    while cashStat.Value < amount do RunService.RenderStepped:Wait() end
 end
 
 -- CẬP NHẬT: Tích hợp hàm chờ mới vào các hàm retry
 local function PlaceTowerRetry(args, axisValue)
     for i = 1, getMaxAttempts() do
         pcall(function() Remotes.PlaceTower:InvokeServer(unpack(args)) end)
+        task.wait(globalEnv.TDX_Config.MacroStepDelay)
         local _, tower = WaitForTowerInitialization(axisValue, 3)
         if tower then return true end
-        task.wait()
     end
     return false
 end
@@ -220,19 +218,19 @@ end
 local function UpgradeTowerRetry(axisValue, path)
     for i = 1, getMaxAttempts() do
         local hash, tower = WaitForTowerInitialization(axisValue)
-        if not hash then task.wait(); continue end
+        if not hash then task.wait(globalEnv.TDX_Config.MacroStepDelay); continue end
         local before = tower.LevelHandler:GetLevelOnPath(path)
         local cost = GetCurrentUpgradeCost(tower, path)
         if not cost then return true end
         WaitForCash(cost)
         pcall(function() Remotes.TowerUpgradeRequest:FireServer(hash, path, 1) end)
+        task.wait(globalEnv.TDX_Config.MacroStepDelay)
         local startTime = tick()
         repeat
-            task.wait(0.1)
+            RunService.RenderStepped:Wait()
             local _, t = GetTowerByAxis(axisValue)
             if t and t.LevelHandler and t.LevelHandler:GetLevelOnPath(path) > before then return true end
         until tick() - startTime > 3
-        task.wait()
     end
     return false
 end
@@ -242,15 +240,17 @@ local function ChangeTargetRetry(axisValue, targetType)
         local hash = GetTowerByAxis(axisValue)
         if hash then
             pcall(function() Remotes.ChangeQueryType:FireServer(hash, targetType) end)
+            task.wait(globalEnv.TDX_Config.MacroStepDelay)
             return true
         end
-        task.wait()
+        task.wait(globalEnv.TDX_Config.MacroStepDelay)
     end
     return false
 end
 
 local function SkipWaveRetry()
     pcall(function() Remotes.SkipWaveVoteCast:FireServer(true) end)
+    task.wait(globalEnv.TDX_Config.MacroStepDelay)
     return true
 end
 
@@ -266,7 +266,7 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
             if ability then
                 local cooldown = ability.CooldownRemaining or 0
                 if cooldown > 0 then task.wait(cooldown + 0.1) end
-                
+
                 local success = false
                 if location == "no_pos" then
                     success = pcall(function()
@@ -281,10 +281,13 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
                         end)
                     end
                 end
-                if success then return true end
+                if success then 
+                    task.wait(globalEnv.TDX_Config.MacroStepDelay)
+                    return true 
+                end
             end
         end
-        task.wait(0.1)
+        task.wait(globalEnv.TDX_Config.MacroStepDelay)
     end
     return false
 end
@@ -294,10 +297,10 @@ local function SellTowerRetry(axisValue)
         local hash = GetTowerByAxis(axisValue)
         if hash then
             pcall(function() Remotes.SellTower:FireServer(hash) end)
-            task.wait(0.2)
+            task.wait(globalEnv.TDX_Config.MacroStepDelay)
             if not GetTowerByAxis(axisValue) then return true end
         end
-        task.wait()
+        task.wait(globalEnv.TDX_Config.MacroStepDelay)
     end
     return false
 end
@@ -371,7 +374,7 @@ end
 local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     local config = globalEnv.TDX_Config
     local rebuildAttempts, soldPositions, jobQueue, activeJobs = {}, {}, {}, {}
-    
+
     local function RebuildWorker()
         task.spawn(function()
             while true do
@@ -401,7 +404,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                         table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
                         for _, record in ipairs(upgradeRecords) do
                             if not UpgradeTowerRetry(tonumber(record.entry.TowerUpgraded), record.entry.UpgradePath) then rebuildSuccess = false; break end
-                            task.wait(0.1)
                         end
                     end
                     if rebuildSuccess and #movingRecords > 0 then
@@ -413,12 +415,11 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                     if rebuildSuccess then
                         for _, record in ipairs(targetRecords) do
                             ChangeTargetRetry(tonumber(record.entry.TowerTargetChange), record.entry.TargetWanted)
-                            task.wait(0.02)
                         end
                     end
                     activeJobs[job.x] = nil
                 else
-                    RunService.Heartbeat:Wait()
+                    RunService.RenderStepped:Wait()
                 end
             end
         end)
@@ -480,7 +481,7 @@ local function RunMacroRunner()
     if not macroContent then error("Không thể đọc file macro") end
     local ok, macro = pcall(function() return HttpService:JSONDecode(macroContent) end)
     if not ok or type(macro) ~= "table" then error("Lỗi parse macro file") end
-    
+
     local gameUI, towerRecords, skipTypesMap, monitorEntries, rebuildSystemActive = getGameUI(), {}, {}, {}, false
 
     for i, entry in ipairs(macro) do
