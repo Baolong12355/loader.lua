@@ -1,4 +1,4 @@
---- START OF FILE rebuild.lua (FINAL POLISHED VERSION) ---
+--- START OF FILE rebuild.lua (FINAL VERSION - Infinite Rebuild Retries) ---
 
 ---------------------------------------------------------------------------------
 --- KHAI BÁO & CÀI ĐẶT (DECLARATIONS & SETUP)
@@ -23,10 +23,10 @@ end
 
 -- Cấu hình mặc định
 local defaultConfig = {
-    ["MaxConcurrentRebuilds"] = 5,
+    ["MaxConcurrentRebuilds"] = 9999,
     ["PriorityRebuildOrder"] = {"EDJ", "Medic", "Commander", "Mobster", "Golden Mobster", "XWM Turret"},
     ["ForceRebuildEvenIfSold"] = false,
-    ["MaxRebuildRetry"] = 5,
+    ["MaxRebuildRetry"] = nil, -- Chỉnh thành nil để thử lại vô hạn
     ["PlaceMode"] = "Rewrite",
     ["VerificationDelay"] = 1.5,
     ["SkipTowersAtAxis"] = {},
