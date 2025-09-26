@@ -193,7 +193,7 @@ RunService.Heartbeat:Connect(function()
 end)
 
 task.spawn(function()
-    while task.wait(1.5) do
+    while task.wait(0.25) do
         local isCurrentlyActive = _G.CurrentFPSControlledTower ~= nil
         local shouldBeActive = false
         for _, enemy in pairs(EnemyClass.GetEnemies()) do
