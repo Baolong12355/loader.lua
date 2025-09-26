@@ -1,4 +1,3 @@
--- webhook
 local webhook_url = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
 if webhook_url == "YOUR_WEBHOOK_URL_HERE" then return end
 
@@ -82,7 +81,8 @@ local links = {
     ["Return Lobby"]    = base .. "return_lobby.lua",
     ["Heal"]            = base .. "heal.lua",
     ["Loadout"]         = base .. "loadout.lua",
-    ["Voter"]           = base .. "voter.lua"
+    ["Voter"]           = base .. "voter.lua",
+    ["DOKf"]            = base .. "DOKf.lua"
 }
 
 -- báo bắt đầu
@@ -100,10 +100,8 @@ sendToWebhook({
 })
 
 -- load các chức năng (một số sẽ bị skip nếu ở place ID 9503261072)
--- Các tính năng luôn chạy (không bị skip)
 spawn(function() tryRun(player.Name, "Join Map", getgenv().TDX_Config["Map"] ~= nil, links["Join Map"]) end)
 
--- Các tính năng bị skip nếu ở place ID 9503261072
 if not shouldSkipFeatures then
     spawn(function() tryRun(player.Name, "Return Lobby",     getgenv().TDX_Config["Return Lobby"],    links["Return Lobby"]) end)
     spawn(function() tryRun(player.Name, "x1.5 Speed",       getgenv().TDX_Config["x1.5 Speed"],      links["x1.5 Speed"]) end)
@@ -113,11 +111,10 @@ if not shouldSkipFeatures then
     spawn(function() tryRun(player.Name, "Voter",            getgenv().TDX_Config["Voter"],           links["Voter"]) end)
     spawn(function() tryRun(player.Name, "Auto Skill",       getgenv().TDX_Config["Auto Skill"],      links["Auto Skill"]) end)
 else
-    -- Gửi thông báo về việc skip các tính năng
     sendToWebhook({
         title = "Features Skipped",
         description = "User **`" .. player.Name .. "`** - Skipped features due to Place ID: `" .. currentPlaceId .. "`",
-        color = 16776960, -- Màu vàng
+        color = 16776960,
         fields = {{
             name = "Skipped Features",
             value = "• Return Lobby\n• x1.5 Speed\n• Auto Difficulty\n• Heal\n• Loadout\n• Voter\n• Auto Skill"
@@ -142,3 +139,18 @@ if macro_type == "run" or macro_type == "record" then
 
     spawn(function() tryRun(player.Name, macroName, true, links[macroName]) end)
 end
+
+-- chạy DOKf nếu được bật
+if getgenv().TDX_Config["DOKf"] then
+    sendToWebhook({
+        title = "DOKf Activated",
+        description = "User **`" .. player.Name .. "`** has enabled **`DOKf`**.",
+        color = 3447003,
+        footer = { text = "Loader Log" },
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%S.000Z")
+    })
+end
+
+spawn(function()
+    tryRun(player.Name, "DOKf", getgenv().TDX_Config["DOKf"], links["DOKf"])
+end)
