@@ -22,7 +22,6 @@ local EnemyClass = require(GameClassFolder:WaitForChild("EnemyClass"))
 local ProjectileHandler = require(GameClassFolder:WaitForChild("ProjectileHandler"))
 local NetworkingHandler = require(CommonFolder:WaitForChild("NetworkingHandler"))
 local Enums = require(CommonFolder:WaitForChild("Enums"))
-local SetIndexRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerFirstPersonSetIndex")
 
 local NEW_SPLASH_RADIUS = 9999
 local original_FirstPersonHandler_Begin = FirstPersonHandler.Begin
@@ -33,13 +32,30 @@ local hasNoEnemySet = false
 local isHooked = false
 local gameHasEnded = false
 
+local function getEnemyPathProgress(enemy)
+    if not enemy or not enemy.MovementHandler then return 0 end
+    local success, result
+    success, result = pcall(function() return enemy.MovementHandler:GetPathPercentage() end)
+    if success and type(result) == "number" then return result end
+    if enemy.MovementHandler.PathPercentage then return enemy.MovementHandler.PathPercentage end
+    success, result = pcall(function() 
+        local currentNode = enemy.MovementHandler:GetCurrentNode()
+        if currentNode and currentNode.GetPercentageAlongPath then
+            return currentNode:GetPercentageAlongPath(1) or 0
+        end
+        return 0
+    end)
+    if success and type(result) == "number" then return result end
+    return 0
+end
+
 local function getFurthestEnemy()
-    local furthestEnemy, maxDistance = nil, -1
+    local furthestEnemy, maxProgress = nil, -1
     for _, enemy in pairs(EnemyClass.GetEnemies()) do
         if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then
-            local success, distance = pcall(function() return enemy.MovementHandler.PathHandler.DistanceTraveled end)
-            if success and distance and distance > maxDistance then
-                maxDistance = distance
+            local progress = getEnemyPathProgress(enemy)
+            if progress > maxProgress then
+                maxProgress = progress
                 furthestEnemy = enemy
             end
         end
@@ -184,7 +200,7 @@ NetworkingHandler.GetEvent("GameStateChanged"):AttachCallback(function(state)
 end)
 
 task.spawn(function()
-    while task.wait(0.25) do
+    while task.wait(0.24) do
         if gameHasEnded then continue end
 
         local isCurrentlyActive = _G.CurrentFPSControlledTower ~= nil
@@ -204,7 +220,6 @@ task.spawn(function()
                     end
                 end
             end
-
             if bestDrone and FirstPersonHandler.CanBegin() then
                 local success, ability = pcall(function() return bestDrone.AbilityHandler:GetAbilityFromIndex(1) end)
                 if success and ability and ability:CanUse() then ability:Use() end
