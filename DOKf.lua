@@ -31,7 +31,7 @@ local original_FirstPersonHandler_Stop = FirstPersonHandler.Stop
 _G.CurrentFPSControlledTower = nil
 local hasNoEnemySet = false
 local isHooked = false
-local gameHasEnded = false -- CỜ TRẠNG THÁI MỚI
+local gameHasEnded = false
 
 local function getFurthestEnemy()
     local furthestEnemy, maxDistance = nil, -1
@@ -92,7 +92,7 @@ local function ApplyHooks()
                 if ModuleTable and ModuleTable.New then
                     local oldNew = ModuleTable.New
                     ModuleTable.New = function(...)
-                        local obj = oldNew(...); obj.DefaultShotInterval = 0; obj.ReloadTime = 0.001; obj.CurrentFirerateMultiplier = 0; obj.DefaultSpreadDegrees = 0; obj.DamageType = Enums.DamageTypes.Toxic 
+                        local obj = oldNew(...); obj.DefaultShotInterval = 0.001; obj.ReloadTime = 0.001; obj.CurrentFirerateMultiplier = 0.001; obj.DefaultSpreadDegrees = 0; obj.DamageType = Enums.DamageTypes.Toxic 
                         if obj.AttackConfig and obj.AttackConfig.DamageData and obj.AttackConfig.DamageData.StunData then obj.AttackConfig.DamageData.StunData.StunDuration = 99999999 end
                         return obj
                     end
@@ -177,9 +177,7 @@ end)
 NetworkingHandler.GetEvent("GameStateChanged"):AttachCallback(function(state)
 	if state == "EndScreen" then
         gameHasEnded = true
-		if _G.CurrentFPSControlledTower then
-            FirstPersonHandler.Stop()
-        end
+		if _G.CurrentFPSControlledTower then FirstPersonHandler.Stop() end
     elseif state == "Running" or state == "MapVoting" or state == "LoadoutSelection" then
         gameHasEnded = false
 	end
@@ -196,12 +194,19 @@ task.spawn(function()
         end
 
         if shouldBeActive and not isCurrentlyActive then
-            local combatDrone = nil
+            local bestDrone, maxPath2Level = nil, -1
             for _, tower in pairs(TowerClass.GetTowers()) do
-                if tower.Type == "Combat Drone" and tower.OwnedByLocalPlayer then combatDrone = tower; break end
+                if tower.Type == "Combat Drone" and tower.OwnedByLocalPlayer then
+                    local success, path2Lvl = pcall(function() return tower.LevelHandler:GetLevelOnPath(2) end)
+                    if success and path2Lvl and path2Lvl > maxPath2Level then
+                        maxPath2Level = path2Lvl
+                        bestDrone = tower
+                    end
+                end
             end
-            if combatDrone and FirstPersonHandler.CanBegin() then
-                local success, ability = pcall(function() return combatDrone.AbilityHandler:GetAbilityFromIndex(1) end)
+
+            if bestDrone and FirstPersonHandler.CanBegin() then
+                local success, ability = pcall(function() return bestDrone.AbilityHandler:GetAbilityFromIndex(1) end)
                 if success and ability and ability:CanUse() then ability:Use() end
             end
         elseif not shouldBeActive and isCurrentlyActive then
