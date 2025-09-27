@@ -1,33 +1,33 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
+local v1 = game:GetService("ReplicatedStorage")
+local v2 = game:GetService("Players")
 
-local player = Players.LocalPlayer
-if not player then return end
+local v3 = v2.LocalPlayer
+if not v3 then return end
 
-local playerGui = player:WaitForChild("PlayerGui")
-local interface = playerGui:WaitForChild("Interface")
-local gameOverScreen = interface:WaitForChild("GameOverScreen")
+local v4 = v3:WaitForChild("PlayerGui")
+local v5 = v4:WaitForChild("Interface")
+local v6 = v5:WaitForChild("GameOverScreen")
 
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local teleportRemote = remotes:FindFirstChild("RequestTeleportToLobby")
+local v7 = v1:WaitForChild("Remotes")
+local v8 = v7:FindFirstChild("RequestTeleportToLobby")
 
-if not teleportRemote or not (teleportRemote:IsA("RemoteEvent") or teleportRemote:IsA("RemoteFunction")) then
+if not v8 or not (v8:IsA("RemoteEvent") or v8:IsA("RemoteFunction")) then
     return
 end
 
-local function tryTeleport()
-    local maxAttempts = 5
-    for _ = 1, maxAttempts do
-        local success = pcall(function()
+local function v9()
+    local v10 = 5
+    for _ = 1, v10 do
+        local v11 = pcall(function()
             task.wait(1)
-            if teleportRemote:IsA("RemoteEvent") then
-                teleportRemote:FireServer()
+            if v8:IsA("RemoteEvent") then
+                v8:FireServer()
             else
-                teleportRemote:InvokeServer()
+                v8:InvokeServer()
             end
         end)
 
-        if success then
+        if v11 then
             return true
         else
             task.wait(1)
@@ -36,42 +36,42 @@ local function tryTeleport()
     return false
 end
 
-local function autoRetryTeleport()
+local function v12()
     while true do
-        if gameOverScreen and gameOverScreen.Visible then
-            tryTeleport()
+        if v6 and v6.Visible then
+            v9()
         end
         task.wait(4)
     end
 end
 
-if gameOverScreen and gameOverScreen.Visible then
-    tryTeleport()
+if v6 and v6.Visible then
+    v9()
 end
 
-if gameOverScreen then
-    gameOverScreen:GetPropertyChangedSignal("Visible"):Connect(function()
-        if gameOverScreen.Visible then
-            coroutine.wrap(autoRetryTeleport)()
+if v6 then
+    v6:GetPropertyChangedSignal("Visible"):Connect(function()
+        if v6.Visible then
+            coroutine.wrap(v12)()
         end
     end)
 end
 
-local screen = interface:WaitForChild("CutsceneScreen")
+local v13 = v5:WaitForChild("CutsceneScreen")
 
-local function fireOnce()
+local function v14()
     task.wait(1)
-    ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CutsceneVoteCast"):FireServer(true)
+    v1:WaitForChild("Remotes"):WaitForChild("CutsceneVoteCast"):FireServer(true)
 end
 
-if screen.Visible then
-    fireOnce()
+if v13.Visible then
+    v14()
 else
-    local connection
-    connection = screen:GetPropertyChangedSignal("Visible"):Connect(function()
-        if screen.Visible then
-            fireOnce()
-            connection:Disconnect()
+    local v15
+    v15 = v13:GetPropertyChangedSignal("Visible"):Connect(function()
+        if v13.Visible then
+            v14()
+            v15:Disconnect()
         end
     end)
 end
