@@ -20,7 +20,7 @@ local FirstPersonAttackManager = require(FirstPersonAttackManagerFolder)
 local FirstPersonAttackHandlerClass = require(FirstPersonAttackManagerFolder:WaitForChild("FirstPersonAttackHandlerClass"))
 local EnemyClass = require(GameClassFolder:WaitForChild("EnemyClass"))
 local ProjectileHandler = require(GameClassFolder:WaitForChild("ProjectileHandler"))
-local GameStates = require(CommonFolder:WaitForChild("Enums")).GameStates
+local NetworkingHandler = require(CommonFolder:WaitForChild("NetworkingHandler"))
 local Enums = require(CommonFolder:WaitForChild("Enums"))
 local SetIndexRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerFirstPersonSetIndex")
 
@@ -31,25 +31,15 @@ local original_FirstPersonHandler_Stop = FirstPersonHandler.Stop
 _G.CurrentFPSControlledTower = nil
 local hasNoEnemySet = false
 local isHooked = false
-
-local function getEnemyPathProgress(enemy)
-    if not enemy or not enemy.MovementHandler then return 0 end
-    local success, result
-    success, result = pcall(function() return enemy.MovementHandler:GetPathPercentage() end)
-    if success and result then return result end
-    if enemy.MovementHandler.PathPercentage then return enemy.MovementHandler.PathPercentage end
-    success, result = pcall(function() return enemy.MovementHandler:GetCurrentNode():GetPercentageAlongPath(1) end)
-    if success and result then return result end
-    return 0
-end
+local gameHasEnded = false -- CỜ TRẠNG THÁI MỚI
 
 local function getFurthestEnemy()
-    local furthestEnemy, maxProgress = nil, -1
+    local furthestEnemy, maxDistance = nil, -1
     for _, enemy in pairs(EnemyClass.GetEnemies()) do
         if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then
-            local progress = getEnemyPathProgress(enemy)
-            if progress > maxProgress then
-                maxProgress = progress
+            local success, distance = pcall(function() return enemy.MovementHandler.PathHandler.DistanceTraveled end)
+            if success and distance and distance > maxDistance then
+                maxDistance = distance
                 furthestEnemy = enemy
             end
         end
@@ -63,13 +53,11 @@ local function ApplyHooks()
 
     local original_AttackHandler_Attack = FirstPersonAttackHandlerClass._Attack
     FirstPersonAttackHandlerClass._Attack = function(self)
+        if gameHasEnded then return original_AttackHandler_Attack(self) end
         local currentTower = _G.CurrentFPSControlledTower
-        if not (currentTower and currentTower.DirectControlHandler and currentTower.DirectControlHandler:IsActive()) then
-            return original_AttackHandler_Attack(self)
-        end
+        if not (currentTower and currentTower.DirectControlHandler and currentTower.DirectControlHandler:IsActive()) then return original_AttackHandler_Attack(self) end
         local towerPosition = currentTower:GetTorsoPosition() or currentTower:GetPosition()
         local furthestEnemy = getFurthestEnemy()
-        
         if furthestEnemy then
             local targetPosition, hitPart
             local headPart = furthestEnemy.Character and furthestEnemy.Character.GetHead and furthestEnemy.Character:GetHead()
@@ -88,7 +76,7 @@ local function ApplyHooks()
     
     local original_NewProjectile = ProjectileHandler.NewProjectile
     ProjectileHandler.NewProjectile = function(initData)
-        if _G.CurrentFPSControlledTower and initData and initData.OriginHash == _G.CurrentFPSControlledTower.Hash then
+        if not gameHasEnded and _G.CurrentFPSControlledTower and initData and initData.OriginHash == _G.CurrentFPSControlledTower.Hash then
             local furthestEnemy = getFurthestEnemy()
             if furthestEnemy then
                 initData.TargetHash = furthestEnemy.Hash; initData.TargetEntityClass = "Enemy"; initData.OverrideGoalPosition = furthestEnemy:GetTorsoPosition(); initData.ForceTrackCharacter = true
@@ -104,7 +92,7 @@ local function ApplyHooks()
                 if ModuleTable and ModuleTable.New then
                     local oldNew = ModuleTable.New
                     ModuleTable.New = function(...)
-                        local obj = oldNew(...); obj.DefaultShotInterval = 0.001; obj.ReloadTime = 0.001; obj.CurrentFirerateMultiplier = 0.001; obj.DefaultSpreadDegrees = 0; obj.DamageType = Enums.DamageTypes.Toxic 
+                        local obj = oldNew(...); obj.DefaultShotInterval = 0; obj.ReloadTime = 0.001; obj.CurrentFirerateMultiplier = 0; obj.DefaultSpreadDegrees = 0; obj.DamageType = Enums.DamageTypes.Toxic 
                         if obj.AttackConfig and obj.AttackConfig.DamageData and obj.AttackConfig.DamageData.StunData then obj.AttackConfig.DamageData.StunData.StunDuration = 99999999 end
                         return obj
                     end
@@ -137,16 +125,10 @@ local uiWaveText = nil
 
 RunService.Heartbeat:Connect(function()
     pcall(function()
-        if not uiWaveText then
-            uiWaveText = PlayerGui:FindFirstChild("Interface"):FindFirstChild("GameInfoBar"):FindFirstChild("Wave"):FindFirstChild("WaveText")
-            return
-        end
-
-        local currentGame = GameClass.GetCurrentGame()
-        if (currentGame and currentGame:GetState() == GameStates.GameOver) or (uiWaveText and string.upper(uiWaveText.Text) == "WAVE 201") then
-            if _G.CurrentFPSControlledTower then FirstPersonHandler.Stop() end
-            return
-        end
+        if gameHasEnded then return end
+        
+        if not uiWaveText then uiWaveText = PlayerGui:FindFirstChild("Interface"):FindFirstChild("GameInfoBar"):FindFirstChild("Wave"):FindFirstChild("WaveText") end
+        if uiWaveText and string.upper(uiWaveText.Text) == "WAVE 201" and _G.CurrentFPSControlledTower then FirstPersonHandler.Stop(); return end
 
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower and tower.Type == "Combat Drone" and tower.OwnedByLocalPlayer and tower.LevelHandler then
@@ -166,7 +148,7 @@ RunService.Heartbeat:Connect(function()
             for _, enemy in pairs(EnemyClass.GetEnemies()) do
                 if enemy and enemy.IsAlive and enemy.DamageReductionTable then
                     for _, reductionInfo in ipairs(enemy.DamageReductionTable) do
-                        if reductionInfo.DamageType == Enums.DamageTypes.Explosive and reductionInfo.DamageReduction and reductionInfo.DamageReduction >= 0.64 then
+                        if reductionInfo.DamageType == Enums.DamageTypes.Explosive and reductionInfo.DamageReduction and reductionInfo.DamageReduction >= 0.74 then
                             hasResistantEnemy = true; break
                         end
                     end
@@ -192,8 +174,21 @@ RunService.Heartbeat:Connect(function()
     end)
 end)
 
+NetworkingHandler.GetEvent("GameStateChanged"):AttachCallback(function(state)
+	if state == "EndScreen" then
+        gameHasEnded = true
+		if _G.CurrentFPSControlledTower then
+            FirstPersonHandler.Stop()
+        end
+    elseif state == "Running" or state == "MapVoting" or state == "LoadoutSelection" then
+        gameHasEnded = false
+	end
+end)
+
 task.spawn(function()
     while task.wait(0.25) do
+        if gameHasEnded then continue end
+
         local isCurrentlyActive = _G.CurrentFPSControlledTower ~= nil
         local shouldBeActive = false
         for _, enemy in pairs(EnemyClass.GetEnemies()) do
