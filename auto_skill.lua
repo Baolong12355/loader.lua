@@ -10,6 +10,61 @@ local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitFor
 local TowerAttack = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerAttack")
 local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 
+-- Thread identity management
+local function setThreadIdentity(identity)
+    if setthreadidentity then
+        setthreadidentity(identity)
+    elseif syn and syn.set_thread_identity then
+        syn.set_thread_identity(identity)
+    end
+end
+
+-- Global config for threaded remotes
+local function getGlobalEnv()
+    if getgenv then return getgenv() end
+    if getfenv then return getfenv() end
+    return _G
+end
+
+local globalEnv = getGlobalEnv()
+globalEnv.TDX_Config = globalEnv.TDX_Config or {}
+if globalEnv.TDX_Config.UseThreadedRemotes == nil then
+    globalEnv.TDX_Config.UseThreadedRemotes = true -- Default to true
+end
+
+-- Threaded remote call wrapper
+local function SafeRemoteCall(remoteType, remote, ...)
+    local args = {...}
+    if globalEnv.TDX_Config.UseThreadedRemotes then
+        return task.spawn(function()
+            setThreadIdentity(2) -- Elevated identity for priority
+
+            if remoteType == "FireServer" then
+                pcall(function()
+                    remote:FireServer(unpack(args))
+                end)
+            elseif remoteType == "InvokeServer" then
+                local success, result = pcall(function()
+                    return remote:InvokeServer(unpack(args))
+                end)
+                return success and result or nil
+            end
+        end)
+    else
+        -- Original non-threaded approach
+        if remoteType == "FireServer" then
+            pcall(function()
+                remote:FireServer(unpack(args))
+            end)
+        elseif remoteType == "InvokeServer" then
+            local success, result = pcall(function()
+                return remote:InvokeServer(unpack(args))
+            end)
+            return success and result or nil
+        end
+    end
+end
+
 -- Enhanced tower configurations
 local directionalTowerTypes = {
         ["Commander"] = { onlyAbilityIndex = 3 },
@@ -129,7 +184,7 @@ end
 -- Function to get enemy's progress along their path (UPDATED)
 local function getEnemyPathDistance(enemy)
         if not enemy then return 0 end
-        
+
         -- Try multiple methods to get path progress
         if enemy.MovementHandler then
                 if enemy.MovementHandler.GetPathPercentage then
@@ -138,11 +193,11 @@ local function getEnemyPathDistance(enemy)
                         end)
                         if success and percentage then return percentage end
                 end
-                
+
                 if enemy.MovementHandler.PathPercentage then
                         return enemy.MovementHandler.PathPercentage or 0
                 end
-                
+
                 if enemy.MovementHandler.GetCurrentNode then
                         local success, node = pcall(function() 
                                 return enemy.MovementHandler:GetCurrentNode() 
@@ -154,17 +209,17 @@ local function getEnemyPathDistance(enemy)
                                 if success2 and percentage then return percentage end
                         end
                 end
-                
+
                 if enemy.MovementHandler.DistanceTraveled then
                         return enemy.MovementHandler.DistanceTraveled
                 end
         end
-        
+
         -- Fallback using path index
         if enemy.PathIndex then
                 return enemy.PathIndex * 10
         end
-        
+
         return 0
 end
 
@@ -429,15 +484,16 @@ local function getBestMedicTarget(medicTower, ownedTowers)
         return bestHash
 end
 
+-- Enhanced SendSkill function with threaded remotes
 local function SendSkill(hash, index, pos, targetHash)
         if useFireServer then
-                TowerUseAbilityRequest:FireServer(hash, index, pos, targetHash)
+                SafeRemoteCall("FireServer", TowerUseAbilityRequest, hash, index, pos, targetHash)
         else
-                TowerUseAbilityRequest:InvokeServer(hash, index, pos, targetHash)
+                SafeRemoteCall("InvokeServer", TowerUseAbilityRequest, hash, index, pos, targetHash)
         end
 end
 
--- ======== NEW: Tower Attack Event Handler ========
+-- ======== Enhanced Tower Attack Event Handler với threaded support ========
 local function handleTowerAttack(attackData)
         local ownedTowers = TowerClass.GetTowers() or {}
 
@@ -448,43 +504,48 @@ local function handleTowerAttack(attackData)
                 local attackingTower = ownedTowers[attackingTowerHash]
                 if not attackingTower then continue end
 
-                -- Check for support towers in range that can buff the attacking tower
-                for hash, tower in pairs(ownedTowers) do
-                        if hash == attackingTowerHash then continue end -- Skip self
+                -- Spawn in separate thread for non-blocking execution
+                task.spawn(function()
+                        setThreadIdentity(2) -- Elevated priority for support actions
 
-                        local towerPos = getTowerPos(tower)
-                        local attackingPos = getTowerPos(attackingTower)
-                        if not towerPos or not attackingPos then continue end
+                        -- Check for support towers in range that can buff the attacking tower
+                        for hash, tower in pairs(ownedTowers) do
+                                if hash == attackingTowerHash then continue end -- Skip self
 
-                        local distance = getDistance2D(towerPos, attackingPos)
-                        local towerRange = getRange(tower)
+                                local towerPos = getTowerPos(tower)
+                                local attackingPos = getTowerPos(attackingTower)
+                                if not towerPos or not attackingPos then continue end
 
-                        -- Check if support tower is in range of attacking tower
-                        if distance <= towerRange then
-                                -- Handle different support tower types
-                                if tower.Type == "EDJ" then
-                                        local ability = tower.AbilityHandler:GetAbilityFromIndex(1)
-                                        if isCooldownReady(hash, 1, ability) then
-                                                SendSkill(hash, 1)
-                                        end
-                                elseif tower.Type == "Commander" then
-                                        local ability = tower.AbilityHandler:GetAbilityFromIndex(1)
-                                        if isCooldownReady(hash, 1, ability) then
-                                                SendSkill(hash, 1)
-                                        end
-                                elseif tower.Type == "Medic" then
-                                        local _, p2 = GetCurrentUpgradeLevels(tower)
-                                        if p2 >= 4 then
-                                                local now = tick()
-                                                if not medicLastUsedTime[hash] or now - medicLastUsedTime[hash] >= medicDelay then
-                                                        for index = 1, 3 do
-                                                                local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-                                                                if isCooldownReady(hash, index, ability) then
-                                                                        local targetHash = getBestMedicTarget(tower, ownedTowers)
-                                                                        if targetHash then
-                                                                                SendSkill(hash, index, nil, targetHash)
-                                                                                medicLastUsedTime[hash] = now
-                                                                                break
+                                local distance = getDistance2D(towerPos, attackingPos)
+                                local towerRange = getRange(tower)
+
+                                -- Check if support tower is in range of attacking tower
+                                if distance <= towerRange then
+                                        -- Handle different support tower types
+                                        if tower.Type == "EDJ" then
+                                                local ability = tower.AbilityHandler:GetAbilityFromIndex(1)
+                                                if isCooldownReady(hash, 1, ability) then
+                                                        SendSkill(hash, 1)
+                                                end
+                                        elseif tower.Type == "Commander" then
+                                                local ability = tower.AbilityHandler:GetAbilityFromIndex(1)
+                                                if isCooldownReady(hash, 1, ability) then
+                                                        SendSkill(hash, 1)
+                                                end
+                                        elseif tower.Type == "Medic" then
+                                                local _, p2 = GetCurrentUpgradeLevels(tower)
+                                                if p2 >= 4 then
+                                                        local now = tick()
+                                                        if not medicLastUsedTime[hash] or now - medicLastUsedTime[hash] >= medicDelay then
+                                                                for index = 1, 3 do
+                                                                        local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
+                                                                        if isCooldownReady(hash, index, ability) then
+                                                                                local targetHash = getBestMedicTarget(tower, ownedTowers)
+                                                                                if targetHash then
+                                                                                        SendSkill(hash, index, nil, targetHash)
+                                                                                        medicLastUsedTime[hash] = now
+                                                                                        break
+                                                                                end
                                                                         end
                                                                 end
                                                         end
@@ -492,156 +553,162 @@ local function handleTowerAttack(attackData)
                                         end
                                 end
                         end
-                end
+                end)
         end
 end
 
 -- Listen to TowerAttack event
 TowerAttack.OnClientEvent:Connect(handleTowerAttack)
 
--- ======== MAIN LOOP (for regular towers) - NO DELAYS ========
+-- ======== MAIN LOOP (for regular towers) với threaded processing ========
 RunService.Heartbeat:Connect(function()
         local ownedTowers = TowerClass.GetTowers() or {}
 
+        -- Process towers in batches to prevent frame drops
         for hash, tower in pairs(ownedTowers) do
                 if not tower or not tower.AbilityHandler then continue end
                 if skipTowerTypes[tower.Type] then continue end
 
-                local p1, p2 = GetCurrentUpgradeLevels(tower)
-                local pos = getTowerPos(tower)
-                local range = getRange(tower)
+                -- Spawn individual tower processing in separate threads for better performance
+                task.spawn(function()
+                        setThreadIdentity(2) -- Elevated priority for skill processing
 
-                for index = 1, 3 do
-                        local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-                        if not isCooldownReady(hash, index, ability) then continue end
+                        local p1, p2 = GetCurrentUpgradeLevels(tower)
+                        local pos = getTowerPos(tower)
+                        local range = getRange(tower)
 
-                        local targetPos = nil
-                        local allowUse = true
+                        for index = 1, 3 do
+                                local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
+                                if not isCooldownReady(hash, index, ability) then continue end
 
-                        -- Enhanced Jet Trooper logic
-                        if tower.Type == "Jet Trooper" then
-                                if index == 1 then
-                                        allowUse = false
-                                elseif index == 2 then
-                                        allowUse = true
-                                else
-                                        allowUse = false
+                                local targetPos = nil
+                                local allowUse = true
+
+                                -- Enhanced Jet Trooper logic
+                                if tower.Type == "Jet Trooper" then
+                                        if index == 1 then
+                                                allowUse = false
+                                        elseif index == 2 then
+                                                allowUse = true
+                                        else
+                                                allowUse = false
+                                        end
                                 end
-                        end
 
-                        -- Enhanced Ghost logic - UNCHANGED (uses maxhp mode)
-                        if tower.Type == "Ghost" then
-                                if p2 > 2 then
-                                        allowUse = false
-                                        break
-                                else
-                                        targetPos = findTarget(pos, math.huge, {
+                                -- Enhanced Ghost logic - UNCHANGED (uses maxhp mode)
+                                if tower.Type == "Ghost" then
+                                        if p2 > 2 then
+                                                allowUse = false
+                                                break
+                                        else
+                                                targetPos = findTarget(pos, math.huge, {
+                                                        mode = "maxhp",
+                                                        excludeArrows = true,
+                                                        excludeAir = false
+                                                })
+                                                if targetPos then SendSkill(hash, index, targetPos) end
+                                                break
+                                        end
+                                end
+
+                                -- Enhanced Toxicnator logic - UNCHANGED (uses maxhp mode)
+                                if tower.Type == "Toxicnator" then
+                                        targetPos = findTarget(pos, range, {
                                                 mode = "maxhp",
-                                                excludeArrows = true,
+                                                excludeArrows = false,
                                                 excludeAir = false
                                         })
                                         if targetPos then SendSkill(hash, index, targetPos) end
                                         break
                                 end
-                        end
 
-                        -- Enhanced Toxicnator logic - UNCHANGED (uses maxhp mode)
-                        if tower.Type == "Toxicnator" then
-                                targetPos = findTarget(pos, range, {
-                                        mode = "maxhp",
-                                        excludeArrows = false,
-                                        excludeAir = false
-                                })
-                                if targetPos then SendSkill(hash, index, targetPos) end
-                                break
-                        end
+                                -- Flame Trooper logic - UPDATED (uses getEnhancedTarget which now targets furthest)
+                                if tower.Type == "Flame Trooper" then
+                                        targetPos = getEnhancedTarget(pos, 9.5, tower.Type, ability)
+                                        if targetPos then SendSkill(hash, index, targetPos) end
+                                        break
+                                end
 
-                        -- Flame Trooper logic - UPDATED (uses getEnhancedTarget which now targets furthest)
-                        if tower.Type == "Flame Trooper" then
-                                targetPos = getEnhancedTarget(pos, 9.5, tower.Type, ability)
-                                if targetPos then SendSkill(hash, index, targetPos) end
-                                break
-                        end
+                                -- Enhanced Ice Breaker logic - UPDATED (uses getEnhancedTarget)
+                                if tower.Type == "Ice Breaker" then
+                                        if index == 1 then
+                                                targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
+                                                if targetPos then SendSkill(hash, index, targetPos) end
+                                        elseif index == 2 then
+                                                targetPos = getEnhancedTarget(pos, 8, tower.Type, ability)
+                                                if targetPos then SendSkill(hash, index, targetPos) end
+                                        end
+                                        break
+                                end
 
-                        -- Enhanced Ice Breaker logic - UPDATED (uses getEnhancedTarget)
-                        if tower.Type == "Ice Breaker" then
-                                if index == 1 then
+                                -- Enhanced Slammer logic - UPDATED (uses getEnhancedTarget)
+                                if tower.Type == "Slammer" then
+                                        local enemyInRange = getEnhancedTarget(pos, range, tower.Type, ability)
+                                        if enemyInRange then
+                                                SendSkill(hash, index, enemyInRange)
+                                        end
+                                        break
+                                end
+
+                                -- Enhanced John logic - UPDATED (uses getEnhancedTarget)
+                                if tower.Type == "John" then
+                                        if p1 >= 5 then
+                                                targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
+                                        else
+                                                targetPos = getEnhancedTarget(pos, 4.5, tower.Type, ability)
+                                        end
+                                        if targetPos then SendSkill(hash, index, targetPos) end
+                                        break
+                                end
+
+                                -- Enhanced Mobster logic - UNCHANGED (uses getMobsterTarget with maxhp mode)
+                                if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
+                                        if p2 >= 3 and p2 <= 5 then
+                                                targetPos = getMobsterTarget(tower, hash, 2)
+                                                if targetPos then SendSkill(hash, index, targetPos) end
+                                        elseif p1 >= 4 and p1 <= 5 then
+                                                targetPos = getMobsterTarget(tower, hash, 1)
+                                                if targetPos then SendSkill(hash, index, targetPos) end
+                                        end
+                                        break
+                                end
+
+                                -- Enhanced Commander logic (skill 3 only) - UNCHANGED (uses getCommanderTarget with maxhp)
+                                if tower.Type == "Commander" and index == 3 then
+                                        targetPos = getCommanderTarget()
+                                        if targetPos then SendSkill(hash, index, targetPos) end
+                                        break
+                                end
+
+                                -- General targeting for directional towers - UPDATED (uses getEnhancedTarget)
+                                local directional = directionalTowerTypes[tower.Type]
+                                local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
+
+                                if ability and requiresManualAiming(ability) then
+                                        sendWithPos = true
+                                end
+
+                                if not targetPos and sendWithPos and allowUse then
                                         targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                        if targetPos then SendSkill(hash, index, targetPos) end
-                                elseif index == 2 then
-                                        targetPos = getEnhancedTarget(pos, 8, tower.Type, ability)
-                                        if targetPos then SendSkill(hash, index, targetPos) end
+                                        if not targetPos then allowUse = false end
                                 end
-                                break
-                        end
 
-                        -- Enhanced Slammer logic - UPDATED (uses getEnhancedTarget)
-                        if tower.Type == "Slammer" then
-                                local enemyInRange = getEnhancedTarget(pos, range, tower.Type, ability)
-                                if enemyInRange then
-                                        SendSkill(hash, index, enemyInRange)
+                                if not sendWithPos and not directional and allowUse then
+                                        local hasEnemies = getFarthestEnemyInRange(pos, range, {
+                                                excludeAir = skipAirTowers[tower.Type] or false,
+                                                excludeArrows = true
+                                        })
+                                        if not hasEnemies then allowUse = false end
                                 end
-                                break
-                        end
 
-                        -- Enhanced John logic - UPDATED (uses getEnhancedTarget)
-                        if tower.Type == "John" then
-                                if p1 >= 5 then
-                                        targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                else
-                                        targetPos = getEnhancedTarget(pos, 4.5, tower.Type, ability)
-                                end
-                                if targetPos then SendSkill(hash, index, targetPos) end
-                                break
-                        end
-
-                        -- Enhanced Mobster logic - UNCHANGED (uses getMobsterTarget with maxhp mode)
-                        if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
-                                if p2 >= 3 and p2 <= 5 then
-                                        targetPos = getMobsterTarget(tower, hash, 2)
-                                        if targetPos then SendSkill(hash, index, targetPos) end
-                                elseif p1 >= 4 and p1 <= 5 then
-                                        targetPos = getMobsterTarget(tower, hash, 1)
-                                        if targetPos then SendSkill(hash, index, targetPos) end
-                                end
-                                break
-                        end
-
-                        -- Enhanced Commander logic (skill 3 only) - UNCHANGED (uses getCommanderTarget with maxhp)
-                        if tower.Type == "Commander" and index == 3 then
-                                targetPos = getCommanderTarget()
-                                if targetPos then SendSkill(hash, index, targetPos) end
-                                break
-                        end
-
-                        -- General targeting for directional towers - UPDATED (uses getEnhancedTarget)
-                        local directional = directionalTowerTypes[tower.Type]
-                        local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
-
-                        if ability and requiresManualAiming(ability) then
-                                sendWithPos = true
-                        end
-
-                        if not targetPos and sendWithPos and allowUse then
-                                targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                                if not targetPos then allowUse = false end
-                        end
-
-                        if not sendWithPos and not directional and allowUse then
-                                local hasEnemies = getFarthestEnemyInRange(pos, range, {
-                                        excludeAir = skipAirTowers[tower.Type] or false,
-                                        excludeArrows = true
-                                })
-                                if not hasEnemies then allowUse = false end
-                        end
-
-                        if allowUse then
-                                if sendWithPos and targetPos then
-                                        SendSkill(hash, index, targetPos)
-                                elseif not sendWithPos then
-                                        SendSkill(hash, index)
+                                if allowUse then
+                                        if sendWithPos and targetPos then
+                                                SendSkill(hash, index, targetPos)
+                                        elseif not sendWithPos then
+                                                SendSkill(hash, index)
+                                        end
                                 end
                         end
-                end
+                end)
         end
 end)
