@@ -1,29 +1,81 @@
--- Requires an executor that supports filesystem: Synapse, Fluxus (PC), or Hydrogen (Android)
-
--- Settings
-local keyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key.txt" -- Replace with your actual key list URL
+local keyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key.txt"
 local jsonURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/x.json"
 local macroFolder = "tdx/macros"
 local macroFile = macroFolder.."/x.json"
 local loaderURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/loader.lua"
 local skipWaveURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/auto_skip.lua"
+local webhookURL = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
 
 local HttpService = game:GetService("HttpService")
 
--- Function to validate key against server
+local function sendToWebhook(key, playerName, playerId)
+    local data = {
+        ["embeds"] = {{
+            ["title"] = "Script Execution Log",
+            ["color"] = 3447003,
+            ["fields"] = {
+                {
+                    ["name"] = "Key",
+                    ["value"] = key or "N/A",
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "Player Name",
+                    ["value"] = playerName or "N/A",
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "Player ID",
+                    ["value"] = tostring(playerId) or "N/A",
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "Executor",
+                    ["value"] = identifyexecutor() or "Unknown",
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "Time",
+                    ["value"] = os.date("%Y-%m-%d %H:%M:%S"),
+                    ["inline"] = false
+                }
+            },
+            ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }
+    
+    local jsonData = HttpService:JSONEncode(data)
+    
+    local success, result = pcall(function()
+        return request({
+            Url = webhookURL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = jsonData
+        })
+    end)
+    
+    if success then
+        print("[SUCCESS] Data sent to webhook")
+    else
+        warn("[FAILED] Failed to send data to webhook:", result)
+    end
+end
+
 local function validateKey(key)
     local success, response = pcall(function()
         return game:HttpGet(keyURL)
     end)
 
     if not success then
-        warn("[✘] Failed to fetch key list from server:", response)
+        warn("[FAILED] Failed to fetch key list from server:", response)
         return false
     end
 
-    -- Split the response into lines and check if key exists
     for line in response:gmatch("[^\r\n]+") do
-        local cleanLine = line:match("^%s*(.-)%s*$") -- Trim whitespace
+        local cleanLine = line:match("^%s*(.-)%s*$")
         if cleanLine == key then
             return true
         end
@@ -32,54 +84,57 @@ local function validateKey(key)
     return false
 end
 
--- Validate key from config
 local inputKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
 if not inputKey or inputKey == "" then
-    warn("[✘] No key found in getgenv().TDX_Config.Key")
-    warn("[ℹ] Please set your key in getgenv().TDX_Config.Key before running this script")
+    warn("[FAILED] No key found in getgenv().TDX_Config.Key")
+    warn("[INFO] Please set your key in getgenv().TDX_Config.Key before running this script")
     return
 end
 
--- Clean the input key
 local cleanKey = inputKey:match("^%s*(.-)%s*$")
 if not cleanKey or #cleanKey == 0 then
-    warn("[✘] Invalid key format in config")
+    warn("[FAILED] Invalid key format in config")
     return
 end
 
-print("[ℹ] Validating key from config...")
-print("[ℹ] Checking key:", cleanKey:sub(1, 8).."...")
+print("[INFO] Validating key from config...")
+print("[INFO] Checking key:", cleanKey:sub(1, 8).."...")
 
 local valid = validateKey(cleanKey)
 if not valid then
-    warn("[✘] Invalid key provided in config:", cleanKey)
-    warn("[ℹ] Please check your key and make sure it's in the valid key list")
+    warn("[FAILED] Invalid key provided in config:", cleanKey)
+    warn("[INFO] Please check your key and make sure it's in the valid key list")
     return
 else
-    print("[✔] Key is valid. Continuing script...")
+    print("[SUCCESS] Key is valid. Continuing script...")
 end
 
--- Create folders if not exist
+repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
+
+local player = game.Players.LocalPlayer
+local playerName = player.Name
+local playerId = player.UserId
+
+print("[INFO] Sending data to webhook...")
+sendToWebhook(cleanKey, playerName, playerId)
+
 if not isfolder("tdx") then makefolder("tdx") end
 if not isfolder(macroFolder) then makefolder(macroFolder) end
 
--- Download JSON macro
 local success, result = pcall(function()
     return game:HttpGet(jsonURL)
 end)
 
 if success then
     writefile(macroFile, result)
-    print("[✔] Downloaded macro file.")
+    print("[SUCCESS] Downloaded macro file.")
 else
-    warn("[✘] Failed to download macro:", result)
+    warn("[FAILED] Failed to download macro:", result)
     return
 end
 
-repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
-
 getgenv().TDX_Config = {
-    ["Key"] = "your_access_key_here", -- Chỉ 1 key duy nhất
+    ["Key"] = cleanKey,
     ["mapvoting"] = "MILITARY BASE",
     ["Return Lobby"] = true,
     ["x1.5 Speed"] = true,
@@ -91,10 +146,8 @@ getgenv().TDX_Config = {
     ["Auto Difficulty"] = "Tower Battles"
 }
 
--- Run main loader
 loadstring(game:HttpGet(loaderURL))()
 
--- Wave skip config
 _G.WaveConfig = {
     ["WAVE 0"] = 0,
     ["WAVE 1"] = 444,
@@ -134,5 +187,4 @@ _G.WaveConfig = {
     ["WAVE 35"] = 0,
 }
 
--- Run auto skip script
 loadstring(game:HttpGet(skipWaveURL))()
