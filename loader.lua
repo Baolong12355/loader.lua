@@ -1,18 +1,15 @@
 local webhook_url = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
 if webhook_url == "YOUR_WEBHOOK_URL_HERE" then return end
 
--- services
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 repeat wait() until game:IsLoaded() and Players.LocalPlayer
 local player = Players.LocalPlayer
 
--- kiểm tra place ID để skip một số tính năng
 local currentPlaceId = game.PlaceId
 local shouldSkipFeatures = (currentPlaceId == 9503261072)
 
--- send webhook
 local function sendToWebhook(embedData)
     local data = { ["embeds"] = {embedData} }
     local json = HttpService:JSONEncode(data)
@@ -33,7 +30,6 @@ local function sendToWebhook(embedData)
     end)
 end
 
--- chạy script từ url
 local function tryRun(playerName, name, enabled, url)
     if not (enabled and typeof(url) == "string" and url:match("^https?://")) then return end
 
@@ -65,11 +61,9 @@ local function tryRun(playerName, name, enabled, url)
     end
 end
 
--- sửa config tạm
 if getgenv().TDX_Config["mapvoting"] ~= nil then getgenv().TDX_Config["Voter"] = true end
 if getgenv().TDX_Config["loadout"] ~= nil then getgenv().TDX_Config["Loadout"] = true end
 
--- đường dẫn scripts
 local base = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/"
 local links = {
     ["x1.5 Speed"]      = base .. "speed.lua",
@@ -85,7 +79,6 @@ local links = {
     ["DOKf"]            = base .. "DOKf.lua"
 }
 
--- báo bắt đầu
 local initMessage = "User **`" .. player.Name .. "`** (ID: `" .. player.UserId .. "`) has started the script."
 if shouldSkipFeatures then
     initMessage = initMessage .. " **[Place ID " .. currentPlaceId .. " - Some features disabled]**"
@@ -99,7 +92,35 @@ sendToWebhook({
     timestamp = os.date("!%Y-%m-%dT%H:%M:%S.000Z")
 })
 
--- load các chức năng (một số sẽ bị skip nếu ở place ID 9503261072)
+local function logUserConfigFull(configTable)
+    local function safeJsonEncode(tbl)
+        local success, result = pcall(function()
+            return HttpService:JSONEncode(tbl)
+        end)
+        return success and result or "Failed to encode config"
+    end
+
+    local fullJson = safeJsonEncode(configTable)
+    local preview = fullJson:sub(1, 1000)
+    if fullJson:len() > 1000 then
+        preview = preview .. "...\n(Truncated)"
+    end
+
+    sendToWebhook({
+        title = "Full TDX_Config",
+        description = "Config for **`" .. player.Name .. "`**",
+        color = 15844367,
+        fields = {{
+            name = "TDX_Config",
+            value = "```json\n" .. preview .. "\n```"
+        }},
+        footer = { text = "Full config log" },
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%S.000Z")
+    })
+end
+
+logUserConfigFull(getgenv().TDX_Config)
+
 spawn(function() tryRun(player.Name, "Join Map", getgenv().TDX_Config["Map"] ~= nil, links["Join Map"]) end)
 
 if not shouldSkipFeatures then
@@ -124,7 +145,6 @@ else
     })
 end
 
--- macro (không bị ảnh hưởng bởi place ID)
 local macro_type = getgenv().TDX_Config["Macros"]
 if macro_type == "run" or macro_type == "record" then
     local macroName = (macro_type == "run") and "Run Macro" or "Record Macro"
@@ -140,7 +160,6 @@ if macro_type == "run" or macro_type == "record" then
     spawn(function() tryRun(player.Name, macroName, true, links[macroName]) end)
 end
 
--- chạy DOKf nếu được bật
 if getgenv().TDX_Config["DOKf"] then
     sendToWebhook({
         title = "DOKf Activated",
