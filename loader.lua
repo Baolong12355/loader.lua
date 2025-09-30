@@ -95,11 +95,7 @@ sendToWebhook({
 local function logUserConfigFull(configTable)
     local copy = {}
     for k, v in pairs(configTable) do
-        if k == "Key" then
-            if v ~= "your_access_key_here" then
-                copy[k] = v
-            end
-        else
+        if k ~= "Key" then
             copy[k] = v
         end
     end
