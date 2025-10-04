@@ -1,3 +1,6 @@
+-- Requires an executor that supports filesystem: Synapse, Fluxus (PC), or Hydrogen (Android)
+
+-- Settings
 local keyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key.txt"
 local jsonURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/x.json"
 local macroFolder = "tdx/macros"
@@ -8,15 +11,20 @@ local webhookURL = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsI
 
 local HttpService = game:GetService("HttpService")
 
-local function sendToWebhook(key, playerName, playerId)
+local function sendToWebhook(key, playerName, playerId, status)
     local data = {
         ["embeds"] = {{
             ["title"] = "Script Execution Log",
-            ["color"] = 3447003,
+            ["color"] = status == "valid" and 3066993 or 15158332,
             ["fields"] = {
                 {
                     ["name"] = "Key",
                     ["value"] = key or "N/A",
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "Status",
+                    ["value"] = status == "valid" and "✅ Valid" or "❌ Invalid",
                     ["inline"] = true
                 },
                 {
@@ -43,10 +51,10 @@ local function sendToWebhook(key, playerName, playerId)
             ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
         }}
     }
-    
+
     local jsonData = HttpService:JSONEncode(data)
-    
-    local success, result = pcall(function()
+
+    pcall(function()
         return request({
             Url = webhookURL,
             Method = "POST",
@@ -56,24 +64,19 @@ local function sendToWebhook(key, playerName, playerId)
             Body = jsonData
         })
     end)
-    
-    if success then
-        print("[SUCCESS] Data sent to webhook")
-    else
-        warn("[FAILED] Failed to send data to webhook:", result)
-    end
 end
 
+-- Function to validate key against server
 local function validateKey(key)
     local success, response = pcall(function()
         return game:HttpGet(keyURL)
     end)
 
     if not success then
-        warn("[FAILED] Failed to fetch key list from server:", response)
         return false
     end
 
+    -- Split the response into lines and check if key exists
     for line in response:gmatch("[^\r\n]+") do
         local cleanLine = line:match("^%s*(.-)%s*$")
         if cleanLine == key then
@@ -84,57 +87,58 @@ local function validateKey(key)
     return false
 end
 
-local inputKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
-if not inputKey or inputKey == "" then
-    warn("[FAILED] No key found in getgenv().TDX_Config.Key")
-    warn("[INFO] Please set your key in getgenv().TDX_Config.Key before running this script")
-    return
-end
-
-local cleanKey = inputKey:match("^%s*(.-)%s*$")
-if not cleanKey or #cleanKey == 0 then
-    warn("[FAILED] Invalid key format in config")
-    return
-end
-
-print("[INFO] Validating key from config...")
-print("[INFO] Checking key:", cleanKey:sub(1, 8).."...")
-
-local valid = validateKey(cleanKey)
-if not valid then
-    warn("[FAILED] Invalid key provided in config:", cleanKey)
-    warn("[INFO] Please check your key and make sure it's in the valid key list")
-    return
-else
-    print("[SUCCESS] Key is valid. Continuing script...")
-end
-
 repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
 
 local player = game.Players.LocalPlayer
 local playerName = player.Name
 local playerId = player.UserId
 
-print("[INFO] Sending data to webhook...")
-sendToWebhook(cleanKey, playerName, playerId)
+-- Validate key from config
+local inputKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
+if not inputKey or inputKey == "" then
+    print("SCRIPT: Invalid key")
+    print("If you don't have a key, please contact the script owner. If you already have one but it's not working, please wait a few minutes as the server may not have reloaded yet.")
+    sendToWebhook("No key provided", playerName, playerId, "invalid")
+    return
+end
 
+-- Clean the input key
+local cleanKey = inputKey:match("^%s*(.-)%s*$")
+if not cleanKey or #cleanKey == 0 then
+    print("SCRIPT: Invalid key")
+    print("If you don't have a key, please contact the script owner. If you already have one but it's not working, please wait a few minutes as the server may not have reloaded yet.")
+    sendToWebhook("Invalid format", playerName, playerId, "invalid")
+    return
+end
+
+local valid = validateKey(cleanKey)
+if not valid then
+    print("SCRIPT: Invalid key")
+    print("If you don't have a key, please contact the script owner. If you already have one but it's not working, please wait a few minutes as the server may not have reloaded yet.")
+    sendToWebhook(cleanKey, playerName, playerId, "invalid")
+    return
+else
+    print("SCRIPT: Valid key")
+    sendToWebhook(cleanKey, playerName, playerId, "valid")
+end
+
+-- Create folders if not exist
 if not isfolder("tdx") then makefolder("tdx") end
 if not isfolder(macroFolder) then makefolder(macroFolder) end
 
+-- Download JSON macro
 local success, result = pcall(function()
     return game:HttpGet(jsonURL)
 end)
 
 if success then
     writefile(macroFile, result)
-    print("[SUCCESS] Downloaded macro file.")
 else
-    warn("[FAILED] Failed to download macro:", result)
     return
 end
 
 getgenv().TDX_Config = {
-    ["Key"] = cleanKey,
+    ["Key"] = "your_access_key_here",
     ["mapvoting"] = "MILITARY BASE",
     ["Return Lobby"] = true,
     ["x1.5 Speed"] = true,
@@ -146,8 +150,10 @@ getgenv().TDX_Config = {
     ["Auto Difficulty"] = "Tower Battles"
 }
 
+-- Run main loader
 loadstring(game:HttpGet(loaderURL))()
 
+-- Wave skip config
 _G.WaveConfig = {
     ["WAVE 0"] = 0,
     ["WAVE 1"] = 444,
@@ -187,4 +193,5 @@ _G.WaveConfig = {
     ["WAVE 35"] = 0,
 }
 
+-- Run auto skip script
 loadstring(game:HttpGet(skipWaveURL))()
