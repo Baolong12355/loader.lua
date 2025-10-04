@@ -70,7 +70,7 @@ local function sendViolationLog(violationType, details)
                 end
             end)
             if success then break end
-            task.wait(0.1)
+            task.wait(0.5)
         end
     end)
 end
