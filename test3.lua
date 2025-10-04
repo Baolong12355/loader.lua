@@ -4,6 +4,7 @@
     Mô tả:
     - Sử dụng RunService.RenderStepped để cập nhật giao diện mượt mà theo từng khung hình.
     - Đảm bảo GUI luôn hiển thị trên cùng bằng cách đặt DisplayOrder ở mức tối đa.
+    - Lọc ra những kẻ địch đã chết (dead) hoặc giả (fake) để không hiển thị trên giao diện.
     - Tích hợp cơ chế bảo vệ nghiêm ngặt:
         + Tự động kick người chơi nếu có bất kỳ hành vi nào cố gắng xóa hoặc thay đổi thuộc tính của GUI.
         + Gửi thông tin chi tiết về hành vi gian lận (Tên người chơi, ID, lý do) đến Discord webhook.
@@ -56,7 +57,7 @@ statusLabel.TextSize = 24
 statusLabel.TextWrapped = true
 statusLabel.TextYAlignment = Enum.TextYAlignment.Top
 statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-statusLabel.Text = "Đang tải..."
+statusLabel.Text = "Loading..."
 statusLabel.ZIndex = 2
 statusLabel.Parent = screenGui
 
@@ -166,9 +167,10 @@ RunService.RenderStepped:Connect(function()
         local nameCount = {}
 
         for _, enemy in pairs(enemies) do
-            if enemy and enemy.IsAlive and enemy.HealthHandler and enemy.HealthHandler.GetHealth and enemy.HealthHandler.GetMaxHealth then
+            -- Chỉ xử lý những kẻ địch còn sống và không phải là "fake"
+            if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy.HealthHandler and enemy.HealthHandler.GetHealth and enemy.HealthHandler.GetMaxHealth then
                 local name = enemy.DisplayName or "Unknown"
-                local hp = formatPercent(enemy.HealthHandler:GetHealth() / enemy.HealthHandler:GetMaxHealth())
+                local hp = formatPercent(enemy.HealthHandler:GetHealth() / enemy.HealthHandler.GetMaxHealth())
                 local key = name .. " | " .. hp
                 nameCount[key] = (nameCount[key] or 0) + 1
             end
