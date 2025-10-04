@@ -179,23 +179,29 @@ if not isfolder("tdx") then makefolder("tdx") end
 if not isfolder(macroFolder) then makefolder(macroFolder) end
 
 -- Download macro file
+print("SCRIPT: Downloading macro file...")
 local success, result = pcall(function()
     return game:HttpGet(jsonURL)
 end)
 
 if success then
     writefile(macroFile, result)
+    print("SCRIPT: Macro file saved successfully")
 else
+    print("SCRIPT: [ERROR] Failed to download macro file")
+    warn("Error:", result)
     return
 end
 
 -- ============================================
 -- SETUP CONFIG - QUAN TRỌNG: ĐẶT SAU KHI CHECK KEY
 -- ============================================
+print("SCRIPT: Setting up TDX_Config...")
+
 getgenv().TDX_Config = {
     ["Return Lobby"] = true,
     ["x1.5 Speed"] = true,
-    ["DOKf"] = true,  -- ← KEY QUAN TRỌNG CHO MAP
+    ["DOKf"] = true,
     ["Auto Skill"] = true,
     ["Map"] = "SCORCHED PASSAGE",
     ["Macros"] = "run",
@@ -206,10 +212,15 @@ getgenv().TDX_Config = {
 -- Khôi phục key đã lưu
 if existingKey then
     getgenv().TDX_Config.Key = existingKey
+    print("SCRIPT: Key restored to config")
 end
 
-print("SCRIPT: Config loaded - Map:", getgenv().TDX_Config["Map"])
+print("SCRIPT: ✓ Config loaded successfully")
+print("SCRIPT: - Map:", getgenv().TDX_Config["Map"])
+print("SCRIPT: - Difficulty:", getgenv().TDX_Config["Auto Difficulty"])
+print("SCRIPT: - Macro Name:", getgenv().TDX_Config["Macro Name"])
 
+print("SCRIPT: Loading main script...")
 loadstring(game:HttpGet(loaderURL))()
 
 -- ============================================
