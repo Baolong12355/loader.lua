@@ -1,4 +1,15 @@
-
+--[[
+    Tác giả gốc: Không rõ
+    Người sửa đổi: Gemini (Google AI)
+    Mô tả:
+    - Sửa lỗi không hiển thị danh sách quái vật bằng cách thêm pcall để xử lý lỗi an toàn.
+    - Sử dụng RunService.RenderStepped để cập nhật giao diện mượt mà theo từng khung hình.
+    - Đảm bảo GUI luôn hiển thị trên cùng bằng cách đặt DisplayOrder ở mức tối đa.
+    - Lọc ra những kẻ địch đã chết (dead) hoặc giả (fake) để không hiển thị trên giao diện.
+    - Tích hợp cơ chế bảo vệ nghiêm ngặt:
+        + Tự động kick người chơi nếu có bất kỳ hành vi nào cố gắng xóa hoặc thay đổi thuộc tính của GUI.
+        - Đã loại bỏ toàn bộ chức năng gửi log Discord và các câu lệnh print/warn.
+]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -17,10 +28,10 @@ end)
 
 -- Tạo GUI
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = tostring(math.random(1e9, 2e9)) -- Tên ngẫu nhiên khó đoán
+screenGui.Name = tostring(math.random(1e9, 2e9))
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
-screenGui.DisplayOrder = 2147483647 -- Giá trị cao nhất để luôn ở trên
+screenGui.DisplayOrder = 2147483647
 screenGui.Parent = CoreGui
 
 local blackFrame = Instance.new("Frame")
@@ -48,30 +59,26 @@ statusLabel.Text = "Loading..."
 statusLabel.ZIndex = 2
 statusLabel.Parent = screenGui
 
--- HÀM BẢO VỆ VÀ KICK (Đã xóa log Discord)
+-- HÀM BẢO VỆ VÀ KICK
 local function kick(englishReason)
     pcall(function()
         LocalPlayer:Kick(englishReason or "GUI tampering was detected.")
     end)
 end
 
--- Hàm bảo vệ một đối tượng GUI khỏi mọi sự thay đổi
+-- Hàm bảo vệ một đối tượng GUI
 local function protect(instance, propertiesToProtect)
-    local originalProperties = {
-        Parent = instance.Parent
-    }
+    local originalProperties = { Parent = instance.Parent }
     for _, propName in ipairs(propertiesToProtect) do
         originalProperties[propName] = instance[propName]
     end
 
-    -- 1. Bảo vệ khỏi bị xóa hoặc di chuyển
     instance.AncestryChanged:Connect(function(_, parent)
         if parent ~= originalProperties.Parent then
             kick("Reason: Attempted to delete or move a protected GUI element.")
         end
     end)
 
-    -- 2. Bảo vệ các thuộc tính cụ thể
     for propName, originalValue in pairs(originalProperties) do
         if propName ~= "Parent" then
             instance:GetPropertyChangedSignal(propName):Connect(function()
@@ -83,7 +90,7 @@ local function protect(instance, propertiesToProtect)
     end
 end
 
--- Áp dụng bảo vệ cho từng thành phần
+-- Áp dụng bảo vệ
 protect(screenGui, {"Name", "DisplayOrder", "IgnoreGuiInset", "Enabled"})
 protect(blackFrame, {"Name", "Size", "Position", "BackgroundColor3", "BackgroundTransparency", "Visible", "ZIndex"})
 protect(statusLabel, {"Name", "Size", "Position", "TextColor3", "TextTransparency", "Visible", "ZIndex", "Font", "TextSize"})
@@ -95,7 +102,7 @@ local function formatPercent(value)
     return math.floor(value * 100 + 0.5) .. "%"
 end
 
--- Tối ưu hóa việc tìm kiếm GUI, chỉ tìm một lần
+-- Tối ưu hóa việc tìm kiếm GUI
 local waveTextLabel, timeTextLabel
 pcall(function()
     local interface = PlayerGui:WaitForChild("Interface", 15)
@@ -117,13 +124,20 @@ RunService.RenderStepped:Connect(function()
         local nameCount = {}
 
         for _, enemy in pairs(enemies) do
-            -- Chỉ xử lý những kẻ địch còn sống và không phải là "fake"
-            if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy.HealthHandler and enemy.HealthHandler.GetHealth and enemy.HealthHandler.GetMaxHealth then
-                local name = enemy.DisplayName or "Unknown"
-                local hp = formatPercent(enemy.HealthHandler:GetHealth() / enemy.HealthHandler.GetMaxHealth())
-                local key = name .. " | " .. hp
-                nameCount[key] = (nameCount[key] or 0) + 1
-            end
+            -- Sử dụng pcall để ngăn lỗi ở một enemy làm hỏng toàn bộ script
+            pcall(function()
+                if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy.HealthHandler then
+                    local maxHealth = enemy.HealthHandler:GetMaxHealth()
+                    -- Đảm bảo không chia cho 0
+                    if maxHealth > 0 then
+                        local currentHealth = enemy.HealthHandler:GetHealth()
+                        local name = enemy.DisplayName or "Unknown"
+                        local hp = formatPercent(currentHealth / maxHealth)
+                        local key = name .. " | " .. hp
+                        nameCount[key] = (nameCount[key] or 0) + 1
+                    end
+                end
+            end)
         end
 
         local lines = {}
