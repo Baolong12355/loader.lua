@@ -138,62 +138,63 @@ end
 local uiWaveText = nil
 
 RunService.Heartbeat:Connect(function()
-    pcall(function()
-        if gameHasEnded then return end
+    if gameHasEnded then return end
         
-        if _G.CurrentFPSControlledTower then
-            local currentTowerInstance = TowerClass.GetTower(_G.CurrentFPSControlledTower.Hash)
-            if not currentTowerInstance or currentTowerInstance.Destroyed then
-                FirstPersonHandler.Stop()
-                return
-            end
-        end
+    if not uiWaveText then
+        pcall(function() uiWaveText = PlayerGui:FindFirstChild("Interface"):FindFirstChild("GameInfoBar"):FindFirstChild("Wave"):FindFirstChild("WaveText") end)
+        return
+    end
 
-        if not uiWaveText then uiWaveText = PlayerGui:FindFirstChild("Interface"):FindFirstChild("GameInfoBar"):FindFirstChild("Wave"):FindFirstChild("WaveText") end
-        if uiWaveText and string.upper(uiWaveText.Text) == "WAVE 201" and _G.CurrentFPSControlledTower then FirstPersonHandler.Stop(); return end
+    if uiWaveText and string.upper(uiWaveText.Text) == "WAVE 201" and _G.CurrentFPSControlledTower then
+        FirstPersonHandler.Stop()
+        return
+    end
 
+    pcall(function()
         for hash, tower in pairs(TowerClass.GetTowers()) do
             if tower and tower.Type == "Combat Drone" and tower.OwnedByLocalPlayer and tower.LevelHandler then
                 local levelStats = tower.LevelHandler:GetLevelStats()
                 if levelStats then levelStats.IsSplash = true; levelStats.SplashRadius = NEW_SPLASH_RADIUS end
             end
         end
+    end)
 
-        if not _G.CurrentFPSControlledTower then return end
-
-        local canSwitchWeapons = false
+    if not _G.CurrentFPSControlledTower then return end
+    
+    local canSwitchWeapons = false
+    pcall(function()
         local levelStats = _G.CurrentFPSControlledTower.LevelHandler:GetLevelStats()
         if levelStats and levelStats.FirstPersonConfig and levelStats.FirstPersonConfig.AttackConfigs and #levelStats.FirstPersonConfig.AttackConfigs > 1 then canSwitchWeapons = true end
-
-        if canSwitchWeapons then
-            local hasResistantEnemy = false
-            for _, enemy in pairs(EnemyClass.GetEnemies()) do
-                if enemy and enemy.IsAlive and enemy.DamageReductionTable then
-                    for _, reductionInfo in ipairs(enemy.DamageReductionTable) do
-                        if reductionInfo.DamageType == Enums.DamageTypes.Explosive and reductionInfo.DamageReduction and reductionInfo.DamageReduction >= 0.74 then
-                            hasResistantEnemy = true; break
-                        end
+    end)
+    
+    if canSwitchWeapons then
+        local hasResistantEnemy = false
+        for _, enemy in pairs(EnemyClass.GetEnemies()) do
+            if enemy and enemy.IsAlive and enemy.DamageReductionTable then
+                for _, reductionInfo in ipairs(enemy.DamageReductionTable) do
+                    if reductionInfo.DamageType == Enums.DamageTypes.Explosive and reductionInfo.DamageReduction and reductionInfo.DamageReduction >= 0.74 then
+                        hasResistantEnemy = true; break
                     end
                 end
-                if hasResistantEnemy then break end
             end
-            
-            local desiredWeaponIndex = hasResistantEnemy and 1 or 2
-            local success, currentWeaponIndexVal = pcall(function() return debug.getupvalue(FirstPersonAttackManager.SwitchAttackHandler, 2) end)
-            
-            if success and currentWeaponIndexVal and desiredWeaponIndex ~= currentWeaponIndexVal then
-                FirstPersonHandler.SwitchAttackHandler(desiredWeaponIndex)
-            end
+            if hasResistantEnemy then break end
         end
-
-        local foundEnemy = false
-        for _, enemy in pairs(EnemyClass.GetEnemies()) do
-            if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then foundEnemy = true; break end
+        
+        local desiredWeaponIndex = hasResistantEnemy and 1 or 2
+        local success, currentWeaponIndexVal = pcall(function() return debug.getupvalue(FirstPersonAttackManager.SwitchAttackHandler, 2) end)
+        
+        if success and currentWeaponIndexVal and desiredWeaponIndex ~= currentWeaponIndexVal then
+            FirstPersonHandler.SwitchAttackHandler(desiredWeaponIndex)
         end
+    end
 
-        if foundEnemy then FirstPersonAttackManager.ToggleTryAttacking(true); hasNoEnemySet = false
-        elseif not hasNoEnemySet then FirstPersonAttackManager.ToggleTryAttacking(false); hasNoEnemySet = true end
-    end)
+    local foundEnemy = false
+    for _, enemy in pairs(EnemyClass.GetEnemies()) do
+        if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then foundEnemy = true; break end
+    end
+
+    if foundEnemy then FirstPersonAttackManager.ToggleTryAttacking(true); hasNoEnemySet = false
+    elseif not hasNoEnemySet then FirstPersonAttackManager.ToggleTryAttacking(false); hasNoEnemySet = true end
 end)
 
 NetworkingHandler.GetEvent("GameStateChanged"):AttachCallback(function(state)
