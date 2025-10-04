@@ -2,7 +2,7 @@
 -- CONFIG SETTINGS
 -- ============================================
 local CONFIG = {
-    ["EnableKeyCheck"] = true,  -- Đặt false để tắt check key
+    ["EnableKeyCheck"] = false,  -- Đặt false để tắt check key
 }
 
 -- ============================================
@@ -126,9 +126,12 @@ local playerName = player.Name
 local playerId = player.UserId
 
 -- Load black screen và FPS optimizer từ cùng base
-pcall(function()
-    loadstring(game:HttpGet(blackURL))()
-end)
+-- Black screen chỉ bật khi PlaceId = 11739766412
+if game.PlaceId == 11739766412 then
+    pcall(function()
+        loadstring(game:HttpGet(blackURL))()
+    end)
+end
 
 pcall(function()
     loadstring(game:HttpGet(fpsURL))()
