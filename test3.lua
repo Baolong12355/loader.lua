@@ -5,17 +5,15 @@
     - Sử dụng RunService.RenderStepped để cập nhật giao diện mượt mà theo từng khung hình.
     - Đảm bảo GUI luôn hiển thị trên cùng bằng cách đặt DisplayOrder ở mức tối đa.
     - Lọc ra những kẻ địch đã chết (dead) hoặc giả (fake) để không hiển thị trên giao diện.
-    - Tích hợp cơ chế bảo vệ nâng cao:
-        + Khi thuộc tính GUI bị thay đổi -> Tự động khôi phục về giá trị gốc.
-        + Sau khi khôi phục -> Gửi log chi tiết đến Discord Webhook.
-        + Sau khi gửi log thành công -> Kick người chơi.
-    - Đã loại bỏ toàn bộ các câu lệnh print/warn.
+    - Tích hợp cơ chế bảo vệ nghiêm ngặt:
+        + Tự động kick người chơi nếu có bất kỳ hành vi nào cố gắng xóa hoặc thay đổi thuộc tính của GUI.
+        + Thông báo kick được hiển thị bằng tiếng Anh.
+    - Đã loại bỏ toàn bộ chức năng gửi log Discord và các câu lệnh print/warn.
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
-local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -30,10 +28,10 @@ end)
 
 -- Tạo GUI
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = tostring(math.random(1e9, 2e9))
+screenGui.Name = tostring(math.random(1e9, 2e9)) -- Tên ngẫu nhiên khó đoán
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
-screenGui.DisplayOrder = 2147483647
+screenGui.DisplayOrder = 2147483647 -- Giá trị cao nhất để luôn ở trên
 screenGui.Parent = CoreGui
 
 local blackFrame = Instance.new("Frame")
@@ -61,71 +59,35 @@ statusLabel.Text = "Loading..."
 statusLabel.ZIndex = 2
 statusLabel.Parent = screenGui
 
--- HÀM BẢO VỆ, GỬI LOG VÀ KICK
-local webhookUrl = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
-local kickInProgress = false
-
--- Quy trình gửi log và kick (chạy bất đồng bộ)
-local function initiateLogAndKick(englishReason)
-    if kickInProgress then return end
-    kickInProgress = true
-
-    task.spawn(function()
-        -- 1. Gửi log tới Discord
-        pcall(function()
-            local payload = {
-                embeds = {{
-                    title = "Player Kicked: GUI Tampering Detected",
-                    color = 16711680, -- Red
-                    fields = {
-                        { name = "Player", value = `[{LocalPlayer.Name}](https://www.roblox.com/users/{LocalPlayer.UserId}/profile)`, inline = true },
-                        { name = "User ID", value = tostring(LocalPlayer.UserId), inline = true },
-                        { name = "Reason", value = "```" .. englishReason .. "```" }
-                    },
-                    footer = { text = "Security System" },
-                    timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-                }}
-            }
-            local encodedPayload = HttpService:JSONEncode(payload)
-            HttpService:PostAsync(webhookUrl, encodedPayload, Enum.HttpContentType.ApplicationJson)
-        end)
-
-        -- 2. Chờ 2 giây để đảm bảo webhook được gửi đi
-        task.wait(0.5)
-
-        -- 3. Kick người chơi
-        pcall(function()
-            LocalPlayer:Kick(englishReason or "GUI tampering was detected and has been logged.")
-        end)
+-- HÀM BẢO VỆ VÀ KICK (Đã xóa log Discord)
+local function kick(englishReason)
+    pcall(function()
+        LocalPlayer:Kick(englishReason or "GUI tampering was detected.")
     end)
 end
 
 -- Hàm bảo vệ một đối tượng GUI khỏi mọi sự thay đổi
 local function protect(instance, propertiesToProtect)
-    local originalProperties = { Parent = instance.Parent }
+    local originalProperties = {
+        Parent = instance.Parent
+    }
     for _, propName in ipairs(propertiesToProtect) do
         originalProperties[propName] = instance[propName]
     end
 
-    -- 1. Bảo vệ khỏi bị xóa hoặc di chuyển (không thể khôi phục)
+    -- 1. Bảo vệ khỏi bị xóa hoặc di chuyển
     instance.AncestryChanged:Connect(function(_, parent)
         if parent ~= originalProperties.Parent then
-            initiateLogAndKick("Reason: Attempted to delete or move a protected GUI element.")
+            kick("Reason: Attempted to delete or move a protected GUI element.")
         end
     end)
 
-    -- 2. Bảo vệ các thuộc tính (có thể khôi phục)
+    -- 2. Bảo vệ các thuộc tính cụ thể
     for propName, originalValue in pairs(originalProperties) do
         if propName ~= "Parent" then
             instance:GetPropertyChangedSignal(propName):Connect(function()
-                local currentValue = instance[propName]
-                if currentValue ~= originalValue then
-                    -- Khôi phục thuộc tính ngay lập tức
-                    instance[propName] = originalValue
-                    
-                    -- Bắt đầu quy trình log và kick
-                    local reason = string.format("Attempted to modify protected GUI property: %s", propName)
-                    initiateLogAndKick(reason)
+                if instance[propName] ~= originalValue then
+                    kick("Reason: Attempted to modify protected GUI property: " .. propName)
                 end
             end)
         end
@@ -166,6 +128,7 @@ RunService.RenderStepped:Connect(function()
         local nameCount = {}
 
         for _, enemy in pairs(enemies) do
+            -- Chỉ xử lý những kẻ địch còn sống và không phải là "fake"
             if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy.HealthHandler and enemy.HealthHandler.GetHealth and enemy.HealthHandler.GetMaxHealth then
                 local name = enemy.DisplayName or "Unknown"
                 local hp = formatPercent(enemy.HealthHandler:GetHealth() / enemy.HealthHandler.GetMaxHealth())
