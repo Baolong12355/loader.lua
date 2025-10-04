@@ -224,7 +224,7 @@ local function UpgradeTowerRetry(axisValue, path)
     while attempts < maxAttempts do
         local hash, tower = WaitForTowerInitialization(axisValue)
         if not hash then
-            task.wait()
+            task.wait(0.2)
             attempts = attempts + 1
             continue
         end
@@ -257,7 +257,7 @@ local function UpgradeTowerRetry(axisValue, path)
         until tick() - startTime > 3
 
         attempts = attempts + 1
-        task.wait(0.1)
+        task.wait()
     end
     RemoveFromRebuildCache(axisValue)
     return false
