@@ -1,3 +1,4 @@
+
 -- ============================================
 -- CONFIG SETTINGS
 -- ============================================
@@ -14,6 +15,7 @@ local loaderURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/mai
 local skipWaveURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/auto_skip.lua"
 local webhookURL = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
 
+-- URLs cho black screen và FPS
 local blackURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/black.lua"
 local fpsURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/fps.lua"
 
@@ -80,6 +82,7 @@ end
 -- ============================================
 local function validateKey(key, playerName)
     if not CONFIG.EnableKeyCheck then
+        print("SCRIPT: Key check is disabled - bypassing validation")
         return true, "bypass"
     end
     
@@ -93,21 +96,28 @@ local function validateKey(key, playerName)
 
     local keyExists = false
     
+    -- Format trong key3.txt: key/name
     for line in response:gmatch("[^\r\n]+") do
         local cleanLine = line:match("^%s*(.-)%s*$")
         
         if cleanLine and #cleanLine > 0 then
+            -- Tách key và name
             local keyPart, namePart = cleanLine:match("^(.+)/(.+)$")
             
             if keyPart and namePart then
+                -- Trim whitespace
                 keyPart = keyPart:match("^%s*(.-)%s*$")
                 namePart = namePart:match("^%s*(.-)%s*$")
                 
+                -- Check key trước
                 if keyPart == key then
                     keyExists = true
+                    -- Nếu key đúng, check name
                     if namePart == playerName then
+                        -- Key và name đều đúng
                         return true, "success"
                     else
+                        -- Key đúng nhưng name sai
                         return false, "wrong_name"
                     end
                 end
@@ -115,6 +125,7 @@ local function validateKey(key, playerName)
         end
     end
 
+    -- Key không tồn tại
     if not keyExists then
         return false, "key_not_found"
     end
@@ -131,12 +142,9 @@ local player = game.Players.LocalPlayer
 local playerName = player.Name
 local playerId = player.UserId
 
--- Lưu key trước khi validate
-local existingKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
-
 -- Key validation
 if CONFIG.EnableKeyCheck then
-    local inputKey = existingKey
+    local inputKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
     if not inputKey or inputKey == "" then
         print("SCRIPT: No key detected in config. Please set your key in getgenv().TDX_Config.Key")
         return
@@ -151,9 +159,9 @@ if CONFIG.EnableKeyCheck then
     local valid, reason = validateKey(cleanKey, playerName)
     if not valid then
         if reason == "wrong_name" then
-            print("SCRIPT: Wrong username. If you want to reset your username, please contact the script owner.")
+            print("SCRIPT: Wrong username. If you want to reset your username, please contact the script owner. If you have already reset it and still getting this error, please wait a few minutes as the server may not have reloaded yet.")
         else
-            print("SCRIPT: Your key does not exist. Please check back in a few minutes.")
+            print("SCRIPT: Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
         end
         return
     else
@@ -161,66 +169,46 @@ if CONFIG.EnableKeyCheck then
     end
     
     sendToWebhook(cleanKey, playerName, playerId)
+else
+    print("SCRIPT: Key check is disabled - skipping validation")
 end
 
--- Load black screen và FPS optimizer
+-- Load black screen và FPS optimizer (chỉ khi PlaceId = 11739766412)
 if game.PlaceId == 11739766412 then
     pcall(function()
         loadstring(game:HttpGet(blackURL))()
     end)
+    
+    pcall(function()
+        loadstring(game:HttpGet(fpsURL))()
+    end)
 end
-
-pcall(function()
-    loadstring(game:HttpGet(fpsURL))()
-end)
 
 -- Create folders
 if not isfolder("tdx") then makefolder("tdx") end
 if not isfolder(macroFolder) then makefolder(macroFolder) end
 
 -- Download macro file
-print("SCRIPT: Downloading macro file...")
 local success, result = pcall(function()
     return game:HttpGet(jsonURL)
 end)
 
 if success then
     writefile(macroFile, result)
-    print("SCRIPT: Macro file saved successfully")
 else
-    print("SCRIPT: [ERROR] Failed to download macro file")
-    warn("Error:", result)
     return
 end
 
--- ============================================
--- SETUP CONFIG - QUAN TRỌNG: ĐẶT SAU KHI CHECK KEY
--- ============================================
-print("SCRIPT: Setting up TDX_Config...")
+-- Setup config
+getgenv().TDX_Config = getgenv().TDX_Config or {}
+getgenv().TDX_Config["Return Lobby"] = true
+getgenv().TDX_Config["x1.5 Speed"] = true
+getgenv().TDX_Config["Auto Skill"] = true
+getgenv().TDX_Config["Map"] = "SCORCHED PASSAGE"
+getgenv().TDX_Config["Macros"] = "run"
+getgenv().TDX_Config["Macro Name"] = "x"
+getgenv().TDX_Config["Auto Difficulty"] = "Endless"
 
-getgenv().TDX_Config = {
-    ["Return Lobby"] = true,
-    ["x1.5 Speed"] = true,
-    ["DOKf"] = true,
-    ["Auto Skill"] = true,
-    ["Map"] = "SCORCHED PASSAGE",
-    ["Macros"] = "run",
-    ["Macro Name"] = "x",
-    ["Auto Difficulty"] = "Endless"
-}
-
--- Khôi phục key đã lưu
-if existingKey then
-    getgenv().TDX_Config.Key = existingKey
-    print("SCRIPT: Key restored to config")
-end
-
-print("SCRIPT: ✓ Config loaded successfully")
-print("SCRIPT: - Map:", getgenv().TDX_Config["Map"])
-print("SCRIPT: - Difficulty:", getgenv().TDX_Config["Auto Difficulty"])
-print("SCRIPT: - Macro Name:", getgenv().TDX_Config["Macro Name"])
-
-print("SCRIPT: Loading main script...")
 loadstring(game:HttpGet(loaderURL))()
 
 -- ============================================
@@ -233,19 +221,20 @@ for i = 1, 100 do
     local waveName = "WAVE " .. i
 
     if i == 70 or i == 81 or i == 100 then
-        _G.WaveConfig[waveName] = 0
+        _G.WaveConfig[waveName] = 0 -- không skip
     else
-        _G.WaveConfig[waveName] = "now"
+        _G.WaveConfig[waveName] = "now" -- skip ngay lập tức
     end
 end
 
--- Non-skippable waves 101–200
+-- Các wave không skip từ 101–200
 local nonSkippableWaves = {
     129, 130, 137, 140, 142,
     149, 150, 152, 159, 162,
     199, 200
 }
 
+-- Thêm range 165–193 vào danh sách không skip
 for i = 165, 193 do
     table.insert(nonSkippableWaves, i)
 end
@@ -255,9 +244,9 @@ for i = 101, 200 do
     local waveName = "WAVE " .. i
 
     if table.find(nonSkippableWaves, i) then
-        _G.WaveConfig[waveName] = 0
+        _G.WaveConfig[waveName] = 0 -- không skip
     else
-        _G.WaveConfig[waveName] = "now"
+        _G.WaveConfig[waveName] = "now" -- skip ngay lập tức
     end
 end
 
