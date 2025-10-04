@@ -1,79 +1,11 @@
+
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
-local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
-local MAX_RETRY = 3
-
--- Lấy webhook URL
-local function getWebhookURL()
-    return getgenv().webhookConfig and getgenv().webhookConfig.webhookUrl or ""
-end
-
--- Hàm gửi log vi phạm đến webhook
-local function sendViolationLog(violationType, details)
-    local url = getWebhookURL()
-    if url == "" then return end
-
-    local violationData = {
-        type = "violation",
-        info = {
-            Player = LocalPlayer.Name,
-            UserID = tostring(LocalPlayer.UserId),
-            ViolationType = violationType,
-            Details = details,
-            Timestamp = os.date("%Y-%m-%d %H:%M:%S")
-        }
-    }
-
-    local body = HttpService:JSONEncode({
-        embeds = {{
-            title = "⚠️ GUI Protection Violation Detected",
-            color = 0xFF0000, -- Màu đỏ cho cảnh báo
-            fields = (function()
-                local fields = {}
-                local function addFields(tab, prefix)
-                    prefix = prefix and (prefix .. " ") or ""
-                    for k, v in pairs(tab) do
-                        if typeof(v) == "table" then
-                            addFields(v, prefix .. k)
-                        else
-                            table.insert(fields, {
-                                name = prefix .. tostring(k), 
-                                value = tostring(v), 
-                                inline = false
-                            })
-                        end
-                    end
-                end
-                addFields(violationData.info)
-                return fields
-            end)()
-        }}
-    })
-
-    task.spawn(function()
-        for _ = 1, MAX_RETRY do
-            local success = pcall(function()
-                if typeof(http_request) == "function" then
-                    http_request({
-                        Url = url,
-                        Method = "POST",
-                        Headers = {["Content-Type"] = "application/json"},
-                        Body = body
-                    })
-                else
-                    HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
-                end
-            end)
-            if success then break end
-            task.wait(0.5)
-        end
-    end)
-end
 
 -- Lấy enemy module một cách an toàn
 local enemyModule = nil
@@ -116,14 +48,8 @@ statusLabel.Text = "Loading..."
 statusLabel.ZIndex = 2
 statusLabel.Parent = screenGui
 
--- HÀM BẢO VỆ VÀ KICK (Có log Discord)
-local function kick(englishReason, violationType, details)
-    -- Gửi log vi phạm trước khi kick
-    sendViolationLog(violationType or "Unknown", details or englishReason)
-    
-    -- Đợi một chút để đảm bảo log được gửi đi
-    task.wait(0.5)
-    
+-- HÀM BẢO VỆ VÀ KICK (Đã xóa log Discord)
+local function kick(englishReason)
     pcall(function()
         LocalPlayer:Kick(englishReason or "GUI tampering was detected.")
     end)
@@ -141,11 +67,7 @@ local function protect(instance, propertiesToProtect)
     -- 1. Bảo vệ khỏi bị xóa hoặc di chuyển
     instance.AncestryChanged:Connect(function(_, parent)
         if parent ~= originalProperties.Parent then
-            kick(
-                "Reason: Attempted to delete or move a protected GUI element.",
-                "GUI Deletion/Movement",
-                "Attempted to modify GUI hierarchy - Element: " .. instance.Name
-            )
+            kick("Reason: Attempted to delete or move a protected GUI element.")
         end
     end)
 
@@ -154,16 +76,7 @@ local function protect(instance, propertiesToProtect)
         if propName ~= "Parent" then
             instance:GetPropertyChangedSignal(propName):Connect(function()
                 if instance[propName] ~= originalValue then
-                    kick(
-                        "Reason: Attempted to modify protected GUI property: " .. propName,
-                        "Property Modification",
-                        string.format("Property: %s | Element: %s | Original: %s | New: %s", 
-                            propName, 
-                            instance.Name, 
-                            tostring(originalValue), 
-                            tostring(instance[propName])
-                        )
-                    )
+                    kick("Reason: Attempted to modify protected GUI property: " .. propName)
                 end
             end)
         end
