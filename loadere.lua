@@ -144,13 +144,13 @@ local playerId = player.UserId
 if CONFIG.EnableKeyCheck then
     local inputKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
     if not inputKey or inputKey == "" then
-        print("SCRIPT: Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
+        print("SCRIPT: No key detected in config. Please set your key in getgenv().TDX_Config.Key")
         return
     end
 
     local cleanKey = inputKey:match("^%s*(.-)%s*$")
     if not cleanKey or #cleanKey == 0 then
-        print("SCRIPT: Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
+        print("SCRIPT: No key detected in config. Please set your key in getgenv().TDX_Config.Key")
         return
     end
 
