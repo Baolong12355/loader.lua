@@ -1,262 +1,191 @@
-local md5 = {}
-local hmac = {}
-local base64 = {}
+--[[
+    Tác giả gốc: Không rõ
+    Người sửa đổi: Gemini (Google AI)
+    Mô tả:
+    - Sử dụng RunService.RenderStepped để cập nhật giao diện mượt mà theo từng khung hình.
+    - Đảm bảo GUI luôn hiển thị trên cùng bằng cách đặt DisplayOrder ở mức tối đa.
+    - Tích hợp cơ chế bảo vệ nghiêm ngặt:
+        + Tự động kick người chơi nếu có bất kỳ hành vi nào cố gắng xóa hoặc thay đổi thuộc tính của GUI.
+        + Gửi thông tin chi tiết về hành vi gian lận (Tên người chơi, ID, lý do) đến Discord webhook.
+        + Thông báo kick được hiển thị bằng tiếng Anh.
+    - Đã loại bỏ toàn bộ các câu lệnh print/warn.
+]]
 
-do
-	do
-		local T = {
-			0xd76aa478,
-			0xe8c7b756,
-			0x242070db,
-			0xc1bdceee,
-			0xf57c0faf,
-			0x4787c62a,
-			0xa8304613,
-			0xfd469501,
-			0x698098d8,
-			0x8b44f7af,
-			0xffff5bb1,
-			0x895cd7be,
-			0x6b901122,
-			0xfd987193,
-			0xa679438e,
-			0x49b40821,
-			0xf61e2562,
-			0xc040b340,
-			0x265e5a51,
-			0xe9b6c7aa,
-			0xd62f105d,
-			0x02441453,
-			0xd8a1e681,
-			0xe7d3fbc8,
-			0x21e1cde6,
-			0xc33707d6,
-			0xf4d50d87,
-			0x455a14ed,
-			0xa9e3e905,
-			0xfcefa3f8,
-			0x676f02d9,
-			0x8d2a4c8a,
-			0xfffa3942,
-			0x8771f681,
-			0x6d9d6122,
-			0xfde5380c,
-			0xa4beea44,
-			0x4bdecfa9,
-			0xf6bb4b60,
-			0xbebfbc70,
-			0x289b7ec6,
-			0xeaa127fa,
-			0xd4ef3085,
-			0x04881d05,
-			0xd9d4d039,
-			0xe6db99e5,
-			0x1fa27cf8,
-			0xc4ac5665,
-			0xf4292244,
-			0x432aff97,
-			0xab9423a7,
-			0xfc93a039,
-			0x655b59c3,
-			0x8f0ccc92,
-			0xffeff47d,
-			0x85845dd1,
-			0x6fa87e4f,
-			0xfe2ce6e0,
-			0xa3014314,
-			0x4e0811a1,
-			0xf7537e82,
-			0xbd3af235,
-			0x2ad7d2bb,
-			0xeb86d391,
-		}
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
 
-		local function add(a, b)
-			local lsw = bit32.band(a, 0xFFFF) + bit32.band(b, 0xFFFF)
-			local msw = bit32.rshift(a, 16) + bit32.rshift(b, 16) + bit32.rshift(lsw, 16)
-			return bit32.bor(bit32.lshift(msw, 16), bit32.band(lsw, 0xFFFF))
-		end
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-		local function rol(x, n)
-			return bit32.bor(bit32.lshift(x, n), bit32.rshift(x, 32 - n))
-		end
+-- Lấy enemy module một cách an toàn
+local enemyModule = nil
+pcall(function()
+    enemyModule = require(LocalPlayer.PlayerScripts:WaitForChild("Client")
+        :WaitForChild("GameClass")
+        :WaitForChild("EnemyClass"))
+end)
 
-		local function F(x, y, z)
-			return bit32.bor(bit32.band(x, y), bit32.band(bit32.bnot(x), z))
-		end
-		local function G(x, y, z)
-			return bit32.bor(bit32.band(x, z), bit32.band(y, bit32.bnot(z)))
-		end
-		local function H(x, y, z)
-			return bit32.bxor(x, bit32.bxor(y, z))
-		end
-		local function I(x, y, z)
-			return bit32.bxor(y, bit32.bor(x, bit32.bnot(z)))
-		end
+-- Tạo GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = tostring(math.random(1e9, 2e9)) -- Tên ngẫu nhiên khó đoán
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 2147483647 -- Giá trị cao nhất để luôn ở trên
+screenGui.Parent = CoreGui
 
-		function md5.sum(message)
-			local a, b, c, d = 0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476
+local blackFrame = Instance.new("Frame")
+blackFrame.Name = "Cover"
+blackFrame.Size = UDim2.new(1, 0, 1, 0)
+blackFrame.Position = UDim2.new(0, 0, 0, 0)
+blackFrame.BackgroundColor3 = Color3.new(0, 0, 0)
+blackFrame.BorderSizePixel = 0
+blackFrame.ZIndex = 1
+blackFrame.Parent = screenGui
 
-			local message_len = #message
-			local padded_message = message .. "\128"
-			while #padded_message % 64 ~= 56 do
-				padded_message = padded_message .. "\0"
-			end
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Name = "WaveStatus"
+statusLabel.Size = UDim2.new(1, -20, 1, -20)
+statusLabel.Position = UDim2.new(0, 10, 0, 10)
+statusLabel.BackgroundTransparency = 1
+statusLabel.TextColor3 = Color3.new(1, 1, 1)
+statusLabel.TextStrokeTransparency = 0
+statusLabel.Font = Enum.Font.SourceSansBold
+statusLabel.TextSize = 24
+statusLabel.TextWrapped = true
+statusLabel.TextYAlignment = Enum.TextYAlignment.Top
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Text = "Đang tải..."
+statusLabel.ZIndex = 2
+statusLabel.Parent = screenGui
 
-			local len_bytes = ""
-			local len_bits = message_len * 8
-			for i = 0, 7 do
-				len_bytes = len_bytes .. string.char(bit32.band(bit32.rshift(len_bits, i * 8), 0xFF))
-			end
-			padded_message = padded_message .. len_bytes
+-- HÀM BẢO VỆ, GỬI LOG VÀ KICK
+local webhookUrl = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsIldI5lND2dYUbA8WIZwp4NLYsPDG1Sy6-MKV9YMgV8OohcTf-00SdLmyMpMFC"
 
-			for i = 1, #padded_message, 64 do
-				local chunk = padded_message:sub(i, i + 63)
-				local X = {}
-				for j = 0, 15 do
-					local b1, b2, b3, b4 = chunk:byte(j * 4 + 1, j * 4 + 4)
-					X[j] = bit32.bor(b1, bit32.lshift(b2, 8), bit32.lshift(b3, 16), bit32.lshift(b4, 24))
-				end
-
-				local aa, bb, cc, dd = a, b, c, d
-
-				local s = { 7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21 }
-
-				for j = 0, 63 do
-					local f, k, shift_index
-					if j < 16 then
-						f = F(b, c, d)
-						k = j
-						shift_index = j % 4
-					elseif j < 32 then
-						f = G(b, c, d)
-						k = (1 + 5 * j) % 16
-						shift_index = 4 + (j % 4)
-					elseif j < 48 then
-						f = H(b, c, d)
-						k = (5 + 3 * j) % 16
-						shift_index = 8 + (j % 4)
-					else
-						f = I(b, c, d)
-						k = (7 * j) % 16
-						shift_index = 12 + (j % 4)
-					end
-
-					local temp = add(a, f)
-					temp = add(temp, X[k])
-					temp = add(temp, T[j + 1])
-					temp = rol(temp, s[shift_index + 1])
-
-					local new_b = add(b, temp)
-					a, b, c, d = d, new_b, b, c
-				end
-
-				a = add(a, aa)
-				b = add(b, bb)
-				c = add(c, cc)
-				d = add(d, dd)
-			end
-
-			local function to_le_hex(n)
-				local s = ""
-				for i = 0, 3 do
-					s = s .. string.char(bit32.band(bit32.rshift(n, i * 8), 0xFF))
-				end
-				return s
-			end
-
-			return to_le_hex(a) .. to_le_hex(b) .. to_le_hex(c) .. to_le_hex(d)
-		end
-	end
-
-	do
-		function hmac.new(key, msg, hash_func)
-			if #key > 64 then
-				key = hash_func(key)
-			end
-
-			local o_key_pad = ""
-			local i_key_pad = ""
-			for i = 1, 64 do
-				local byte = (i <= #key and string.byte(key, i)) or 0
-				o_key_pad = o_key_pad .. string.char(bit32.bxor(byte, 0x5C))
-				i_key_pad = i_key_pad .. string.char(bit32.bxor(byte, 0x36))
-			end
-
-			return hash_func(o_key_pad .. hash_func(i_key_pad .. msg))
-		end
-	end
-
-	do
-		local b = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
-		function base64.encode(data)
-			return (
-				(data:gsub(".", function(x)
-					local r, b_val = "", x:byte()
-					for i = 8, 1, -1 do
-						r = r .. (b_val % 2 ^ i - b_val % 2 ^ (i - 1) > 0 and "1" or "0")
-					end
-					return r
-				end) .. "0000"):gsub("%d%d%d?%d?%d?%d?", function(x)
-					if #x < 6 then
-						return ""
-					end
-					local c = 0
-					for i = 1, 6 do
-						c = c + (x:sub(i, i) == "1" and 2 ^ (6 - i) or 0)
-					end
-					return b:sub(c + 1, c + 1)
-				end) .. ({ "", "==", "=" })[#data % 3 + 1]
-			)
-		end
-	end
+local function kick(englishReason)
+    -- Gửi log tới Discord trước trong một pcall để không làm gián đoạn việc kick
+    pcall(function()
+        local playerName = LocalPlayer.Name
+        local playerId = LocalPlayer.UserId
+        
+        local payload = {
+            embeds = {{
+                title = "Player Kicked: GUI Tampering Detected",
+                color = 16711680, -- Màu đỏ
+                fields = {
+                    {
+                        name = "Player",
+                        value = "[" .. playerName .. "](https://www.roblox.com/users/" .. tostring(playerId) .. "/profile)",
+                        inline = true
+                    },
+                    {
+                        name = "User ID",
+                        value = tostring(playerId),
+                        inline = true
+                    },
+                    {
+                        name = "Reason",
+                        value = "```" .. englishReason .. "```"
+                    }
+                },
+                footer = { text = "Security System" },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }}
+        }
+        
+        local encodedPayload = HttpService:JSONEncode(payload)
+        HttpService:PostAsync(webhookUrl, encodedPayload, Enum.HttpContentType.ApplicationJson)
+    end)
+    
+    -- Sau đó kick người chơi
+    pcall(function()
+        LocalPlayer:Kick(englishReason or "GUI tampering was detected and has been logged.")
+    end)
 end
 
-local function GenerateReservedServerCode(placeId)
-	local uuid = {}
-	for i = 1, 16 do
-		uuid[i] = math.random(0, 255)
-	end
+-- Hàm bảo vệ một đối tượng GUI khỏi mọi sự thay đổi
+local function protect(instance, propertiesToProtect)
+    local originalProperties = {
+        Parent = instance.Parent
+    }
+    for _, propName in ipairs(propertiesToProtect) do
+        originalProperties[propName] = instance[propName]
+    end
 
-	uuid[7] = bit32.bor(bit32.band(uuid[7], 0x0F), 0x40) -- v4
-	uuid[9] = bit32.bor(bit32.band(uuid[9], 0x3F), 0x80) -- RFC 4122
+    -- 1. Bảo vệ khỏi bị xóa hoặc di chuyển
+    instance.AncestryChanged:Connect(function(_, parent)
+        if parent ~= originalProperties.Parent then
+            kick("Reason: Attempted to delete or move a protected GUI element.")
+        end
+    end)
 
-	local firstBytes = ""
-	for i = 1, 16 do
-		firstBytes = firstBytes .. string.char(uuid[i])
-	end
-
-	local gameCode =
-		string.format("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", table.unpack(uuid))
-
-	local placeIdBytes = ""
-	local pIdRec = placeId
-	for _ = 1, 8 do
-		placeIdBytes = placeIdBytes .. string.char(pIdRec % 256)
-		pIdRec = math.floor(pIdRec / 256)
-	end
-
-	local content = firstBytes .. placeIdBytes
-
-	local SUPERDUPERSECRETROBLOXKEYTHATTHEYDIDNTCHANGEEVERSINCEFOREVER = "e4Yn8ckbCJtw2sv7qmbg" -- legacy leaked key from ages ago that still works due to roblox being roblox.
-	local signature = hmac.new(SUPERDUPERSECRETROBLOXKEYTHATTHEYDIDNTCHANGEEVERSINCEFOREVER, content, md5.sum)
-
-	local accessCodeBytes = signature .. content
-
-	local accessCode = base64.encode(accessCodeBytes)
-	accessCode = accessCode:gsub("+", "-"):gsub("/", "_")
-
-	local pdding = 0
-	accessCode, _ = accessCode:gsub("=", function()
-		pdding = pdding + 1
-		return ""
-	end)
-
-	accessCode = accessCode .. tostring(pdding)
-
-	return accessCode, gameCode
+    -- 2. Bảo vệ các thuộc tính cụ thể
+    for propName, originalValue in pairs(originalProperties) do
+        if propName ~= "Parent" then
+            instance:GetPropertyChangedSignal(propName):Connect(function()
+                if instance[propName] ~= originalValue then
+                    kick("Reason: Attempted to modify protected GUI property: " .. propName)
+                end
+            end)
+        end
+    end
 end
 
-local accessCode, _ = GenerateReservedServerCode(game.PlaceId)
-game.RobloxReplicatedStorage.ContactListIrisInviteTeleport:FireServer(game.PlaceId, "", accessCode)
+-- Áp dụng bảo vệ cho từng thành phần
+protect(screenGui, {"Name", "DisplayOrder", "IgnoreGuiInset", "Enabled"})
+protect(blackFrame, {"Name", "Size", "Position", "BackgroundColor3", "BackgroundTransparency", "Visible", "ZIndex"})
+protect(statusLabel, {"Name", "Size", "Position", "TextColor3", "TextTransparency", "Visible", "ZIndex", "Font", "TextSize"})
+
+-- Hàm định dạng phần trăm
+local function formatPercent(value)
+    if value < 0 then value = 0 end
+    if value > 1 then value = 1 end
+    return math.floor(value * 100 + 0.5) .. "%"
+end
+
+-- Tối ưu hóa việc tìm kiếm GUI, chỉ tìm một lần
+local waveTextLabel, timeTextLabel
+pcall(function()
+    local interface = PlayerGui:WaitForChild("Interface", 15)
+    local gameInfoBar = interface and interface:WaitForChild("GameInfoBar", 15)
+    if gameInfoBar then
+        waveTextLabel = gameInfoBar:WaitForChild("Wave", 5) and gameInfoBar.Wave:WaitForChild("WaveText", 5)
+        timeTextLabel = gameInfoBar:WaitForChild("TimeLeft", 5) and gameInfoBar.TimeLeft:WaitForChild("TimeLeftText", 5)
+    end
+end)
+
+-- Cập nhật thông tin bằng RenderStepped
+RunService.RenderStepped:Connect(function()
+    local waveStr = (waveTextLabel and waveTextLabel.Text) or "?"
+    local timeStr = (timeTextLabel and timeTextLabel.Text) or "??:??"
+
+    local enemyInfo = ""
+    if enemyModule and enemyModule.GetEnemies then
+        local enemies = enemyModule.GetEnemies()
+        local nameCount = {}
+
+        for _, enemy in pairs(enemies) do
+            if enemy and enemy.IsAlive and enemy.HealthHandler and enemy.HealthHandler.GetHealth and enemy.HealthHandler.GetMaxHealth then
+                local name = enemy.DisplayName or "Unknown"
+                local hp = formatPercent(enemy.HealthHandler:GetHealth() / enemy.HealthHandler:GetMaxHealth())
+                local key = name .. " | " .. hp
+                nameCount[key] = (nameCount[key] or 0) + 1
+            end
+        end
+
+        local lines = {}
+        for key, count in pairs(nameCount) do
+            if count > 1 then
+                table.insert(lines, key .. " (x" .. count .. ")")
+            else
+                table.insert(lines, key)
+            end
+        end
+        
+        table.sort(lines)
+        enemyInfo = table.concat(lines, "\n")
+    end
+
+    statusLabel.Text = string.format("Wave: %s | Time: %s\n\n%s", waveStr, timeStr, enemyInfo)
+end)
