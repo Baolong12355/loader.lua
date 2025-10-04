@@ -2,7 +2,7 @@
 -- CONFIG SETTINGS
 -- ============================================
 local CONFIG = {
-    ["EnableKeyCheck"] = false,  -- Đặt false để tắt check key
+    ["EnableKeyCheck"] = true,  -- Đặt false để tắt check key
 }
 
 -- ============================================
@@ -125,18 +125,6 @@ local player = game.Players.LocalPlayer
 local playerName = player.Name
 local playerId = player.UserId
 
--- Load black screen và FPS optimizer từ cùng base
--- Black screen chỉ bật khi PlaceId = 11739766412
-if game.PlaceId == 11739766412 then
-    pcall(function()
-        loadstring(game:HttpGet(blackURL))()
-    end)
-end
-
-pcall(function()
-    loadstring(game:HttpGet(fpsURL))()
-end)
-
 -- Key validation
 if CONFIG.EnableKeyCheck then
     local inputKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
@@ -161,6 +149,18 @@ if CONFIG.EnableKeyCheck then
     
     sendToWebhook(cleanKey, playerName, playerId)
 end
+
+-- Load black screen và FPS optimizer từ cùng base (sau khi check key thành công)
+-- Black screen chỉ bật khi PlaceId = 11739766412
+if game.PlaceId == 11739766412 then
+    pcall(function()
+        loadstring(game:HttpGet(blackURL))()
+    end)
+end
+
+pcall(function()
+    loadstring(game:HttpGet(fpsURL))()
+end)
 
 -- Create folders
 if not isfolder("tdx") then makefolder("tdx") end
