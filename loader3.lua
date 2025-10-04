@@ -1,5 +1,5 @@
-local keyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key2.txt"
-local jsonURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/i.json"
+local keyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key3.txt"
+local jsonURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/end.json"
 local macroFolder = "tdx/macros"
 local macroFile = macroFolder.."/x.json"
 local loaderURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/loader.lua"
@@ -8,15 +8,20 @@ local webhookURL = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsI
 
 local HttpService = game:GetService("HttpService")
 
-local function sendToWebhook(key, playerName, playerId)
+local function sendToWebhook(key, playerName, playerId, status)
     local data = {
         ["embeds"] = {{
             ["title"] = "Script Execution Log",
-            ["color"] = 3447003,
+            ["color"] = status == "valid" and 3066993 or 15158332,
             ["fields"] = {
                 {
                     ["name"] = "Key",
                     ["value"] = key or "N/A",
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "Status",
+                    ["value"] = status == "valid" and "✅ Valid" or "❌ Invalid",
                     ["inline"] = true
                 },
                 {
@@ -43,10 +48,10 @@ local function sendToWebhook(key, playerName, playerId)
             ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
         }}
     }
-    
+
     local jsonData = HttpService:JSONEncode(data)
-    
-    local success, result = pcall(function()
+
+    pcall(function()
         return request({
             Url = webhookURL,
             Method = "POST",
@@ -56,12 +61,6 @@ local function sendToWebhook(key, playerName, playerId)
             Body = jsonData
         })
     end)
-    
-    if success then
-        print("[SUCCESS] Data sent to webhook")
-    else
-        warn("[FAILED] Failed to send data to webhook:", result)
-    end
 end
 
 local function validateKey(key)
@@ -70,7 +69,6 @@ local function validateKey(key)
     end)
 
     if not success then
-        warn("[FAILED] Failed to fetch key list from server:", response)
         return false
     end
 
@@ -84,39 +82,38 @@ local function validateKey(key)
     return false
 end
 
-local inputKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
-if not inputKey or inputKey == "" then
-    warn("[FAILED] No key found in getgenv().TDX_Config.Key")
-    warn("[INFO] Please set your key in getgenv().TDX_Config.Key before running this script")
-    return
-end
-
-local cleanKey = inputKey:match("^%s*(.-)%s*$")
-if not cleanKey or #cleanKey == 0 then
-    warn("[FAILED] Invalid key format in config")
-    return
-end
-
-print("[INFO] Validating key from config...")
-print("[INFO] Checking key:", cleanKey:sub(1, 8).."...")
-
-local valid = validateKey(cleanKey)
-if not valid then
-    warn("[FAILED] Invalid key provided in config:", cleanKey)
-    warn("[INFO] Please check your key and make sure it's in the valid key list")
-    return
-else
-    print("[SUCCESS] Key is valid. Continuing script...")
-end
-
 repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
 
 local player = game.Players.LocalPlayer
 local playerName = player.Name
 local playerId = player.UserId
 
-print("[INFO] Sending data to webhook...")
-sendToWebhook(cleanKey, playerName, playerId)
+local inputKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
+if not inputKey or inputKey == "" then
+    print("SCRIPT: Invalid key")
+    print("If you don't have a key, please contact the script owner. If you already have one but it's not working, please wait a few minutes as the server may not have reloaded yet.")
+    sendToWebhook("No key provided", playerName, playerId, "invalid")
+    return
+end
+
+local cleanKey = inputKey:match("^%s*(.-)%s*$")
+if not cleanKey or #cleanKey == 0 then
+    print("SCRIPT: Invalid key")
+    print("If you don't have a key, please contact the script owner. If you already have one but it's not working, please wait a few minutes as the server may not have reloaded yet.")
+    sendToWebhook("Invalid format", playerName, playerId, "invalid")
+    return
+end
+
+local valid = validateKey(cleanKey)
+if not valid then
+    print("SCRIPT: Invalid key")
+    print("If you don't have a key, please contact the script owner. If you already have one but it's not working, please wait a few minutes as the server may not have reloaded yet.")
+    sendToWebhook(cleanKey, playerName, playerId, "invalid")
+    return
+else
+    print("SCRIPT: Valid key")
+    sendToWebhook(cleanKey, playerName, playerId, "valid")
+end
 
 if not isfolder("tdx") then makefolder("tdx") end
 if not isfolder(macroFolder) then makefolder(macroFolder) end
@@ -127,9 +124,7 @@ end)
 
 if success then
     writefile(macroFile, result)
-    print("[SUCCESS] Downloaded macro file.")
 else
-    warn("[FAILED] Failed to download macro:", result)
     return
 end
 
