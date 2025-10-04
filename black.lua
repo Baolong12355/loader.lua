@@ -29,6 +29,7 @@ blackFrame.Position = UDim2.new(0, 0, 0, 0)
 blackFrame.BackgroundColor3 = Color3.new(0, 0, 0)
 blackFrame.BorderSizePixel = 0
 blackFrame.ZIndex = 1
+blackFrame.Active = true -- SỬA LỖI: Đặt thành true để ngăn click xuyên qua
 blackFrame.Parent = screenGui
 
 local statusLabel = Instance.new("TextLabel")
@@ -80,7 +81,8 @@ end
 
 -- Áp dụng bảo vệ
 protect(screenGui, {"Name", "DisplayOrder", "IgnoreGuiInset", "Enabled"})
-protect(blackFrame, {"Name", "Size", "Position", "BackgroundColor3", "BackgroundTransparency", "Visible", "ZIndex"})
+-- SỬA LỖI: Thêm "Active" vào danh sách bảo vệ
+protect(blackFrame, {"Name", "Size", "Position", "BackgroundColor3", "BackgroundTransparency", "Visible", "ZIndex", "Active"})
 protect(statusLabel, {"Name", "Size", "Position", "TextColor3", "TextTransparency", "Visible", "ZIndex", "Font", "TextSize"})
 
 -- Hàm định dạng phần trăm
@@ -109,7 +111,7 @@ RunService.RenderStepped:Connect(function()
     local enemyInfo = ""
     if enemyModule and enemyModule.GetEnemies then
         local enemies = enemyModule.GetEnemies()
-        local enemyGroups = {} -- Cấu trúc dữ liệu mới để gom nhóm
+        local enemyGroups = {}
 
         for _, enemy in pairs(enemies) do
             pcall(function()
@@ -120,12 +122,9 @@ RunService.RenderStepped:Connect(function()
                         local name = enemy.DisplayName or "Unknown"
                         local hp = formatPercent(currentHealth / maxHealth)
                         
-                        -- Logic gom nhóm
                         if not enemyGroups[name] then
-                            -- Nếu chưa có nhóm cho loại quái này, tạo mới
                             enemyGroups[name] = { count = 1, hps = {hp} }
                         else
-                            -- Nếu đã có, cập nhật
                             enemyGroups[name].count = enemyGroups[name].count + 1
                             table.insert(enemyGroups[name].hps, hp)
                         end
@@ -136,15 +135,13 @@ RunService.RenderStepped:Connect(function()
 
         local lines = {}
         for name, data in pairs(enemyGroups) do
-            -- Sắp xếp danh sách HP để hiển thị ổn định
             table.sort(data.hps)
-            -- Tạo chuỗi hiển thị
             local hpString = table.concat(data.hps, ", ")
             local line = string.format("%s (x%d): %s", name, data.count, hpString)
             table.insert(lines, line)
         end
         
-        table.sort(lines) -- Sắp xếp danh sách các loại quái theo alphabet
+        table.sort(lines)
         enemyInfo = table.concat(lines, "\n")
     end
 
