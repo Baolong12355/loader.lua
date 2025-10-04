@@ -29,7 +29,7 @@ local original_FirstPersonHandler_Stop = FirstPersonHandler.Stop
 
 _G.CurrentFPSControlledTower = nil
 local hasNoEnemySet = false
-local isHooked = false
+local hooksAppliedForSession = false
 local gameHasEnded = false
 
 local function getEnemyPathProgress(enemy)
@@ -40,9 +40,7 @@ local function getEnemyPathProgress(enemy)
     if enemy.MovementHandler.PathPercentage then return enemy.MovementHandler.PathPercentage end
     success, result = pcall(function() 
         local currentNode = enemy.MovementHandler:GetCurrentNode()
-        if currentNode and currentNode.GetPercentageAlongPath then
-            return currentNode:GetPercentageAlongPath(1) or 0
-        end
+        if currentNode and currentNode.GetPercentageAlongPath then return currentNode:GetPercentageAlongPath(1) or 0 end
         return 0
     end)
     if success and type(result) == "number" then return result end
@@ -64,8 +62,7 @@ local function getFurthestEnemy()
 end
 
 local function ApplyHooks()
-    if isHooked then return end
-    isHooked = true
+    if hooksAppliedForSession then return end
 
     local original_AttackHandler_Attack = FirstPersonAttackHandlerClass._Attack
     FirstPersonAttackHandlerClass._Attack = function(self)
@@ -121,6 +118,7 @@ local function ApplyHooks()
             end)
         end
     end
+    hooksAppliedForSession = true
 end
 
 FirstPersonHandler.Begin = function(towerInstance)
@@ -142,7 +140,6 @@ local uiWaveText = nil
 RunService.Heartbeat:Connect(function()
     pcall(function()
         if gameHasEnded then return end
-        
         if not uiWaveText then uiWaveText = PlayerGui:FindFirstChild("Interface"):FindFirstChild("GameInfoBar"):FindFirstChild("Wave"):FindFirstChild("WaveText") end
         if uiWaveText and string.upper(uiWaveText.Text) == "WAVE 201" and _G.CurrentFPSControlledTower then FirstPersonHandler.Stop(); return end
 
@@ -193,6 +190,7 @@ end)
 NetworkingHandler.GetEvent("GameStateChanged"):AttachCallback(function(state)
 	if state == "EndScreen" then
         gameHasEnded = true
+        hooksAppliedForSession = false
 		if _G.CurrentFPSControlledTower then FirstPersonHandler.Stop() end
     elseif state == "Running" or state == "MapVoting" or state == "LoadoutSelection" then
         gameHasEnded = false
@@ -200,7 +198,7 @@ NetworkingHandler.GetEvent("GameStateChanged"):AttachCallback(function(state)
 end)
 
 task.spawn(function()
-    while task.wait(0.24) do
+    while task.wait(0.25) do
         if gameHasEnded then continue end
 
         local isCurrentlyActive = _G.CurrentFPSControlledTower ~= nil
