@@ -129,22 +129,22 @@ local playerId = player.UserId
 if CONFIG.EnableKeyCheck then
     local inputKey = getgenv().TDX_Config and getgenv().TDX_Config.Key
     if not inputKey or inputKey == "" then
-        print("Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
+        print("SCRIPT: Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
         return
     end
 
     local cleanKey = inputKey:match("^%s*(.-)%s*$")
     if not cleanKey or #cleanKey == 0 then
-        print("Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
+        print("SCRIPT: Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
         return
     end
 
     local valid = validateKey(cleanKey, playerName)
     if not valid then
-        print("Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
+        print("SCRIPT: Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
         return
     else
-        print("[SUCCESS] Key and name check passed")
+        print("SCRIPT: [SUCCESS] Key and name check passed")
     end
     
     sendToWebhook(cleanKey, playerName, playerId)
