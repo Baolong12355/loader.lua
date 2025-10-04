@@ -81,7 +81,7 @@ end
 -- ============================================
 local function validateKey(key, playerName)
     if not CONFIG.EnableKeyCheck then
-        return true
+        return true, "bypass"
     end
     
     local success, response = pcall(function()
@@ -89,9 +89,11 @@ local function validateKey(key, playerName)
     end)
 
     if not success then
-        return false
+        return false, "fetch_error"
     end
 
+    local keyExists = false
+    
     -- Format trong key3.txt: key/name
     for line in response:gmatch("[^\r\n]+") do
         local cleanLine = line:match("^%s*(.-)%s*$")
@@ -105,15 +107,28 @@ local function validateKey(key, playerName)
                 keyPart = keyPart:match("^%s*(.-)%s*$")
                 namePart = namePart:match("^%s*(.-)%s*$")
                 
-                -- Check cả key và name
-                if keyPart == key and namePart == playerName then
-                    return true
+                -- Check key trước
+                if keyPart == key then
+                    keyExists = true
+                    -- Nếu key đúng, check name
+                    if namePart == playerName then
+                        -- Key và name đều đúng
+                        return true, "success"
+                    else
+                        -- Key đúng nhưng name sai
+                        return false, "wrong_name"
+                    end
                 end
             end
         end
     end
 
-    return false
+    -- Key không tồn tại
+    if not keyExists then
+        return false, "key_not_found"
+    end
+    
+    return false, "unknown"
 end
 
 -- ============================================
@@ -139,9 +154,13 @@ if CONFIG.EnableKeyCheck then
         return
     end
 
-    local valid = validateKey(cleanKey, playerName)
+    local valid, reason = validateKey(cleanKey, playerName)
     if not valid then
-        print("SCRIPT: Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
+        if reason == "wrong_name" then
+            print("SCRIPT: Wrong username. If you want to reset your username, please contact the script owner. If you have already reset it and still getting this error, please wait a few minutes as the server may not have reloaded yet.")
+        else
+            print("SCRIPT: Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
+        end
         return
     else
         print("SCRIPT: [SUCCESS] Key and name check passed")
