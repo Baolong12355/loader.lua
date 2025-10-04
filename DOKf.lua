@@ -29,7 +29,7 @@ local original_FirstPersonHandler_Stop = FirstPersonHandler.Stop
 
 _G.CurrentFPSControlledTower = nil
 local hasNoEnemySet = false
-local hooksAppliedForSession = false
+local isHooked = false
 local gameHasEnded = false
 
 local function getEnemyPathProgress(enemy)
@@ -62,7 +62,8 @@ local function getFurthestEnemy()
 end
 
 local function ApplyHooks()
-    if hooksAppliedForSession then return end
+    if isHooked then return end
+    isHooked = true
 
     local original_AttackHandler_Attack = FirstPersonAttackHandlerClass._Attack
     FirstPersonAttackHandlerClass._Attack = function(self)
@@ -118,7 +119,6 @@ local function ApplyHooks()
             end)
         end
     end
-    hooksAppliedForSession = true
 end
 
 FirstPersonHandler.Begin = function(towerInstance)
@@ -140,6 +140,15 @@ local uiWaveText = nil
 RunService.Heartbeat:Connect(function()
     pcall(function()
         if gameHasEnded then return end
+        
+        if _G.CurrentFPSControlledTower then
+            local currentTowerInstance = TowerClass.GetTower(_G.CurrentFPSControlledTower.Hash)
+            if not currentTowerInstance or currentTowerInstance.Destroyed then
+                FirstPersonHandler.Stop()
+                return
+            end
+        end
+
         if not uiWaveText then uiWaveText = PlayerGui:FindFirstChild("Interface"):FindFirstChild("GameInfoBar"):FindFirstChild("Wave"):FindFirstChild("WaveText") end
         if uiWaveText and string.upper(uiWaveText.Text) == "WAVE 201" and _G.CurrentFPSControlledTower then FirstPersonHandler.Stop(); return end
 
