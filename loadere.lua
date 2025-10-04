@@ -2,7 +2,7 @@
 -- CONFIG SETTINGS
 -- ============================================
 local CONFIG = {
-    ["EnableKeyCheck"] = true,  -- Đặt false để tắt check key
+    ["EnableKeyCheck"] = false,  -- Đặt false để tắt check key
 }
 
 -- ============================================
