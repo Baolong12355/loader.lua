@@ -16,6 +16,9 @@ local webhookURL = "https://discord.com/api/webhooks/972059328276201492/DPHtxfsI
 
 local HttpService = game:GetService("HttpService")
 
+-- Make sure the config table exists. This is the fix for the 'nil' error.
+getgenv().TDX_Config = getgenv().TDX_Config or {}
+
 -- =========================================================================================
 -- WEBHOOK AND DUAL VALIDATION FUNCTIONS
 -- =========================================================================================
@@ -40,41 +43,29 @@ local function sendToWebhook(key, playerName, playerId)
     end)
 end
 
--- Validates that the key AND the player's in-game name match an entry in the key file.
 local function validateKeyForPlayer(key, playerName)
     local success, response = pcall(function() return game:HttpGet(keyURL) end)
     if not success then
         warn("[FAILED] Failed to fetch key list from server:", response)
         return false
     end
-
     local expectedEntry = key .. "/" .. playerName
     for line in response:gmatch("[^\r\n]+") do
-        local lineFromFile = line:match("^%s*(.-)%s*$")
-        if lineFromFile == expectedEntry then
-            return true -- Found an exact match for "key/playerName"
+        if line:match("^%s*(.-)%s*$") == expectedEntry then
+            return true
         end
     end
-    
-    return false -- No match found
+    return false
 end
 
 if enableKeyCheck then
-    local config = getgenv().TDX_Config or {}
-    local inputKey = config.Key
-
+    local inputKey = getgenv().TDX_Config.Key
     if not inputKey or inputKey == "" then
-        warn("[FAILED] 'Key' not found in getgenv().TDX_Config. Please set your key.")
+        warn("[FAILED] 'Key' not found or is empty in getgenv().TDX_Config. Please set your key.")
         return
     end
-
     local cleanKey = inputKey:match("^%s*(.-)%s*$")
-    if not cleanKey or #cleanKey == 0 then
-         warn("[FAILED] Invalid key format in config.")
-         return
-    end
-
-    -- Wait for the player to load to get their name for validation
+    
     print("[INFO] Waiting for player to load for validation...")
     repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
     
@@ -90,8 +81,7 @@ if enableKeyCheck then
     else
         print("[SUCCESS] Key is valid for " .. playerName .. ". Continuing script...")
     end
-
-    -- Send data to webhook after successful validation
+    
     sendToWebhook(cleanKey, playerName, player.UserId)
 end
 
@@ -110,16 +100,16 @@ else
     return
 end
 
-getgenv().TDX_Config = {
-    ["Return Lobby"] = true,
-    ["x1.5 Speed"] = true,
-    ["DOKf"] = true,
-    ["Auto Skill"] = true,
-    ["Map"] = "SCORCHED PASSAGE",
-    ["Macros"] = "run",
-    ["Macro Name"] = "x",
-    ["Auto Difficulty"] = "Endless"
-}
+-- This section now MERGES settings instead of OVERWRITING the table, preserving your Key.
+local config = getgenv().TDX_Config
+config["Return Lobby"] = true
+config["x1.5 Speed"] = true
+config["DOKf"] = true
+config["Auto Skill"] = true
+config["Map"] = "SCORCHED PASSAGE"
+config["Macros"] = "run"
+config["Macro Name"] = "x"
+config["Auto Difficulty"] = "Endless"
 
 -- =========================================================================================
 -- WAVE SKIP CONFIGURATION
@@ -128,9 +118,9 @@ _G.WaveConfig = {}
 for i = 1, 100 do
     local waveName = "WAVE " .. i
     if i == 70 or i == 81 or i == 100 then
-        _G.WaveConfig[waveName] = 0 -- don't skip
+        _G.WaveConfig[waveName] = 0
     else
-        _G.WaveConfig[waveName] = "now" -- skip immediately
+        _G.WaveConfig[waveName] = "now"
     end
 end
 
@@ -142,9 +132,9 @@ end
 for i = 101, 200 do
     local waveName = "WAVE " .. i
     if table.find(nonSkippableWaves, i) then
-        _G.WaveConfig[waveName] = 0 -- don't skip
+        _G.WaveConfig[waveName] = 0
     else
-        _G.WaveConfig[waveName] = "now" -- skip immediately
+        _G.WaveConfig[waveName] = "now"
     end
 end
 
