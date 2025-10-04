@@ -1,3 +1,4 @@
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
@@ -108,35 +109,42 @@ RunService.RenderStepped:Connect(function()
     local enemyInfo = ""
     if enemyModule and enemyModule.GetEnemies then
         local enemies = enemyModule.GetEnemies()
-        local nameCount = {}
+        local enemyGroups = {} -- Cấu trúc dữ liệu mới để gom nhóm
 
         for _, enemy in pairs(enemies) do
-            -- Sử dụng pcall để ngăn lỗi ở một enemy làm hỏng toàn bộ script
             pcall(function()
                 if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy.HealthHandler then
                     local maxHealth = enemy.HealthHandler:GetMaxHealth()
-                    -- Đảm bảo không chia cho 0
                     if maxHealth > 0 then
                         local currentHealth = enemy.HealthHandler:GetHealth()
                         local name = enemy.DisplayName or "Unknown"
                         local hp = formatPercent(currentHealth / maxHealth)
-                        local key = name .. " | " .. hp
-                        nameCount[key] = (nameCount[key] or 0) + 1
+                        
+                        -- Logic gom nhóm
+                        if not enemyGroups[name] then
+                            -- Nếu chưa có nhóm cho loại quái này, tạo mới
+                            enemyGroups[name] = { count = 1, hps = {hp} }
+                        else
+                            -- Nếu đã có, cập nhật
+                            enemyGroups[name].count = enemyGroups[name].count + 1
+                            table.insert(enemyGroups[name].hps, hp)
+                        end
                     end
                 end
             end)
         end
 
         local lines = {}
-        for key, count in pairs(nameCount) do
-            if count > 1 then
-                table.insert(lines, key .. " (x" .. count .. ")")
-            else
-                table.insert(lines, key)
-            end
+        for name, data in pairs(enemyGroups) do
+            -- Sắp xếp danh sách HP để hiển thị ổn định
+            table.sort(data.hps)
+            -- Tạo chuỗi hiển thị
+            local hpString = table.concat(data.hps, ", ")
+            local line = string.format("%s (x%d): %s", name, data.count, hpString)
+            table.insert(lines, line)
         end
-
-        table.sort(lines)
+        
+        table.sort(lines) -- Sắp xếp danh sách các loại quái theo alphabet
         enemyInfo = table.concat(lines, "\n")
     end
 
