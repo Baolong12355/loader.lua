@@ -50,7 +50,7 @@ enemyListFrame.Position = UDim2.new(0, 10, 0, 40)
 enemyListFrame.BackgroundTransparency = 1
 enemyListFrame.BorderSizePixel = 0
 enemyListFrame.ScrollBarThickness = 6
-enemyListFrame.ScrollingDirection = Enum.ScrollingDirection.XY -- CHO PHÉP KÉO NGANG
+enemyListFrame.ScrollingDirection = Enum.ScrollingDirection.XY
 enemyListFrame.ZIndex = 2
 enemyListFrame.Parent = screenGui
 
@@ -125,9 +125,7 @@ RunService.RenderStepped:Connect(function()
                 local hp = formatPercent(percentValue)
                 local name = enemy.DisplayName or "Unknown"
 
-                if not enemyGroups[name] then
-                    enemyGroups[name] = { count = 0, hpData = {} }
-                end
+                if not enemyGroups[name] then enemyGroups[name] = { count = 0, hpData = {} } end
                 
                 local group = enemyGroups[name]
                 group.count += 1
@@ -137,29 +135,28 @@ RunService.RenderStepped:Connect(function()
     end
     
     for _, child in ipairs(enemyListFrame:GetChildren()) do
-        if child:IsA("TextLabel") then
-            child:Destroy()
-        end
+        if child:IsA("TextLabel") then child:Destroy() end
     end
 
     local sortedNames = {}
     for name in pairs(enemyGroups) do table.insert(sortedNames, name) end
     table.sort(sortedNames)
-
+    
+    local maxCanvasWidth = 0
     for i, name in ipairs(sortedNames) do
         local data = enemyGroups[name]
         local newLine = Instance.new("TextLabel")
         newLine.Name = name
         newLine.LayoutOrder = i
-        newLine.Size = UDim2.new(0, 0, 0, 22) -- Để AutomaticSize tự quyết định chiều rộng
-        newLine.AutomaticSize = Enum.AutomaticSize.X -- Tự động mở rộng chiều ngang
-        newLine.TextWrapped = false -- Tắt ngắt dòng để kéo ngang
+        newLine.AutomaticSize = Enum.AutomaticSize.X
+        newLine.Size = UDim2.new(0, 0, 0, 22)
+        newLine.TextWrapped = false
         newLine.BackgroundTransparency = 1
         newLine.Font = Enum.Font.SourceSansBold
         newLine.TextSize = 22
         newLine.TextXAlignment = Enum.TextXAlignment.Left
-        newLine.RichText = true -- Bật RichText để định dạng màu
-        newLine.TextColor3 = NORMAL_COLOR -- Màu mặc định là trắng
+        newLine.RichText = true
+        newLine.TextColor3 = NORMAL_COLOR
         
         local hpStrings = {}
         for _, hpInfo in ipairs(data.hpData) do
@@ -172,9 +169,14 @@ RunService.RenderStepped:Connect(function()
         
         local hpString = table.concat(hpStrings, ", ")
         newLine.Text = string.format("%s (x%d): %s", name, data.count, hpString)
-        
         newLine.Parent = enemyListFrame
+        
+        -- SỬA LỖI: Cập nhật chiều rộng tối đa sau khi tạo TextLabel
+        maxCanvasWidth = math.max(maxCanvasWidth, newLine.AbsoluteSize.X)
     end
+    
+    -- SỬA LỖI: Đặt CanvasSize để kích hoạt thanh cuộn ngang
+    enemyListFrame.CanvasSize = UDim2.new(0, maxCanvasWidth, 0, uiListLayout.AbsoluteContentSize.Y)
 end)
 
 RunService.RenderStepped:Connect(function()
