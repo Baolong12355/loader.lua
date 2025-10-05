@@ -200,6 +200,7 @@ else
 end
 
 -- Setup config
+getgenv().DOKf.lua = true
 getgenv().TDX_Config = getgenv().TDX_Config or {}
 getgenv().TDX_Config["Return Lobby"] = true
 getgenv().TDX_Config["x1.5 Speed"] = true
