@@ -100,8 +100,6 @@ end)
 local SHIELD_COLOR = Color3.fromRGB(0, 170, 255)
 local NORMAL_COLOR = Color3.new(1, 1, 1)
 
-local lastEnemyData = ""
-
 RunService.RenderStepped:Connect(function()
     local waveStr = (waveTextLabel and waveTextLabel.Text) or "?"
     local timeStr = (timeTextLabel and timeTextLabel.Text) or "??:??"
@@ -110,56 +108,49 @@ RunService.RenderStepped:Connect(function()
     local enemyGroups = {}
     if enemyModule and enemyModule.GetEnemies then
         for _, enemy in pairs(enemyModule.GetEnemies()) do
-            pcall(function()
-                if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy.HealthHandler then
-                    local maxHealth = enemy.HealthHandler:GetMaxHealth()
-                    if maxHealth > 0 then
-                        local currentHealth = enemy.HealthHandler:GetHealth()
-                        local currentShield = 0
-                        
-                        -- SỬA LỖI: Kiểm tra an toàn trước khi gọi GetShield
-                        if enemy.HealthHandler.GetShield then
-                            currentShield = enemy.HealthHandler:GetShield() or 0
-                        end
-                        
-                        local hasShield = currentShield > 0
-                        local percentValue = (currentHealth + currentShield) / maxHealth
-                        local hp = formatPercent(percentValue)
-                        local name = enemy.DisplayName or "Unknown"
+            local success, _ = pcall(function()
+                if not (enemy and enemy.IsAlive and not enemy.IsFakeEnemy) then return end
 
-                        if not enemyGroups[name] then
-                            enemyGroups[name] = { count = 0, hps = {}, hasShield = false }
-                        end
-                        
-                        local group = enemyGroups[name]
-                        group.count += 1
-                        table.insert(group.hps, hp)
-                        if hasShield then
-                            group.hasShield = true
-                        end
-                    end
+                local hh = enemy.HealthHandler
+                if not (hh and typeof(hh) == "table" and hh.GetMaxHealth and hh.GetHealth) then return end
+
+                local maxHealth = hh:GetMaxHealth()
+                if not (typeof(maxHealth) == "number" and maxHealth > 0) then return end
+                
+                local currentHealth = hh:GetHealth() or 0
+                local currentShield = 0
+                if hh.GetShield then
+                    currentShield = hh:GetShield() or 0
+                end
+                
+                local hasShield = currentShield > 0
+                local percentValue = (currentHealth + currentShield) / maxHealth
+                local hp = formatPercent(percentValue)
+                local name = enemy.DisplayName or "Unknown"
+
+                if not enemyGroups[name] then
+                    enemyGroups[name] = { count = 0, hps = {}, hasShield = false }
+                end
+                
+                local group = enemyGroups[name]
+                group.count += 1
+                table.insert(group.hps, hp)
+                if hasShield then
+                    group.hasShield = true
                 end
             end)
         end
     end
     
-    -- Tối ưu hóa: Chỉ cập nhật GUI nếu dữ liệu thay đổi
-    local currentEnemyData = ""
+    for _, child in ipairs(enemyListFrame:GetChildren()) do
+        if child:IsA("TextLabel") then
+            child:Destroy()
+        end
+    end
+
     local sortedNames = {}
     for name in pairs(enemyGroups) do table.insert(sortedNames, name) end
     table.sort(sortedNames)
-
-    for _, name in ipairs(sortedNames) do
-        local data = enemyGroups[name]
-        table.sort(data.hps)
-        currentEnemyData ..= string.format("%s%s%s;", name, tostring(data.hasShield), table.concat(data.hps, ","))
-    end
-    
-    if currentEnemyData == lastEnemyData then return end
-    lastEnemyData = currentEnemyData
-
-    enemyListFrame:ClearAllChildren()
-    uiListLayout.Parent = enemyListFrame
 
     for i, name in ipairs(sortedNames) do
         local data = enemyGroups[name]
@@ -173,6 +164,7 @@ RunService.RenderStepped:Connect(function()
         newLine.TextXAlignment = Enum.TextXAlignment.Left
         newLine.TextColor3 = data.hasShield and SHIELD_COLOR or NORMAL_COLOR
         
+        table.sort(data.hps)
         local hpString = table.concat(data.hps, ", ")
         newLine.Text = string.format("%s (x%d): %s", name, data.count, hpString)
         
