@@ -1,4 +1,3 @@
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
@@ -6,7 +5,6 @@ local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Lấy enemy module một cách an toàn
 local enemyModule = nil
 pcall(function()
     enemyModule = require(LocalPlayer.PlayerScripts:WaitForChild("Client")
@@ -14,13 +12,12 @@ pcall(function()
         :WaitForChild("EnemyClass"))
 end)
 
--- Tạo GUI
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = tostring(math.random(1e9, 2e9))
 screenGui.ResetOnSpawn = false
-screenGui.IgnoreGuiInset = true -- Đảm bảo che phủ cả thanh trên cùng của Roblox
-screenGui.DisplayOrder = 2147483647 -- Giá trị cao nhất có thể, đảm bảo nằm trên mọi GUI khác
-screenGui.Parent = CoreGui -- Đặt vào CoreGui để có độ ưu tiên cao nhất
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 2147483647
+screenGui.Parent = CoreGui
 
 local blackFrame = Instance.new("Frame")
 blackFrame.Name = "Cover"
@@ -29,7 +26,7 @@ blackFrame.Position = UDim2.new(0, 0, 0, 0)
 blackFrame.BackgroundColor3 = Color3.new(0, 0, 0)
 blackFrame.BorderSizePixel = 0
 blackFrame.ZIndex = 1
-blackFrame.Active = true -- Ngăn click xuyên qua
+blackFrame.Active = true
 blackFrame.Parent = screenGui
 
 local statusLabel = Instance.new("TextLabel")
@@ -48,14 +45,12 @@ statusLabel.Text = "Loading..."
 statusLabel.ZIndex = 2
 statusLabel.Parent = screenGui
 
--- HÀM BẢO VỆ VÀ KICK
 local function kick(englishReason)
     pcall(function()
         LocalPlayer:Kick(englishReason or "GUI tampering was detected.")
     end)
 end
 
--- Hàm bảo vệ một đối tượng GUI
 local function protect(instance, propertiesToProtect)
     local originalProperties = { Parent = instance.Parent }
     for _, propName in ipairs(propertiesToProtect) do
@@ -79,19 +74,16 @@ local function protect(instance, propertiesToProtect)
     end
 end
 
--- Áp dụng bảo vệ
 protect(screenGui, {"Name", "DisplayOrder", "IgnoreGuiInset", "Enabled"})
 protect(blackFrame, {"Name", "Size", "Position", "BackgroundColor3", "BackgroundTransparency", "Visible", "ZIndex", "Active"})
 protect(statusLabel, {"Name", "Size", "Position", "TextColor3", "TextTransparency", "Visible", "ZIndex", "Font", "TextSize"})
 
--- Hàm định dạng phần trăm
 local function formatPercent(value)
     if value < 0 then value = 0 end
     if value > 1 then value = 1 end
     return math.floor(value * 100 + 0.5) .. "%"
 end
 
--- Tối ưu hóa việc tìm kiếm GUI
 local waveTextLabel, timeTextLabel
 pcall(function()
     local interface = PlayerGui:WaitForChild("Interface", 15)
@@ -102,7 +94,6 @@ pcall(function()
     end
 end)
 
--- Cập nhật thông tin bằng RenderStepped
 RunService.RenderStepped:Connect(function()
     local waveStr = (waveTextLabel and waveTextLabel.Text) or "?"
     local timeStr = (timeTextLabel and timeTextLabel.Text) or "??:??"
@@ -145,4 +136,11 @@ RunService.RenderStepped:Connect(function()
     end
 
     statusLabel.Text = string.format("Wave: %s | Time: %s\n\n%s", waveStr, timeStr, enemyInfo)
+end)
+
+RunService.RenderStepped:Connect(function()
+    if screenGui.Parent ~= CoreGui then
+        screenGui.Parent = CoreGui
+    end
+    screenGui.DisplayOrder = 2147483647
 end)
