@@ -50,6 +50,7 @@ enemyListFrame.Position = UDim2.new(0, 10, 0, 40)
 enemyListFrame.BackgroundTransparency = 1
 enemyListFrame.BorderSizePixel = 0
 enemyListFrame.ScrollBarThickness = 6
+enemyListFrame.ScrollingDirection = Enum.ScrollingDirection.XY -- CHO PHÉP KÉO NGANG
 enemyListFrame.ZIndex = 2
 enemyListFrame.Parent = screenGui
 
@@ -97,7 +98,7 @@ pcall(function()
     end
 end)
 
-local SHIELD_COLOR = Color3.fromRGB(0, 170, 255)
+local SHIELD_COLOR_STRING = "rgb(0,170,255)"
 local NORMAL_COLOR = Color3.new(1, 1, 1)
 
 RunService.RenderStepped:Connect(function()
@@ -108,20 +109,16 @@ RunService.RenderStepped:Connect(function()
     local enemyGroups = {}
     if enemyModule and enemyModule.GetEnemies then
         for _, enemy in pairs(enemyModule.GetEnemies()) do
-            local success, _ = pcall(function()
+            pcall(function()
                 if not (enemy and enemy.IsAlive and not enemy.IsFakeEnemy) then return end
-
                 local hh = enemy.HealthHandler
-                if not (hh and typeof(hh) == "table" and hh.GetMaxHealth and hh.GetHealth) then return end
-
+                if not (hh and hh.GetMaxHealth and hh.GetHealth) then return end
                 local maxHealth = hh:GetMaxHealth()
                 if not (typeof(maxHealth) == "number" and maxHealth > 0) then return end
                 
                 local currentHealth = hh:GetHealth() or 0
                 local currentShield = 0
-                if hh.GetShield then
-                    currentShield = hh:GetShield() or 0
-                end
+                if hh.GetShield then currentShield = hh:GetShield() or 0 end
                 
                 local hasShield = currentShield > 0
                 local percentValue = (currentHealth + currentShield) / maxHealth
@@ -129,15 +126,12 @@ RunService.RenderStepped:Connect(function()
                 local name = enemy.DisplayName or "Unknown"
 
                 if not enemyGroups[name] then
-                    enemyGroups[name] = { count = 0, hps = {}, hasShield = false }
+                    enemyGroups[name] = { count = 0, hpData = {} }
                 end
                 
                 local group = enemyGroups[name]
                 group.count += 1
-                table.insert(group.hps, hp)
-                if hasShield then
-                    group.hasShield = true
-                end
+                table.insert(group.hpData, {hp = hp, shield = hasShield})
             end)
         end
     end
@@ -157,15 +151,26 @@ RunService.RenderStepped:Connect(function()
         local newLine = Instance.new("TextLabel")
         newLine.Name = name
         newLine.LayoutOrder = i
-        newLine.Size = UDim2.new(1, 0, 0, 22)
+        newLine.Size = UDim2.new(0, 0, 0, 22) -- Để AutomaticSize tự quyết định chiều rộng
+        newLine.AutomaticSize = Enum.AutomaticSize.X -- Tự động mở rộng chiều ngang
+        newLine.TextWrapped = false -- Tắt ngắt dòng để kéo ngang
         newLine.BackgroundTransparency = 1
         newLine.Font = Enum.Font.SourceSansBold
         newLine.TextSize = 22
         newLine.TextXAlignment = Enum.TextXAlignment.Left
-        newLine.TextColor3 = data.hasShield and SHIELD_COLOR or NORMAL_COLOR
+        newLine.RichText = true -- Bật RichText để định dạng màu
+        newLine.TextColor3 = NORMAL_COLOR -- Màu mặc định là trắng
         
-        table.sort(data.hps)
-        local hpString = table.concat(data.hps, ", ")
+        local hpStrings = {}
+        for _, hpInfo in ipairs(data.hpData) do
+            if hpInfo.shield then
+                table.insert(hpStrings, string.format('<font color="%s">%s</font>', SHIELD_COLOR_STRING, hpInfo.hp))
+            else
+                table.insert(hpStrings, hpInfo.hp)
+            end
+        end
+        
+        local hpString = table.concat(hpStrings, ", ")
         newLine.Text = string.format("%s (x%d): %s", name, data.count, hpString)
         
         newLine.Parent = enemyListFrame
