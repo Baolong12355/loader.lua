@@ -29,46 +29,49 @@ blackFrame.ZIndex = 1
 blackFrame.Active = true
 blackFrame.Parent = screenGui
 
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Name = "WaveStatus"
-statusLabel.Size = UDim2.new(1, -20, 1, -20)
-statusLabel.Position = UDim2.new(0, 10, 0, 10)
-statusLabel.BackgroundTransparency = 1
-statusLabel.TextColor3 = Color3.new(1, 1, 1)
-statusLabel.TextStrokeTransparency = 0
-statusLabel.Font = Enum.Font.SourceSansBold
-statusLabel.TextSize = 24
-statusLabel.TextWrapped = true
-statusLabel.TextYAlignment = Enum.TextYAlignment.Top
-statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-statusLabel.Text = "Loading..."
-statusLabel.ZIndex = 2
-statusLabel.Parent = screenGui
+local headerLabel = Instance.new("TextLabel")
+headerLabel.Name = "Header"
+headerLabel.Size = UDim2.new(1, -20, 0, 30)
+headerLabel.Position = UDim2.new(0, 10, 0, 10)
+headerLabel.BackgroundTransparency = 1
+headerLabel.TextColor3 = Color3.new(1, 1, 1)
+headerLabel.TextStrokeTransparency = 0
+headerLabel.Font = Enum.Font.SourceSansBold
+headerLabel.TextSize = 24
+headerLabel.TextYAlignment = Enum.TextYAlignment.Top
+headerLabel.TextXAlignment = Enum.TextXAlignment.Left
+headerLabel.ZIndex = 2
+headerLabel.Parent = screenGui
+
+local enemyListFrame = Instance.new("ScrollingFrame")
+enemyListFrame.Name = "EnemyList"
+enemyListFrame.Size = UDim2.new(1, -20, 1, -50)
+enemyListFrame.Position = UDim2.new(0, 10, 0, 40)
+enemyListFrame.BackgroundTransparency = 1
+enemyListFrame.BorderSizePixel = 0
+enemyListFrame.ScrollBarThickness = 6
+enemyListFrame.ZIndex = 2
+enemyListFrame.Parent = screenGui
+
+local uiListLayout = Instance.new("UIListLayout")
+uiListLayout.Padding = UDim.new(0, 2)
+uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+uiListLayout.Parent = enemyListFrame
 
 local function kick(englishReason)
-    pcall(function()
-        LocalPlayer:Kick(englishReason or "GUI tampering was detected.")
-    end)
+    pcall(function() LocalPlayer:Kick(englishReason or "GUI tampering was detected.") end)
 end
 
 local function protect(instance, propertiesToProtect)
     local originalProperties = { Parent = instance.Parent }
-    for _, propName in ipairs(propertiesToProtect) do
-        originalProperties[propName] = instance[propName]
-    end
-
+    for _, propName in ipairs(propertiesToProtect) do originalProperties[propName] = instance[propName] end
     instance.AncestryChanged:Connect(function(_, parent)
-        if parent ~= originalProperties.Parent then
-            kick("Reason: Attempted to delete or move a protected GUI element.")
-        end
+        if parent ~= originalProperties.Parent then kick("Reason: Attempted to delete or move a protected GUI element.") end
     end)
-
     for propName, originalValue in pairs(originalProperties) do
         if propName ~= "Parent" then
             instance:GetPropertyChangedSignal(propName):Connect(function()
-                if instance[propName] ~= originalValue then
-                    kick("Reason: Attempted to modify protected GUI property: " .. propName)
-                end
+                if instance[propName] ~= originalValue then kick("Reason: Attempted to modify protected GUI property: " .. propName) end
             end)
         end
     end
@@ -76,11 +79,11 @@ end
 
 protect(screenGui, {"Name", "DisplayOrder", "IgnoreGuiInset", "Enabled"})
 protect(blackFrame, {"Name", "Size", "Position", "BackgroundColor3", "BackgroundTransparency", "Visible", "ZIndex", "Active"})
-protect(statusLabel, {"Name", "Size", "Position", "TextColor3", "TextTransparency", "Visible", "ZIndex", "Font", "TextSize"})
+protect(headerLabel, {"Name", "Size", "Position", "TextColor3", "Visible", "ZIndex"})
+protect(enemyListFrame, {"Name", "Size", "Position", "Visible", "ZIndex"})
 
 local function formatPercent(value)
     if value < 0 then value = 0 end
-    if value > 1 then value = 1 end
     return math.floor(value * 100 + 0.5) .. "%"
 end
 
@@ -94,53 +97,75 @@ pcall(function()
     end
 end)
 
+local SHIELD_COLOR = Color3.fromRGB(0, 170, 255)
+local NORMAL_COLOR = Color3.new(1, 1, 1)
+
 RunService.RenderStepped:Connect(function()
     local waveStr = (waveTextLabel and waveTextLabel.Text) or "?"
     local timeStr = (timeTextLabel and timeTextLabel.Text) or "??:??"
+    headerLabel.Text = string.format("Wave: %s | Time: %s", waveStr, timeStr)
 
-    local enemyInfo = ""
+    local enemyGroups = {}
     if enemyModule and enemyModule.GetEnemies then
-        local enemies = enemyModule.GetEnemies()
-        local enemyGroups = {}
-
-        for _, enemy in pairs(enemies) do
+        for _, enemy in pairs(enemyModule.GetEnemies()) do
             pcall(function()
                 if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy.HealthHandler then
                     local maxHealth = enemy.HealthHandler:GetMaxHealth()
                     if maxHealth > 0 then
                         local currentHealth = enemy.HealthHandler:GetHealth()
-                        local name = enemy.DisplayName or "Unknown"
-                        local hp = formatPercent(currentHealth / maxHealth)
+                        local currentShield = enemy.HealthHandler:GetShield()
+                        local hasShield = currentShield > 0
                         
+                        local percentValue = (currentHealth + currentShield) / maxHealth
+                        local hp = formatPercent(percentValue)
+                        local name = enemy.DisplayName or "Unknown"
+
                         if not enemyGroups[name] then
-                            enemyGroups[name] = { count = 1, hps = {hp} }
-                        else
-                            enemyGroups[name].count = enemyGroups[name].count + 1
-                            table.insert(enemyGroups[name].hps, hp)
+                            enemyGroups[name] = { count = 0, hps = {}, hasShield = false }
+                        end
+                        
+                        local group = enemyGroups[name]
+                        group.count += 1
+                        table.insert(group.hps, hp)
+                        if hasShield then
+                            group.hasShield = true
                         end
                     end
                 end
             end)
         end
-
-        local lines = {}
-        for name, data in pairs(enemyGroups) do
-            table.sort(data.hps)
-            local hpString = table.concat(data.hps, ", ")
-            local line = string.format("%s (x%d): %s", name, data.count, hpString)
-            table.insert(lines, line)
-        end
-        
-        table.sort(lines)
-        enemyInfo = table.concat(lines, "\n")
     end
 
-    statusLabel.Text = string.format("Wave: %s | Time: %s\n\n%s", waveStr, timeStr, enemyInfo)
+    enemyListFrame:ClearAllChildren()
+    uiListLayout.Parent = enemyListFrame
+
+    local sortedNames = {}
+    for name in pairs(enemyGroups) do
+        table.insert(sortedNames, name)
+    end
+    table.sort(sortedNames)
+
+    for i, name in ipairs(sortedNames) do
+        local data = enemyGroups[name]
+        local newLine = Instance.new("TextLabel")
+        newLine.Name = name
+        newLine.LayoutOrder = i
+        newLine.Size = UDim2.new(1, 0, 0, 22)
+        newLine.BackgroundTransparency = 1
+        newLine.Font = Enum.Font.SourceSansBold
+        newLine.TextSize = 22
+        newLine.TextXAlignment = Enum.TextXAlignment.Left
+        newLine.TextColor3 = data.hasShield and SHIELD_COLOR or NORMAL_COLOR
+        
+        table.sort(data.hps)
+        local hpString = table.concat(data.hps, ", ")
+        newLine.Text = string.format("%s (x%d): %s", name, data.count, hpString)
+        
+        newLine.Parent = enemyListFrame
+    end
 end)
 
 RunService.RenderStepped:Connect(function()
-    if screenGui.Parent ~= CoreGui then
-        screenGui.Parent = CoreGui
-    end
+    if screenGui.Parent ~= CoreGui then screenGui.Parent = CoreGui end
     screenGui.DisplayOrder = 2147483647
 end)
