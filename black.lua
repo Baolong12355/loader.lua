@@ -18,9 +18,9 @@ end)
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = tostring(math.random(1e9, 2e9))
 screenGui.ResetOnSpawn = false
-screenGui.IgnoreGuiInset = true
-screenGui.DisplayOrder = 2147483647
-screenGui.Parent = CoreGui
+screenGui.IgnoreGuiInset = true -- Đảm bảo che phủ cả thanh trên cùng của Roblox
+screenGui.DisplayOrder = 2147483647 -- Giá trị cao nhất có thể, đảm bảo nằm trên mọi GUI khác
+screenGui.Parent = CoreGui -- Đặt vào CoreGui để có độ ưu tiên cao nhất
 
 local blackFrame = Instance.new("Frame")
 blackFrame.Name = "Cover"
@@ -29,7 +29,7 @@ blackFrame.Position = UDim2.new(0, 0, 0, 0)
 blackFrame.BackgroundColor3 = Color3.new(0, 0, 0)
 blackFrame.BorderSizePixel = 0
 blackFrame.ZIndex = 1
-blackFrame.Active = true -- SỬA LỖI: Đặt thành true để ngăn click xuyên qua
+blackFrame.Active = true -- Ngăn click xuyên qua
 blackFrame.Parent = screenGui
 
 local statusLabel = Instance.new("TextLabel")
@@ -81,7 +81,6 @@ end
 
 -- Áp dụng bảo vệ
 protect(screenGui, {"Name", "DisplayOrder", "IgnoreGuiInset", "Enabled"})
--- SỬA LỖI: Thêm "Active" vào danh sách bảo vệ
 protect(blackFrame, {"Name", "Size", "Position", "BackgroundColor3", "BackgroundTransparency", "Visible", "ZIndex", "Active"})
 protect(statusLabel, {"Name", "Size", "Position", "TextColor3", "TextTransparency", "Visible", "ZIndex", "Font", "TextSize"})
 
