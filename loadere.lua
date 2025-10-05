@@ -199,10 +199,10 @@ else
     return
 end
 
--- Setup config
-getgenv().DOKf.lua = true
+-- Setup confie
 getgenv().TDX_Config = getgenv().TDX_Config or {}
 getgenv().TDX_Config["Return Lobby"] = true
+getgenv().TDX_Config["DOKf"] = true
 getgenv().TDX_Config["x1.5 Speed"] = true
 getgenv().TDX_Config["Auto Skill"] = true
 getgenv().TDX_Config["Map"] = "SCORCHED PASSAGE"
