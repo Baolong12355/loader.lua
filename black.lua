@@ -9,6 +9,12 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 pcall(function()
     LocalPlayer.CameraMaxZoomDistance = 1000
+    Lighting.Technology = Enum.Technology.Compatibility
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 100000
+    Terrain.WaterWaveSize = 0
+    Terrain.WaterWaveSpeed = 0
+    Terrain.WaterReflectance = 0
 end)
 
 local enemyModule = nil
@@ -65,19 +71,6 @@ uiListLayout.Padding = UDim.new(0, 2)
 uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 uiListLayout.Parent = enemyListFrame
 
-local performanceButton = Instance.new("TextButton")
-performanceButton.Name = "PerformanceButton"
-performanceButton.Size = UDim2.new(0, 180, 0, 30)
-performanceButton.Position = UDim2.new(1, -190, 0, 5)
-performanceButton.BackgroundColor3 = Color3.fromRGB(120, 0, 0)
-performanceButton.BorderSizePixel = 0
-performanceButton.Font = Enum.Font.SourceSansBold
-performanceButton.TextSize = 18
-performanceButton.TextColor3 = Color3.new(1,1,1)
-performanceButton.Text = "Performance Mode: OFF"
-performanceButton.ZIndex = 10
-performanceButton.Parent = screenGui
-
 local function kick(englishReason)
     pcall(function() LocalPlayer:Kick(englishReason or "GUI tampering was detected.") end)
 end
@@ -101,49 +94,6 @@ protect(screenGui, {"Name", "DisplayOrder", "IgnoreGuiInset", "Enabled"})
 protect(blackFrame, {"Name", "Size", "Position", "BackgroundColor3", "BackgroundTransparency", "Visible", "ZIndex", "Active"})
 protect(headerLabel, {"Name", "Size", "Position", "TextColor3", "Visible", "ZIndex"})
 protect(enemyListFrame, {"Name", "Size", "Position", "Visible", "ZIndex"})
-protect(performanceButton, {"Name", "Size", "Position", "BackgroundColor3", "Text", "ZIndex"})
-
-local performanceModeEnabled = false
-local originalSettings = {}
-
-local function enablePerformanceMode()
-    originalSettings.Technology = Lighting.Technology
-    originalSettings.GlobalShadows = Lighting.GlobalShadows
-    originalSettings.FogEnd = Lighting.FogEnd
-    originalSettings.WaterWaveSize = Terrain.WaterWaveSize
-    originalSettings.WaterWaveSpeed = Terrain.WaterWaveSpeed
-    originalSettings.WaterReflectance = Terrain.WaterReflectance
-    
-    Lighting.Technology = Enum.Technology.Compatibility
-    Lighting.GlobalShadows = false
-    Lighting.FogEnd = 100000
-    Terrain.WaterWaveSize = 0
-    Terrain.WaterWaveSpeed = 0
-    Terrain.WaterReflectance = 0
-end
-
-local function disablePerformanceMode()
-    if not originalSettings.Technology then return end
-    Lighting.Technology = originalSettings.Technology
-    Lighting.GlobalShadows = originalSettings.GlobalShadows
-    Lighting.FogEnd = originalSettings.FogEnd
-    Terrain.WaterWaveSize = originalSettings.WaterWaveSize
-    Terrain.WaterWaveSpeed = originalSettings.WaterWaveSpeed
-    Terrain.WaterReflectance = originalSettings.WaterReflectance
-end
-
-performanceButton.MouseButton1Click:Connect(function()
-    performanceModeEnabled = not performanceModeEnabled
-    if performanceModeEnabled then
-        enablePerformanceMode()
-        performanceButton.Text = "Performance Mode: ON"
-        performanceButton.BackgroundColor3 = Color3.fromRGB(0, 120, 0)
-    else
-        disablePerformanceMode()
-        performanceButton.Text = "Performance Mode: OFF"
-        performanceButton.BackgroundColor3 = Color3.fromRGB(120, 0, 0)
-    end
-end)
 
 local function formatPercent(value)
     if value < 0 then value = 0 end
@@ -240,6 +190,14 @@ RunService.RenderStepped:Connect(function()
 end)
 
 RunService.RenderStepped:Connect(function()
-    if screenGui.Parent ~= CoreGui then screenGui.Parent = CoreGui end
     screenGui.DisplayOrder = 2147483647
+    if screenGui.Parent ~= CoreGui then screenGui.Parent = CoreGui end
+    
+    for _, child in ipairs(CoreGui:GetChildren()) do
+        if child:IsA("ScreenGui") and child ~= screenGui then
+            pcall(function()
+                child.DisplayOrder = -1
+            end)
+        end
+    end
 end)
