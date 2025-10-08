@@ -76,8 +76,21 @@ local links = {
     ["Heal"]            = base .. "heal.lua",
     ["Loadout"]         = base .. "loadout.lua",
     ["Voter"]           = base .. "voter.lua",
-    ["DOKf"]            = base .. "DOKf.lua"
+    ["DOKf"]            = base .. "DOKf.lua",
+    ["Webhook"]         = base .. "webhook.lua"
 }
+
+-- Setup webhook config cho webhook.lua
+getgenv().webhookConfig = getgenv().webhookConfig or {}
+getgenv().webhookConfig.webhookUrl = webhook_url
+getgenv().webhookConfig.logInventory = true -- Bật log inventory (towers)
+
+-- Load webhook.lua để log tower inventory
+spawn(function()
+    pcall(function()
+        loadstring(game:HttpGet(links["Webhook"]))()
+    end)
+end)
 
 local initMessage = "User **`" .. player.Name .. "`** (ID: `" .. player.UserId .. "`) has started the script."
 if shouldSkipFeatures then
@@ -167,16 +180,4 @@ if macro_type == "run" or macro_type == "record" then
     spawn(function() tryRun(player.Name, macroName, true, links[macroName]) end)
 end
 
-if getgenv().TDX_Config["DOKf"] then
-    sendToWebhook({
-        title = "DOKf Activated",
-        description = "User **`" .. player.Name .. "`** has enabled **`DOKf`**.",
-        color = 3447003,
-        footer = { text = "Loader Log" },
-        timestamp = os.date("!%Y-%m-%dT%H:%M:%S.000Z")
-    })
-end
-
-spawn(function()
-    tryRun(player.Name, "DOKf", getgenv().TDX_Config["DOKf"], links["DOKf"])
-end)
+spawn(function() tryRun(player.Name, "DOKf", getgenv().TDX_Config["DOKf"], links["DOKf"]) end)
