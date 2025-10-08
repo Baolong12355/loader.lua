@@ -71,12 +71,54 @@ local function sendLobbyInfo()
             local currencyDisplay = mainGUI and mainGUI:FindFirstChild("CurrencyDisplay")
             local goldDisplay = currencyDisplay and currencyDisplay:FindFirstChild("GoldDisplay")
             local valueText = goldDisplay and goldDisplay:FindFirstChild("ValueText")
+
             local stats = {
                 Level = LocalPlayer:FindFirstChild("leaderstats") and LocalPlayer.leaderstats:FindFirstChild("Level") and LocalPlayer.leaderstats.Level.Value or "N/A",
                 Wins = LocalPlayer:FindFirstChild("leaderstats") and LocalPlayer.leaderstats:FindFirstChild("Wins") and LocalPlayer.leaderstats.Wins.Value or "N/A",
                 Gold = valueText and valueText:IsA("TextLabel") and valueText.Text or "N/A"
             }
+
             sendToWebhook({type = "lobby", stats = stats})
+
+            local success, result = pcall(function()
+                local ReplicatedStorage = game:GetService("ReplicatedStorage")
+                local Data = require(ReplicatedStorage:WaitForChild("TDX_Shared"):WaitForChild("Client"):WaitForChild("Services"):WaitForChild("Data"))
+                local ShopData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ShopDataV2"))
+
+                local inventory = Data.Get("Inventory")
+                local ownedTowers = inventory.Towers or {}
+                local ownedPowerUps = inventory.PowerUps or {}
+                local allTowers = ShopData.Items.Towers
+
+                local towerList = {}
+                if getgenv().webhookConfig and getgenv().webhookConfig.logInventory then
+                    for id, data in pairs(allTowers) do
+                        if ownedTowers[id] then
+                            table.insert(towerList, data.ViewportName or tostring(id))
+                        end
+                    end
+                end
+
+                local powerupList = {}
+                for id, amount in pairs(ownedPowerUps) do
+                    if type(amount) == "number" and amount > 0 then
+                        table.insert(powerupList, id .. " x" .. tostring(amount))
+                    end
+                end
+
+                local statsData = {
+                    PowerUps = table.concat(powerupList, ", ")
+                }
+
+                if #towerList > 0 then
+                    statsData.Towers = table.concat(towerList, ", ")
+                end
+
+                sendToWebhook({
+                    type = "lobby",
+                    stats = statsData
+                })
+            end)
         end
     end)
 end
