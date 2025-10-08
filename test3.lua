@@ -1,157 +1,203 @@
---[[
-    Tác giả gốc: Không rõ
-    Người sửa đổi: Gemini (Google AI)
-    Mô tả:
-    - Sửa lỗi không hiển thị danh sách quái vật bằng cách thêm pcall để xử lý lỗi an toàn.
-    - Sử dụng RunService.RenderStepped để cập nhật giao diện mượt mà theo từng khung hình.
-    - Đảm bảo GUI luôn hiển thị trên cùng bằng cách đặt DisplayOrder ở mức tối đa.
-    - Lọc ra những kẻ địch đã chết (dead) hoặc giả (fake) để không hiển thị trên giao diện.
-    - Tích hợp cơ chế bảo vệ nghiêm ngặt:
-        + Tự động kick người chơi nếu có bất kỳ hành vi nào cố gắng xóa hoặc thay đổi thuộc tính của GUI.
-        - Đã loại bỏ toàn bộ chức năng gửi log Discord và các câu lệnh print/warn.
-]]
+repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local CoreGui = game:GetService("CoreGui")
-
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Lấy enemy module một cách an toàn
-local enemyModule = nil
-pcall(function()
-    enemyModule = require(LocalPlayer.PlayerScripts:WaitForChild("Client")
-        :WaitForChild("GameClass")
-        :WaitForChild("EnemyClass"))
-end)
+local MAX_RETRY = 3
 
--- Tạo GUI
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = tostring(math.random(1e9, 2e9))
-screenGui.ResetOnSpawn = false
-screenGui.IgnoreGuiInset = true
-screenGui.DisplayOrder = 2147483647
-screenGui.Parent = CoreGui
-
-local blackFrame = Instance.new("Frame")
-blackFrame.Name = "Cover"
-blackFrame.Size = UDim2.new(1, 0, 1, 0)
-blackFrame.Position = UDim2.new(0, 0, 0, 0)
-blackFrame.BackgroundColor3 = Color3.new(0, 0, 0)
-blackFrame.BorderSizePixel = 0
-blackFrame.ZIndex = 1
-blackFrame.Parent = screenGui
-
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Name = "WaveStatus"
-statusLabel.Size = UDim2.new(1, -20, 1, -20)
-statusLabel.Position = UDim2.new(0, 10, 0, 10)
-statusLabel.BackgroundTransparency = 1
-statusLabel.TextColor3 = Color3.new(1, 1, 1)
-statusLabel.TextStrokeTransparency = 0
-statusLabel.Font = Enum.Font.SourceSansBold
-statusLabel.TextSize = 24
-statusLabel.TextWrapped = true
-statusLabel.TextYAlignment = Enum.TextYAlignment.Top
-statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-statusLabel.Text = "Loading..."
-statusLabel.ZIndex = 2
-statusLabel.Parent = screenGui
-
--- HÀM BẢO VỆ VÀ KICK
-local function kick(englishReason)
-    pcall(function()
-        LocalPlayer:Kick(englishReason or "GUI tampering was detected.")
-    end)
+local function getWebhookURL()
+    return getgenv().webhookConfig and getgenv().webhookConfig.webhookUrl or ""
 end
 
--- Hàm bảo vệ một đối tượng GUI
-local function protect(instance, propertiesToProtect)
-    local originalProperties = { Parent = instance.Parent }
-    for _, propName in ipairs(propertiesToProtect) do
-        originalProperties[propName] = instance[propName]
-    end
-
-    instance.AncestryChanged:Connect(function(_, parent)
-        if parent ~= originalProperties.Parent then
-            kick("Reason: Attempted to delete or move a protected GUI element.")
-        end
-    end)
-
-    for propName, originalValue in pairs(originalProperties) do
-        if propName ~= "Parent" then
-            instance:GetPropertyChangedSignal(propName):Connect(function()
-                if instance[propName] ~= originalValue then
-                    kick("Reason: Attempted to modify protected GUI property: " .. propName)
-                end
-            end)
-        end
-    end
+local function formatTime(seconds)
+    seconds = tonumber(seconds)
+    if not seconds then return "N/A" end
+    local mins = math.floor(seconds / 60)
+    local secs = math.floor(seconds % 60)
+    return string.format("%dm %ds", mins, secs)
 end
 
--- Áp dụng bảo vệ
-protect(screenGui, {"Name", "DisplayOrder", "IgnoreGuiInset", "Enabled"})
-protect(blackFrame, {"Name", "Size", "Position", "BackgroundColor3", "BackgroundTransparency", "Visible", "ZIndex"})
-protect(statusLabel, {"Name", "Size", "Position", "TextColor3", "TextTransparency", "Visible", "ZIndex", "Font", "TextSize"})
+local function sendToWebhook(data)
+    local url = getWebhookURL()
+    if url == "" then return end
 
--- Hàm định dạng phần trăm
-local function formatPercent(value)
-    if value < 0 then value = 0 end
-    if value > 1 then value = 1 end
-    return math.floor(value * 100 + 0.5) .. "%"
-end
-
--- Tối ưu hóa việc tìm kiếm GUI
-local waveTextLabel, timeTextLabel
-pcall(function()
-    local interface = PlayerGui:WaitForChild("Interface", 15)
-    local gameInfoBar = interface and interface:WaitForChild("GameInfoBar", 15)
-    if gameInfoBar then
-        waveTextLabel = gameInfoBar:WaitForChild("Wave", 5) and gameInfoBar.Wave:WaitForChild("WaveText", 5)
-        timeTextLabel = gameInfoBar:WaitForChild("TimeLeft", 5) and gameInfoBar.TimeLeft:WaitForChild("TimeLeftText", 5)
-    end
-end)
-
--- Cập nhật thông tin bằng RenderStepped
-RunService.RenderStepped:Connect(function()
-    local waveStr = (waveTextLabel and waveTextLabel.Text) or "?"
-    local timeStr = (timeTextLabel and timeTextLabel.Text) or "??:??"
-
-    local enemyInfo = ""
-    if enemyModule and enemyModule.GetEnemies then
-        local enemies = enemyModule.GetEnemies()
-        local nameCount = {}
-
-        for _, enemy in pairs(enemies) do
-            -- Sử dụng pcall để ngăn lỗi ở một enemy làm hỏng toàn bộ script
-            pcall(function()
-                if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy.HealthHandler then
-                    local maxHealth = enemy.HealthHandler:GetMaxHealth()
-                    -- Đảm bảo không chia cho 0
-                    if maxHealth > 0 then
-                        local currentHealth = enemy.HealthHandler:GetHealth()
-                        local name = enemy.DisplayName or "Unknown"
-                        local hp = formatPercent(currentHealth / maxHealth)
-                        local key = name .. " | " .. hp
-                        nameCount[key] = (nameCount[key] or 0) + 1
+    local body = HttpService:JSONEncode({
+        embeds = {{
+            title = data.type == "game" and "Game Result" or "Lobby Info",
+            color = 0x5B9DFF,
+            fields = (function()
+                local fields = {}
+                local function addFields(tab, prefix)
+                    prefix = prefix and (prefix .. " ") or ""
+                    for k, v in pairs(tab) do
+                        if typeof(v) == "table" then
+                            addFields(v, prefix .. k)
+                        else
+                            table.insert(fields, {name = prefix .. tostring(k), value = tostring(v), inline = false})
+                        end
                     end
                 end
+                addFields(data.rewards or data.stats or data)
+                return fields
+            end)()
+        }}
+    })
+
+    task.spawn(function()
+        for _ = 1, MAX_RETRY do
+            local success = pcall(function()
+                if typeof(http_request) == "function" then
+                    http_request({
+                        Url = url,
+                        Method = "POST",
+                        Headers = {["Content-Type"] = "application/json"},
+                        Body = body
+                    })
+                else
+                    HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
+                end
+            end)
+            if success then break end
+        end
+    end)
+end
+
+local function sendLobbyInfo()
+    task.spawn(function()
+        local gui = LocalPlayer:WaitForChild("PlayerGui", 5)
+        if gui then
+            local mainGUI = gui:FindFirstChild("GUI")
+            local currencyDisplay = mainGUI and mainGUI:FindFirstChild("CurrencyDisplay")
+            local goldDisplay = currencyDisplay and currencyDisplay:FindFirstChild("GoldDisplay")
+            local valueText = goldDisplay and goldDisplay:FindFirstChild("ValueText")
+
+            local stats = {
+                Level = LocalPlayer:FindFirstChild("leaderstats") and LocalPlayer.leaderstats:FindFirstChild("Level") and LocalPlayer.leaderstats.Level.Value or "N/A",
+                Wins = LocalPlayer:FindFirstChild("leaderstats") and LocalPlayer.leaderstats:FindFirstChild("Wins") and LocalPlayer.leaderstats.Wins.Value or "N/A",
+                Gold = valueText and valueText:IsA("TextLabel") and valueText.Text or "N/A"
+            }
+
+            sendToWebhook({type = "lobby", stats = stats})
+
+            local success, result = pcall(function()
+                local ReplicatedStorage = game:GetService("ReplicatedStorage")
+                local Data = require(ReplicatedStorage:WaitForChild("TDX_Shared"):WaitForChild("Client"):WaitForChild("Services"):WaitForChild("Data"))
+                local ShopData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ShopDataV2"))
+                
+                local inventory = Data.Get("Inventory")
+                local ownedTowers = inventory.Towers or {}
+                local ownedPowerUps = inventory.PowerUps or {}
+                local allTowers = ShopData.Items.Towers
+
+                local towerList = {}
+                for id, data in pairs(allTowers) do
+                    if ownedTowers[id] then
+                        table.insert(towerList, data.ViewportName or tostring(id))
+                    end
+                end
+
+                local powerupList = {}
+                for id, amount in pairs(ownedPowerUps) do
+                    if type(amount) == "number" and amount > 0 then
+                        table.insert(powerupList, id .. " x" .. tostring(amount))
+                    end
+                end
+
+                sendToWebhook({
+                    type = "lobby",
+                    stats = {
+                        Towers = table.concat(towerList, ", "),
+                        PowerUps = table.concat(powerupList, ", ")
+                    }
+                })
             end)
         end
+    end)
+end
 
-        local lines = {}
-        for key, count in pairs(nameCount) do
-            if count > 1 then
-                table.insert(lines, key .. " (x" .. count .. ")")
-            else
-                table.insert(lines, key)
+local function loopCheckLobbyGold()
+    local config = getgenv().webhookConfig or {}
+    local TARGET_GOLD = config.targetGold
+    local ENABLE_KICK = TARGET_GOLD and true or false
+    if not TARGET_GOLD then return end
+
+    task.spawn(function()
+        while true do
+            local gui = LocalPlayer:FindFirstChild("PlayerGui")
+            if gui then
+                local mainGUI = gui:FindFirstChild("GUI")
+                local currencyDisplay = mainGUI and mainGUI:FindFirstChild("CurrencyDisplay")
+                local goldDisplay = currencyDisplay and currencyDisplay:FindFirstChild("GoldDisplay")
+                local valueText = goldDisplay and goldDisplay:FindFirstChild("ValueText")
+                if valueText and valueText:IsA("TextLabel") then
+                    local goldAmount = tonumber(valueText.Text:gsub("[$,]", "")) or 0
+                    if goldAmount >= TARGET_GOLD then
+                        sendToWebhook({
+                            type = "lobby",
+                            stats = {
+                                message = "đã đạt vàng mục tiêu",
+                                Gold = tostring(goldAmount),
+                                Player = LocalPlayer.Name
+                            }
+                        })
+                        if ENABLE_KICK then
+                            LocalPlayer:Kick("đã đạt " .. goldAmount .. " vàng")
+                        end
+                        break
+                    end
+                end
             end
+            task.wait(0.25)
         end
-        
-        table.sort(lines)
-        enemyInfo = table.concat(lines, "\n")
-    end
+    end)
+end
 
-    statusLabel.Text = string.format("Wave: %s | Time: %s\n\n%s", waveStr, timeStr, enemyInfo)
-end)
+local function hookGameReward()
+    task.spawn(function()
+        local handler
+        local ok = pcall(function()
+            handler = require(LocalPlayer.PlayerScripts.Client.UserInterfaceHandler:WaitForChild("GameOverScreenHandler"))
+        end)
+        if not ok or not handler then return end
+
+        local old = handler.DisplayScreen
+        handler.DisplayScreen = function(data)
+            task.spawn(function()
+                local name = LocalPlayer.Name
+                local result = {
+                    type = "game",
+                    rewards = {
+                        Map = data.MapName or "Unknown",
+                        Mode = tostring(data.Difficulty or "Unknown"),
+                        Result = data.Victory and "Victory" or "Defeat",
+                        Wave = data.LastPassedWave and tostring(data.LastPassedWave) or "N/A",
+                        Time = formatTime(data.TimeElapsed),
+                        Gold = tostring((data.PlayerNameToGoldMap and data.PlayerNameToGoldMap[name]) or 0),
+                        Tokens = tostring((data.PlayerNameToTokensMap and data.PlayerNameToTokensMap[name]) or 0),
+                        XP = tostring((data.PlayerNameToXPMap and data.PlayerNameToXPMap[name]) or 0),
+                        PowerUps = {}
+                    }
+                }
+                local powerups = (data.PlayerNameToPowerUpsRewardedMapMap or {})[name] or {}
+                for id, count in pairs(powerups) do
+                    table.insert(result.rewards.PowerUps, id .. " x" .. tostring(count or 1))
+                end
+                sendToWebhook(result)
+            end)
+            return old(data)
+        end
+    end)
+end
+
+local function isLobby()
+    local gui = LocalPlayer:FindFirstChild("PlayerGui")
+    return gui and gui:FindFirstChild("GUI") and gui.GUI:FindFirstChild("CurrencyDisplay") ~= nil
+end
+
+if isLobby() then
+    sendLobbyInfo()
+    loopCheckLobbyGold()
+else
+    hookGameReward()
+end
