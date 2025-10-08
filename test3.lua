@@ -84,16 +84,18 @@ local function sendLobbyInfo()
                 local ReplicatedStorage = game:GetService("ReplicatedStorage")
                 local Data = require(ReplicatedStorage:WaitForChild("TDX_Shared"):WaitForChild("Client"):WaitForChild("Services"):WaitForChild("Data"))
                 local ShopData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ShopDataV2"))
-                
+
                 local inventory = Data.Get("Inventory")
                 local ownedTowers = inventory.Towers or {}
                 local ownedPowerUps = inventory.PowerUps or {}
                 local allTowers = ShopData.Items.Towers
 
                 local towerList = {}
-                for id, data in pairs(allTowers) do
-                    if ownedTowers[id] then
-                        table.insert(towerList, data.ViewportName or tostring(id))
+                if getgenv().webhookConfig and getgenv().webhookConfig.logInventory then
+                    for id, data in pairs(allTowers) do
+                        if ownedTowers[id] then
+                            table.insert(towerList, data.ViewportName or tostring(id))
+                        end
                     end
                 end
 
@@ -104,12 +106,17 @@ local function sendLobbyInfo()
                     end
                 end
 
+                local statsData = {
+                    PowerUps = table.concat(powerupList, ", ")
+                }
+
+                if #towerList > 0 then
+                    statsData.Towers = table.concat(towerList, ", ")
+                end
+
                 sendToWebhook({
                     type = "lobby",
-                    stats = {
-                        Towers = table.concat(towerList, ", "),
-                        PowerUps = table.concat(powerupList, ", ")
-                    }
+                    stats = statsData
                 })
             end)
         end
