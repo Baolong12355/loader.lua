@@ -230,6 +230,7 @@ end
 
 -- Các wave không skip từ 101–200
 local nonSkippableWaves = {
+    125, -- thêm wave 125 vào đây
     129, 130, 137, 140, 142,
     149, 150, 152, 159, 162,
     199, 200
