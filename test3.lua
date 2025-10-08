@@ -1,3 +1,4 @@
+
 repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
 
 local Players = game:GetService("Players")
@@ -143,13 +144,13 @@ local function loopCheckLobbyGold()
                         sendToWebhook({
                             type = "lobby",
                             stats = {
-                                message = "đã đạt vàng mục tiêu",
+                                message = "Target gold reached",
                                 Gold = tostring(goldAmount),
                                 Player = LocalPlayer.Name
                             }
                         })
                         if ENABLE_KICK then
-                            LocalPlayer:Kick("đã đạt " .. goldAmount .. " vàng")
+                            LocalPlayer:Kick("Reached " .. goldAmount .. " gold")
                         end
                         break
                     end
@@ -190,6 +191,66 @@ local function hookGameReward()
                 for id, count in pairs(powerups) do
                     table.insert(result.rewards.PowerUps, id .. " x" .. tostring(count or 1))
                 end
+
+                pcall(function()
+                    local EnemyClass = require(LocalPlayer.PlayerScripts.Client.GameClass:WaitForChild("EnemyClass"))
+                    local remainingEnemies = EnemyClass.GetEnemies()
+                    local enemyList = {}
+
+                    for _, enemy in pairs(remainingEnemies) do
+                        if enemy and enemy:Alive() then -- Only log living enemies
+                            local enemyName = enemy.DisplayName or enemy.Type or "Unknown Enemy"
+                            
+                            -- Health
+                            local hp = "N/A"
+                            if enemy.HealthHandler then
+                                hp = string.format("%.0f/%.0f", enemy.HealthHandler:GetHealth(), enemy.HealthHandler:GetMaxHealth())
+                            end
+                            
+                            -- Shield (conditional)
+                            local shieldInfo = ""
+                            if enemy.HealthHandler and enemy.HealthHandler:GetMaxShield and enemy.HealthHandler:GetMaxShield() > 0 then
+                                local shield = string.format("%.0f/%.0f", enemy.HealthHandler:GetShield(), enemy.HealthHandler:GetMaxShield())
+                                shieldInfo = " | Shield: " .. shield
+                            end
+
+                            -- Special Attributes (conditional)
+                            local attributes = {}
+                            if enemy.IsBoss then table.insert(attributes, "Boss") end
+                            if enemy.IsMiniBoss then table.insert(attributes, "Mini-Boss") end
+                            if enemy.Stealth then table.insert(attributes, "Stealth") end
+                            if enemy.Invulnerable then table.insert(attributes, "Invulnerable") end
+                            if enemy.TakeNoDamage then table.insert(attributes, "Damage Immune") end
+
+                            -- Resistances (conditional)
+                            if enemy.DamageReductionMap then
+                                for dmgType, reduction in pairs(enemy.DamageReductionMap) do
+                                    if reduction > 0 then
+                                        table.insert(attributes, string.format("%s Resistance (%.0f%%)", tostring(dmgType), reduction * 100))
+                                    end
+                                end
+                            end
+
+                            -- Build the final string
+                            local enemyInfo = string.format("%s - HP: %s%s", enemyName, hp, shieldInfo)
+                            if #attributes > 0 then
+                                enemyInfo = enemyInfo .. " (" .. table.concat(attributes, ", ") .. ")"
+                            end
+                            table.insert(enemyList, enemyInfo)
+                        end
+                    end
+
+                    if #enemyList > 0 then
+                        -- Discord's character limit for a field value is 1024
+                        local enemyString = table.concat(enemyList, "\n")
+                        if string.len(enemyString) > 1024 then
+                            enemyString = string.sub(enemyString, 1, 1020) .. "\n..."
+                        end
+                        result.rewards["Remaining Enemies"] = enemyString
+                    end
+                end)
+                --- END OF NEW CODE ---
+
                 sendToWebhook(result)
             end)
             return old(data)
