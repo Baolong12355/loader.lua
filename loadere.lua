@@ -219,37 +219,38 @@ _G.WaveConfig = {}
 
 -- Waves 1–100
 for i = 1, 100 do
-    local waveName = "WAVE " .. i
+local waveName = "WAVE " .. i
 
-    if i == 70 or i == 81 or i == 100 then
-        _G.WaveConfig[waveName] = 0 -- không skip
-    else
-        _G.WaveConfig[waveName] = "now" -- skip ngay lập tức
-    end
+if i == 70 or i == 81 or i == 100 then  
+    _G.WaveConfig[waveName] = 0 -- không skip  
+else  
+    _G.WaveConfig[waveName] = "now" -- skip ngay lập tức  
+end
+
 end
 
 -- Các wave không skip từ 101–200
 local nonSkippableWaves = {
-    125, -- thêm wave 125 vào đây
-    129, 130, 137, 140, 142,
-    149, 150, 152, 159, 162,
-    199, 200
+129, 130, 137, 140, 142,
+149, 150, 152, 159, 162,
+199, 200
 }
 
 -- Thêm range 165–193 vào danh sách không skip
 for i = 165, 193 do
-    table.insert(nonSkippableWaves, i)
+table.insert(nonSkippableWaves, i)
 end
 
 -- Waves 101–200
 for i = 101, 200 do
-    local waveName = "WAVE " .. i
+local waveName = "WAVE " .. i
 
-    if table.find(nonSkippableWaves, i) then
-        _G.WaveConfig[waveName] = 0 -- không skip
-    else
-        _G.WaveConfig[waveName] = "now" -- skip ngay lập tức
-    end
+if table.find(nonSkippableWaves, i) then  
+    _G.WaveConfig[waveName] = 0 -- không skip  
+else  
+    _G.WaveConfig[waveName] = "now" -- skip ngay lập tức  
+end
+
 end
 
 loadstring(game:HttpGet(skipWaveURL))()
