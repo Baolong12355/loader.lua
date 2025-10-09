@@ -1,3 +1,4 @@
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -47,6 +48,17 @@ local function getEnemyPathProgress(enemy)
     return 0
 end
 
+-- Hàm kiểm tra xem quái có kháng damage type không
+local function hasResistance(enemy, damageType, threshold)
+    if not enemy or not enemy.DamageReductionTable then return false end
+    for _, reductionInfo in ipairs(enemy.DamageReductionTable) do
+        if reductionInfo.DamageType == damageType and reductionInfo.DamageReduction and reductionInfo.DamageReduction >= (threshold or 0.74) then
+            return true
+        end
+    end
+    return false
+end
+
 local function getFurthestEnemy()
     local furthestEnemy, maxProgress = nil, -1
     for _, enemy in pairs(EnemyClass.GetEnemies()) do
@@ -87,7 +99,7 @@ local function ApplyHooks()
         end
         return original_AttackHandler_Attack(self)
     end
-    
+
     local original_NewProjectile = ProjectileHandler.NewProjectile
     ProjectileHandler.NewProjectile = function(initData)
         if not gameHasEnded and _G.CurrentFPSControlledTower and initData and initData.OriginHash == _G.CurrentFPSControlledTower.Hash then
@@ -139,7 +151,7 @@ local uiWaveText = nil
 
 RunService.Heartbeat:Connect(function()
     if gameHasEnded then return end
-        
+
     if not uiWaveText then
         pcall(function() uiWaveText = PlayerGui:FindFirstChild("Interface"):FindFirstChild("GameInfoBar"):FindFirstChild("Wave"):FindFirstChild("WaveText") end)
         return
@@ -160,29 +172,27 @@ RunService.Heartbeat:Connect(function()
     end)
 
     if not _G.CurrentFPSControlledTower then return end
-    
+
     local canSwitchWeapons = false
     pcall(function()
         local levelStats = _G.CurrentFPSControlledTower.LevelHandler:GetLevelStats()
         if levelStats and levelStats.FirstPersonConfig and levelStats.FirstPersonConfig.AttackConfigs and #levelStats.FirstPersonConfig.AttackConfigs > 1 then canSwitchWeapons = true end
     end)
-    
+
     if canSwitchWeapons then
-        local hasResistantEnemy = false
-        for _, enemy in pairs(EnemyClass.GetEnemies()) do
-            if enemy and enemy.IsAlive and enemy.DamageReductionTable then
-                for _, reductionInfo in ipairs(enemy.DamageReductionTable) do
-                    if reductionInfo.DamageType == Enums.DamageTypes.Explosive and reductionInfo.DamageReduction and reductionInfo.DamageReduction >= 0.74 then
-                        hasResistantEnemy = true; break
-                    end
-                end
-            end
-            if hasResistantEnemy then break end
+        -- Kiểm tra xem quái xa nhất hiện tại có kháng explosive không
+        local furthestEnemy = getFurthestEnemy()
+        local shouldSwitchToAlternate = false
+        
+        if furthestEnemy and hasResistance(furthestEnemy, Enums.DamageTypes.Explosive, 0.74) then
+            shouldSwitchToAlternate = true
         end
-        
-        local desiredWeaponIndex = hasResistantEnemy and 1 or 2
+
+        -- Weapon index 1 = alternative weapon (cho quái có kháng explosive)
+        -- Weapon index 2 = explosive weapon (mặc định)
+        local desiredWeaponIndex = shouldSwitchToAlternate and 1 or 2
         local success, currentWeaponIndexVal = pcall(function() return debug.getupvalue(FirstPersonAttackManager.SwitchAttackHandler, 2) end)
-        
+
         if success and currentWeaponIndexVal and desiredWeaponIndex ~= currentWeaponIndexVal then
             FirstPersonHandler.SwitchAttackHandler(desiredWeaponIndex)
         end
@@ -198,13 +208,13 @@ RunService.Heartbeat:Connect(function()
 end)
 
 NetworkingHandler.GetEvent("GameStateChanged"):AttachCallback(function(state)
-	if state == "EndScreen" then
+        if state == "EndScreen" then
         gameHasEnded = true
         hooksAppliedForSession = false
-		if _G.CurrentFPSControlledTower then FirstPersonHandler.Stop() end
+                if _G.CurrentFPSControlledTower then FirstPersonHandler.Stop() end
     elseif state == "Running" or state == "MapVoting" or state == "LoadoutSelection" then
         gameHasEnded = false
-	end
+        end
 end)
 
 task.spawn(function()
