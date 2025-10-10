@@ -1,5 +1,5 @@
 local CONFIG = {
-    ["EnableKeyCheck"] = true,
+    ["EnableKeyCheck"] = false,
 }
 
 local keyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key3.txt"
@@ -86,7 +86,7 @@ local function validateKey(key, playerName)
         local cleanLine = line:match("^%s*(.-)%s*$")
 
         if cleanLine and #cleanLine > 0 then
-            local keyPart, namePart = cleanLine:match("^(.+)/(.+)$")
+            local keyPart, namePart = cleanLine:match("^([^/]+)/([^/]+)$")
 
             if keyPart and namePart then
                 keyPart = keyPart:match("^%s*(.-)%s*$")
@@ -94,7 +94,7 @@ local function validateKey(key, playerName)
 
                 if keyPart == key then
                     keyExists = true
-                    if namePart == playerName then
+                    if namePart == playerName and #namePart == #playerName then
                         return true, "success"
                     else
                         return false, "wrong_name"
