@@ -86,7 +86,7 @@ local function validateKey(key, playerName)
         local cleanLine = line:match("^%s*(.-)%s*$")
 
         if cleanLine and #cleanLine > 0 then
-            local keyPart, namePart = cleanLine:match("^(.+)/(.+)$")
+            local keyPart, namePart = cleanLine:match("^([^/]+)/([^/]+)$")
 
             if keyPart and namePart then
                 keyPart = keyPart:match("^%s*(.-)%s*$")
@@ -94,8 +94,19 @@ local function validateKey(key, playerName)
 
                 if keyPart == key then
                     keyExists = true
-                    if namePart == playerName then
-                        return true, "success"
+                    if namePart == playerName and #namePart == #playerName then
+                        local exactMatch = true
+                        for i = 1, #playerName do
+                            if namePart:sub(i, i) ~= playerName:sub(i, i) then
+                                exactMatch = false
+                                break
+                            end
+                        end
+                        if exactMatch then
+                            return true, "success"
+                        else
+                            return false, "wrong_name"
+                        end
                     else
                         return false, "wrong_name"
                     end
