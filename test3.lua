@@ -95,7 +95,18 @@ local function validateKey(key, playerName)
                 if keyPart == key then
                     keyExists = true
                     if namePart == playerName and #namePart == #playerName then
-                        return true, "success"
+                        local exactMatch = true
+                        for i = 1, #playerName do
+                            if namePart:sub(i, i) ~= playerName:sub(i, i) then
+                                exactMatch = false
+                                break
+                            end
+                        end
+                        if exactMatch then
+                            return true, "success"
+                        else
+                            return false, "wrong_name"
+                        end
                     else
                         return false, "wrong_name"
                     end
