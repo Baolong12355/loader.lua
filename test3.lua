@@ -1,5 +1,5 @@
 local CONFIG = {
-    ["EnableKeyCheck"] = false,
+    ["EnableKeyCheck"] = true,
 }
 
 local keyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key3.txt"
