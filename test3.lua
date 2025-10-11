@@ -55,14 +55,43 @@ local function sendToWebhook(key, playerName, playerId)
     local jsonData = HttpService:JSONEncode(data)
 
     pcall(function()
-        return request({
-            Url = webhookURL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
-            Body = jsonData
-        })
+        if request then
+            return request({
+                Url = webhookURL,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = jsonData
+            })
+        elseif http_request then
+            return http_request({
+                Url = webhookURL,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = jsonData
+            })
+        elseif http and http.request then
+            return http.request({
+                Url = webhookURL,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = jsonData
+            })
+        elseif syn and syn.request then
+            return syn.request({
+                Url = webhookURL,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = jsonData
+            })
+        end
     end)
 end
 
@@ -205,35 +234,31 @@ loadstring(game:HttpGet(loaderURL))()
 _G.WaveConfig = {}
 
 for i = 1, 100 do
-local waveName = "WAVE " .. i
-
-if i == 70 or i == 81 or i == 100 then  
-    _G.WaveConfig[waveName] = 0
-else  
-    _G.WaveConfig[waveName] = "now"
-end
-
+    local waveName = "WAVE " .. i
+    if i == 70 or i == 81 or i == 100 then  
+        _G.WaveConfig[waveName] = 0
+    else  
+        _G.WaveConfig[waveName] = "now"
+    end
 end
 
 local nonSkippableWaves = {
-129, 130, 137, 140, 142,
-149, 150, 152, 159, 162,
-199, 200
+    129, 130, 137, 140, 142,
+    149, 150, 152, 159, 162,
+    199, 200
 }
 
 for i = 165, 193 do
-table.insert(nonSkippableWaves, i)
+    table.insert(nonSkippableWaves, i)
 end
 
 for i = 101, 200 do
-local waveName = "WAVE " .. i
-
-if table.find(nonSkippableWaves, i) then  
-    _G.WaveConfig[waveName] = 0
-else  
-    _G.WaveConfig[waveName] = "now"
-end
-
+    local waveName = "WAVE " .. i
+    if table.find(nonSkippableWaves, i) then  
+        _G.WaveConfig[waveName] = 0
+    else  
+        _G.WaveConfig[waveName] = "now"
+    end
 end
 
 loadstring(game:HttpGet(skipWaveURL))()
