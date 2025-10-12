@@ -1,4 +1,4 @@
--- ✅ Auto Join Map - TDX (Đã thêm Remote đổi party + kiểm tra TRANSPORTING)
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -56,7 +56,11 @@ local function tryEnterMap()
     trySetMapIfNeeded()
 
     local LeaveQueue = ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("LeaveQueue")
-    local roots = {Workspace:FindFirstChild("APCs"), Workspace:FindFirstChild("APCs2")}
+    local roots = {
+        Workspace:FindFirstChild("APCs"), 
+        Workspace:FindFirstChild("APCs2"),
+        Workspace:FindFirstChild("BasementElevators")
+    }
 
     for _, root in ipairs(roots) do
         if root then
