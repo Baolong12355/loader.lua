@@ -21,13 +21,6 @@ local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitFor
 local TowerAttack = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerAttack")
 local useFireServer = TowerUseAbilityRequest:IsA("RemoteEvent")
 
--- SKILL QUEUE SYSTEM
-local skillQueue = {}
-local activeSkills = 0
-local maxConcurrentSkills = 5
-local skillDelay = 0.1 -- delay giữa mỗi skill (giây)
-local lastSkillTime = 0
-
 local function setThreadIdentity(identity)
     if setthreadidentity then
         setthreadidentity(identity)
@@ -76,6 +69,8 @@ local mobsterUsedEnemies = {}
 local prevCooldown = {}
 local medicLastUsedTime = {}
 local medicDelay = 0.5
+local lastGlobalSkillUseTime = 0
+local skillDelay = 0.05
 
 local function getDistance2D(pos1, pos2)
     local dx = pos1.X - pos2.X
@@ -341,39 +336,23 @@ local function getBestMedicTarget(medicTower, ownedTowers)
     return bestHash
 end
 
--- HỆ THỐNG QUEUE VÀ DELAY
+local function canUseSkill()
+    local now = tick()
+    if now - lastGlobalSkillUseTime >= skillDelay then
+        lastGlobalSkillUseTime = now
+        return true
+    end
+    return false
+end
+
 local function SendSkill(hash, index, pos, targetHash)
-    table.insert(skillQueue, {hash = hash, index = index, pos = pos, targetHash = targetHash})
+    if not canUseSkill() then return end
+    if useFireServer then
+        SafeRemoteCall("FireServer", TowerUseAbilityRequest, hash, index, pos, targetHash)
+    else
+        SafeRemoteCall("InvokeServer", TowerUseAbilityRequest, hash, index, pos, targetHash)
+    end
 end
-
-local function ProcessSkillQueue()
-    task.spawn(function()
-        while true do
-            if #skillQueue > 0 and activeSkills < maxConcurrentSkills then
-                local now = tick()
-                if now - lastSkillTime >= skillDelay then
-                    local skillData = table.remove(skillQueue, 1)
-                    activeSkills = activeSkills + 1
-                    lastSkillTime = now
-                    
-                    task.spawn(function()
-                        if useFireServer then
-                            SafeRemoteCall("FireServer", TowerUseAbilityRequest, skillData.hash, skillData.index, skillData.pos, skillData.targetHash)
-                        else
-                            SafeRemoteCall("InvokeServer", TowerUseAbilityRequest, skillData.hash, skillData.index, skillData.pos, skillData.targetHash)
-                        end
-                        task.wait(0.05)
-                        activeSkills = activeSkills - 1
-                    end)
-                end
-            end
-            task.wait(0.01)
-        end
-    end)
-end
-
--- Khởi động hệ thống xử lý queue
-ProcessSkillQueue()
 
 local function handleTowerAttack(attackData)
     if not GameModules.TowerClass then return end
