@@ -69,21 +69,47 @@ end
 -- gửi thông tin lobby
 local function sendLobbyInfo()
     task.spawn(function()
-        local gui = LocalPlayer:WaitForChild("PlayerGui", 5)
-        if gui then
-            local mainGUI = gui:FindFirstChild("GUI")
-            local currencyDisplay = mainGUI and mainGUI:FindFirstChild("CurrencyDisplay")
-            local goldDisplay = currencyDisplay and currencyDisplay:FindFirstChild("GoldDisplay")
-            local goldText = goldDisplay and goldDisplay:FindFirstChild("ValueText")
-            local crystalDisplay = currencyDisplay and currencyDisplay:FindFirstChild("CrystalsDisplay")
-            local crystalText = crystalDisplay and crystalDisplay:FindFirstChild("ValueText")
+        local gui = LocalPlayer:WaitForChild("PlayerGui", 10)
+        if not gui then return end
+        
+        local mainGUI = gui:WaitForChild("GUI", 5)
+        if not mainGUI then return end
+        
+        local currencyDisplay = mainGUI:WaitForChild("CurrencyDisplay", 5)
+        if not currencyDisplay then return end
+        
+        local goldDisplay = currencyDisplay:WaitForChild("GoldDisplay", 5)
+        local crystalDisplay = currencyDisplay:WaitForChild("CrystalsDisplay", 5)
+        
+        if not goldDisplay or not crystalDisplay then return end
+        
+        local goldText = goldDisplay:WaitForChild("ValueText", 5)
+        local crystalText = crystalDisplay:WaitForChild("ValueText", 5)
+        
+        if not goldText or not crystalText then return end
 
-            local stats = {
-                Level = LocalPlayer:FindFirstChild("leaderstats") and LocalPlayer.leaderstats:FindFirstChild("Level") and LocalPlayer.leaderstats.Level.Value or "N/A",
-                Wins = LocalPlayer:FindFirstChild("leaderstats") and LocalPlayer.leaderstats:FindFirstChild("Wins") and LocalPlayer.leaderstats.Wins.Value or "N/A",
-                Gold = goldText and goldText:IsA("TextLabel") and goldText.Text or "N/A",
-                Crystal = crystalText and crystalText:IsA("TextLabel") and crystalText.Text or "N/A"
-            }
+        -- Đợi UI cập nhật số thực (max 15s)
+        local startTime = tick()
+        local maxWaitTime = 15
+        
+        while tick() - startTime < maxWaitTime do
+            local goldValue = goldText.Text
+            local crystalValue = crystalText.Text
+            
+            -- Kiểm tra nếu đã có giá trị hợp lệ (không phải "0" hoặc rỗng)
+            if goldValue and goldValue ~= "" and goldValue ~= "0" and tonumber(goldValue:gsub("[,%$]", "")) then
+                break
+            end
+            
+            task.wait(0.5)
+        end
+
+        local stats = {
+            Level = LocalPlayer:FindFirstChild("leaderstats") and LocalPlayer.leaderstats:FindFirstChild("Level") and LocalPlayer.leaderstats.Level.Value or "N/A",
+            Wins = LocalPlayer:FindFirstChild("leaderstats") and LocalPlayer.leaderstats:FindFirstChild("Wins") and LocalPlayer.leaderstats.Wins.Value or "N/A",
+            Gold = goldText.Text or "N/A",
+            Crystal = crystalText.Text or "N/A"
+        }
 
             sendToWebhook({type = "lobby", stats = stats})
 
