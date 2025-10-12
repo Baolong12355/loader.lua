@@ -1,3 +1,4 @@
+
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -7,7 +8,6 @@ local cashStat = player:WaitForChild("leaderstats"):WaitForChild("Cash")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local PlayerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
 
--- Thread identity management
 local function setThreadIdentity(identity)
     if setthreadidentity then
         setthreadidentity(identity)
@@ -16,12 +16,10 @@ local function setThreadIdentity(identity)
     end
 end
 
--- Remote call wrapper với thread isolation
 local function SafeRemoteCall(remoteType, remote, ...)
     local args = {...}
     return task.spawn(function()
-        setThreadIdentity(2) -- Elevated identity cho ưu tiên cao
-
+        setThreadIdentity(2)
         if remoteType == "FireServer" then
             pcall(function()
                 remote:FireServer(unpack(args))
@@ -35,7 +33,6 @@ local function SafeRemoteCall(remoteType, remote, ...)
     end)
 end
 
--- Universal compatibility functions
 local function getGlobalEnv()
     if getgenv then return getgenv() end
     if getfenv then return getfenv() end
@@ -58,7 +55,6 @@ local function safeIsFile(path)
     return false
 end
 
--- Cấu hình mặc định với threaded remotes
 local defaultConfig = {
     ["Macro Name"] = "endless",
     ["PlaceMode"] = "Rewrite",
@@ -74,7 +70,7 @@ local defaultConfig = {
     ["MonitorCheckDelay"] = 0.05,
     ["AllowParallelTargets"] = false,
     ["AllowParallelSkips"] = true,
-    ["UseThreadedRemotes"] = true -- Thêm option mới
+    ["UseThreadedRemotes"] = true
 }
 
 local globalEnv = getGlobalEnv()
@@ -121,7 +117,6 @@ if not TowerClass then
     error("Không thể load TowerClass - vui lòng đảm bảo bạn đang trong game TDX")
 end
 
--- ==== AUTO SELL CONVERTED TOWERS - RUNNER với threaded remotes ====
 task.spawn(function()
     while task.wait(0.5) do
         for hash, tower in pairs(TowerClass.GetTowers()) do
@@ -137,7 +132,6 @@ task.spawn(function()
     end
 end)
 
--- CẬP NHẬT: Đảm bảo sử dụng so sánh tuyệt đối theo yêu cầu
 local function GetTowerByAxis(targetX)
     for hash, tower in pairs(TowerClass.GetTowers()) do
         local spawnCFrame = tower.SpawnCFrame
@@ -150,7 +144,6 @@ local function GetTowerByAxis(targetX)
     return nil, nil
 end
 
--- CẬP NHẬT: Hàm chờ mới để đảm bảo tower đã sẵn sàng
 local function WaitForTowerInitialization(axisX, timeout)
     timeout = timeout or 5
     local startTime = tick()
@@ -227,21 +220,45 @@ end
 
 local function GetCurrentUpgradeCost(tower, path)
     if not tower or not tower.LevelHandler then return nil end
-    local maxLvl = tower.LevelHandler:GetMaxLevel()
-    local curLvl = tower.LevelHandler:GetLevelOnPath(path)
+    
+    local levelHandler = tower.LevelHandler
+    local maxLvl = levelHandler:GetMaxLevel()
+    local curLvl = levelHandler:GetLevelOnPath(path)
+    
     if curLvl >= maxLvl then return nil end
-    local ok, baseCost = pcall(function() return tower.LevelHandler:GetLevelUpgradeCost(path, 1) end)
-    if not ok then return nil end
-    local disc = 0
-    pcall(function() disc = tower.BuffHandler and tower.BuffHandler:GetDiscount() or 0 end)
-    return math.floor(baseCost * (1 - disc))
+    
+    local towerName = tower.Type
+    local discount = 0
+    local priceMultiplier = 1
+    local dynamicPriceData = {}
+    
+    if tower.BuffHandler then
+        pcall(function() 
+            discount = tower.BuffHandler:GetDiscount() or 0 
+        end)
+    end
+    
+    if levelHandler.HasDynamicPriceScaling then
+        local playerData = TowerClass.GetDynamicPriceScalingData(tower)
+        dynamicPriceData = playerData or {}
+    end
+    
+    local success, cost = pcall(function()
+        local LevelHandlerUtilities = require(ReplicatedStorage:WaitForChild("TDX_Shared"):WaitForChild("Common"):WaitForChild("LevelHandlerUtilities"))
+        return LevelHandlerUtilities.GetLevelUpgradeCost(levelHandler, towerName, path, 1, discount, priceMultiplier, dynamicPriceData)
+    end)
+    
+    if not success then
+        return nil
+    end
+    
+    return cost
 end
 
 local function WaitForCash(amount)
     while cashStat.Value < amount do RunService.RenderStepped:Wait() end
 end
 
--- CẬP NHẬT: Tích hợp hàm chờ mới vào các hàm retry với threaded remotes
 local function PlaceTowerRetry(args, axisValue)
     for i = 1, getMaxAttempts() do
         if globalEnv.TDX_Config.UseThreadedRemotes then
@@ -344,7 +361,6 @@ local function UseMovingSkillRetry(axisValue, skillIndex, location)
                         end
                     end
                 else
-                    -- Original non-threaded approach
                     if location == "no_pos" then
                         success = pcall(function()
                             if useFireServer then TowerUseAbilityRequest:FireServer(hash, skillIndex) 
@@ -390,7 +406,6 @@ local function SellTowerRetry(axisValue)
     return false
 end
 
--- ===== UNIFIED MONITOR SYSTEM với threaded remotes =====
 local function StartUnifiedMonitor(monitorEntries, gameUI)
     local processedEntries = {}
     local attemptedSkipWaves = {}
@@ -447,7 +462,7 @@ local function StartUnifiedMonitor(monitorEntries, gameUI)
     end
 
     task.spawn(function()
-        setThreadIdentity(2) -- Set elevated identity cho monitor thread
+        setThreadIdentity(2)
         while true do
             local success, currentWave, currentTime = pcall(function() return gameUI.waveText.Text, gameUI.timeText.Text end)
             if success then
@@ -464,14 +479,13 @@ local function StartUnifiedMonitor(monitorEntries, gameUI)
     end)
 end
 
--- ===== HỆ THỐNG REBUILD với threaded remotes =====
 local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     local config = globalEnv.TDX_Config
     local rebuildAttempts, soldPositions, jobQueue, activeJobs = {}, {}, {}, {}
 
     local function RebuildWorker()
         task.spawn(function()
-            setThreadIdentity(2) -- Set elevated identity cho rebuild workers
+            setThreadIdentity(2)
             while true do
                 if #jobQueue > 0 then
                     local job = table.remove(jobQueue, 1)
@@ -488,7 +502,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
 
                     local rebuildSuccess = true
 
-                    -- Place tower
                     if placeRecord then
                         local action = placeRecord.entry
                         local vecTab = {}
@@ -505,7 +518,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                         end
                     end
 
-                    -- Upgrade towers
                     if rebuildSuccess then
                         table.sort(upgradeRecords, function(a, b) return a.line < b.line end)
                         for _, record in ipairs(upgradeRecords) do
@@ -516,7 +528,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                         end
                     end
 
-                    -- Handle moving skills
                     if rebuildSuccess and #movingRecords > 0 then
                         task.spawn(function()
                             local lastMovingRecord = movingRecords[#movingRecords].entry
@@ -524,7 +535,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
                         end)
                     end
 
-                    -- Change targets
                     if rebuildSuccess then
                         for _, record in ipairs(targetRecords) do
                             ChangeTargetRetry(tonumber(record.entry.TowerTargetChange), record.entry.TargetWanted)
@@ -600,7 +610,6 @@ local function StartRebuildSystem(rebuildEntry, towerRecords, skipTypesMap)
     end)
 end
 
--- ===== MAIN RUNNER =====
 local function RunMacroRunner()
     local config = globalEnv.TDX_Config
     local macroName = config["Macro Name"] or "event"
@@ -622,7 +631,6 @@ local function RunMacroRunner()
 
     local gameUI, towerRecords, skipTypesMap, monitorEntries, rebuildSystemActive = getGameUI(), {}, {}, {}, false
 
-    -- Collect monitor entries
     for i, entry in ipairs(macro) do
         if entry.TowerTargetChange or entry.towermoving or entry.SkipWave then 
             table.insert(monitorEntries, entry) 
@@ -633,7 +641,6 @@ local function RunMacroRunner()
         StartUnifiedMonitor(monitorEntries, gameUI) 
     end
 
-    -- Execute macro
     for i, entry in ipairs(macro) do
         if entry.SuperFunction == "sell_all" then 
             SellAllTowers(entry.Skip)
