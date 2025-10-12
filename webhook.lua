@@ -69,15 +69,18 @@ end
 -- gửi thông tin lobby
 local function sendLobbyInfo()
     task.spawn(function()
-        -- đợi TopBar MenuIconHolder visible
+        -- Đợi TowerBar load xong
         local gui = LocalPlayer:WaitForChild("PlayerGui", 10)
         if gui then
-            local topBar = gui:WaitForChild("TopBar", 10)
-            if topBar then
-                local menuIconHolder = topBar:WaitForChild("MenuIconHolder", 10)
-                if menuIconHolder then
-                    repeat task.wait(0.1) until menuIconHolder.Visible
+            local debug = gui:FindFirstChild("Debug")
+            local clientLabel = debug and debug:FindFirstChild("client")
+            if clientLabel then
+                local startTime = tick()
+                while clientLabel.Visible and clientLabel.Text == "Loading TowerBar" do
+                    task.wait(0.1)
+                    if tick() - startTime > 30 then break end
                 end
+                task.wait(0.5)
             end
         end
         
