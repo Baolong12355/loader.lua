@@ -6,10 +6,12 @@ local LocalPlayer = Players.LocalPlayer
 
 local MAX_RETRY = 3
 
+-- lấy webhook URL
 local function getWebhookURL()
     return getgenv().webhookConfig and getgenv().webhookConfig.webhookUrl or ""
 end
 
+-- format thời gian
 local function formatTime(seconds)
     seconds = tonumber(seconds)
     if not seconds then return "N/A" end
@@ -18,6 +20,7 @@ local function formatTime(seconds)
     return string.format("%dm %ds", mins, secs)
 end
 
+-- gửi dữ liệu lên webhook
 local function sendToWebhook(data)
     local url = getWebhookURL()
     if url == "" then return end
@@ -63,6 +66,7 @@ local function sendToWebhook(data)
     end)
 end
 
+-- gửi thông tin lobby
 local function sendLobbyInfo()
     task.spawn(function()
         local gui = LocalPlayer:WaitForChild("PlayerGui", 5)
@@ -70,12 +74,15 @@ local function sendLobbyInfo()
             local mainGUI = gui:FindFirstChild("GUI")
             local currencyDisplay = mainGUI and mainGUI:FindFirstChild("CurrencyDisplay")
             local goldDisplay = currencyDisplay and currencyDisplay:FindFirstChild("GoldDisplay")
-            local valueText = goldDisplay and goldDisplay:FindFirstChild("ValueText")
+            local goldText = goldDisplay and goldDisplay:FindFirstChild("ValueText")
+            local crystalDisplay = currencyDisplay and currencyDisplay:FindFirstChild("CrystalsDisplay")
+            local crystalText = crystalDisplay and crystalDisplay:FindFirstChild("ValueText")
 
             local stats = {
                 Level = LocalPlayer:FindFirstChild("leaderstats") and LocalPlayer.leaderstats:FindFirstChild("Level") and LocalPlayer.leaderstats.Level.Value or "N/A",
                 Wins = LocalPlayer:FindFirstChild("leaderstats") and LocalPlayer.leaderstats:FindFirstChild("Wins") and LocalPlayer.leaderstats.Wins.Value or "N/A",
-                Gold = valueText and valueText:IsA("TextLabel") and valueText.Text or "N/A"
+                Gold = goldText and goldText:IsA("TextLabel") and goldText.Text or "N/A",
+                Crystal = crystalText and crystalText:IsA("TextLabel") and crystalText.Text or "N/A"
             }
 
             sendToWebhook({type = "lobby", stats = stats})
@@ -114,20 +121,18 @@ local function sendLobbyInfo()
                     statsData.Towers = table.concat(towerList, ", ")
                 end
 
-                sendToWebhook({
-                    type = "lobby",
-                    stats = statsData
-                })
+                sendToWebhook({type = "lobby", stats = statsData})
             end)
         end
     end)
 end
 
-local function loopCheckLobbyGold()
+-- loop kiểm tra gold + crystal
+local function loopCheckLobbyCurrency()
     local config = getgenv().webhookConfig or {}
     local TARGET_GOLD = config.targetGold
-    local ENABLE_KICK = TARGET_GOLD and true or false
-    if not TARGET_GOLD then return end
+    local TARGET_CRYSTAL = config.targetCrystal
+    local ENABLE_KICK = TARGET_GOLD or TARGET_CRYSTAL
 
     task.spawn(function()
         while true do
@@ -136,23 +141,20 @@ local function loopCheckLobbyGold()
                 local mainGUI = gui:FindFirstChild("GUI")
                 local currencyDisplay = mainGUI and mainGUI:FindFirstChild("CurrencyDisplay")
                 local goldDisplay = currencyDisplay and currencyDisplay:FindFirstChild("GoldDisplay")
-                local valueText = goldDisplay and goldDisplay:FindFirstChild("ValueText")
-                if valueText and valueText:IsA("TextLabel") then
-                    local goldAmount = tonumber(valueText.Text:gsub("[$,]", "")) or 0
-                    if goldAmount >= TARGET_GOLD then
-                        sendToWebhook({
-                            type = "lobby",
-                            stats = {
-                                message = "đã đạt vàng mục tiêu",
-                                Gold = tostring(goldAmount),
-                                Player = LocalPlayer.Name
-                            }
-                        })
-                        if ENABLE_KICK then
-                            LocalPlayer:Kick("đã đạt " .. goldAmount .. " vàng")
-                        end
-                        break
-                    end
+                local crystalDisplay = currencyDisplay and currencyDisplay:FindFirstChild("CrystalsDisplay")
+                local goldAmount = goldDisplay and goldDisplay:FindFirstChild("ValueText") and tonumber(goldDisplay.ValueText.Text:gsub("[,%$]", "")) or 0
+                local crystalAmount = crystalDisplay and crystalDisplay:FindFirstChild("ValueText") and tonumber(crystalDisplay.ValueText.Text:gsub("[,%$]", "")) or 0
+
+                if TARGET_GOLD and goldAmount >= TARGET_GOLD then
+                    sendToWebhook({type = "lobby", stats = {message = "đã đạt vàng mục tiêu", Gold = tostring(goldAmount), Player = LocalPlayer.Name}})
+                    if ENABLE_KICK then LocalPlayer:Kick("đã đạt " .. goldAmount .. " vàng") end
+                    break
+                end
+
+                if TARGET_CRYSTAL and crystalAmount >= TARGET_CRYSTAL then
+                    sendToWebhook({type = "lobby", stats = {message = "đã đạt crystal mục tiêu", Crystal = tostring(crystalAmount), Player = LocalPlayer.Name}})
+                    if ENABLE_KICK then LocalPlayer:Kick("đã đạt " .. crystalAmount .. " crystal") end
+                    break
                 end
             end
             task.wait(0.25)
@@ -160,6 +162,7 @@ local function loopCheckLobbyGold()
     end)
 end
 
+-- hook reward game
 local function hookGameReward()
     task.spawn(function()
         local handler
@@ -181,6 +184,7 @@ local function hookGameReward()
                         Wave = data.LastPassedWave and tostring(data.LastPassedWave) or "N/A",
                         Time = formatTime(data.TimeElapsed),
                         Gold = tostring((data.PlayerNameToGoldMap and data.PlayerNameToGoldMap[name]) or 0),
+                        Crystals = tostring((data.PlayerNameToCrystalsMap and data.PlayerNameToCrystalsMap[name]) or 0),
                         Tokens = tostring((data.PlayerNameToTokensMap and data.PlayerNameToTokensMap[name]) or 0),
                         XP = tostring((data.PlayerNameToXPMap and data.PlayerNameToXPMap[name]) or 0),
                         PowerUps = {}
@@ -197,14 +201,16 @@ local function hookGameReward()
     end)
 end
 
+-- check đang ở lobby
 local function isLobby()
     local gui = LocalPlayer:FindFirstChild("PlayerGui")
     return gui and gui:FindFirstChild("GUI") and gui.GUI:FindFirstChild("CurrencyDisplay") ~= nil
 end
 
+-- main
 if isLobby() then
     sendLobbyInfo()
-    loopCheckLobbyGold()
+    loopCheckLobbyCurrency()
 else
     hookGameReward()
 end
