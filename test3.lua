@@ -66,11 +66,34 @@ local skipTowerTypes = {["Helicopter"] = true, ["Cryo Helicopter"] = true, ["Med
 local skipAirTowers = {["Ice Breaker"] = true, ["John"] = true, ["Slammer"] = true, ["Mobster"] = true, ["Golden Mobster"] = true}
 
 local mobsterUsedEnemies = {}
-local prevCooldown = {}
 local medicLastUsedTime = {}
 local medicDelay = 0.5
 local lastGlobalSkillUseTime = 0
 local skillDelay = 0.05
+
+-- UPDATE: Bảng này sẽ lưu trữ các kỹ năng có sẵn để sử dụng trong mỗi khung hình.
+local availableAbilities = {}
+
+-- UPDATE: Hàm mới để cập nhật trạng thái của tất cả các kỹ năng một lần mỗi khung hình.
+-- Nó sử dụng logic `ability:CanUse()` giống như hotbar của game, hiệu quả hơn nhiều.
+local function UpdateAvailableAbilities()
+    table.clear(availableAbilities)
+    local ownedTowers = GameModules.TowerClass.GetTowers() or {}
+    for hash, tower in pairs(ownedTowers) do
+        if tower and tower.OwnedByLocalPlayer and tower.AbilityHandler then
+            for i = 1, 3 do
+                local ability = tower.AbilityHandler:GetAbilityFromIndex(i)
+                if ability and ability:CanUse() and not ability.Passive then
+                    if not availableAbilities[hash] then
+                        availableAbilities[hash] = {}
+                    end
+                    availableAbilities[hash][i] = true
+                end
+            end
+        end
+    end
+end
+
 
 local function getDistance2D(pos1, pos2)
     local dx = pos1.X - pos2.X
@@ -98,19 +121,7 @@ local function GetCurrentUpgradeLevels(tower)
     return p1, p2
 end
 
-local function isCooldownReady(hash, index, ability)
-    if not ability then return false end
-    local lastCD = (prevCooldown[hash] and prevCooldown[hash][index]) or 0
-    local currentCD = ability.CooldownRemaining or 0
-    if currentCD > lastCD + 0.1 or currentCD > 0 then
-        prevCooldown[hash] = prevCooldown[hash] or {}
-        prevCooldown[hash][index] = currentCD
-        return false
-    end
-    prevCooldown[hash] = prevCooldown[hash] or {}
-    prevCooldown[hash][index] = currentCD
-    return true
-end
+-- DEPRECATED: Hàm isCooldownReady đã bị loại bỏ và thay thế bằng hệ thống `availableAbilities`.
 
 local function getAccurateDPS(tower)
     if not tower or not GameModules.TowerUtilities then return 0 end
@@ -122,7 +133,6 @@ local function getAccurateDPS(tower)
     return success and dps or 0
 end
 
--- UPDATE: Sử dụng hàm IsUbered từ BuffHandler để kiểm tra buff của Medic một cách đáng tin cậy.
 local function isBuffedByMedic(tower)
     if not tower or not tower.BuffHandler or not tower.BuffHandler.IsUbered then
         return false
@@ -318,7 +328,6 @@ local function getBestMedicTarget(medicTower, ownedTowers)
     local medicRange = getRange(medicTower)
     local bestHash, bestDPS = nil, -1
     for hash, tower in pairs(ownedTowers) do
-        -- UPDATE: Medic sẽ bỏ qua chính nó và tháp Refractor.
         if tower == medicTower or tower.Type == "Refractor" then continue end
         if canReceiveBuff(tower) and not isBuffedByMedic(tower) then
             local towerPos = getTowerPos(tower)
@@ -369,20 +378,18 @@ local function handleTowerAttack(attackData)
                 local distance = getDistance2D(towerPos, attackingPos)
                 local towerRange = getRange(tower)
                 if distance <= towerRange then
+                    -- UPDATE: Thay đổi kiểm tra cooldown sang hệ thống mới
                     if tower.Type == "EDJ" then
-                        local ability = tower.AbilityHandler:GetAbilityFromIndex(1)
-                        if isCooldownReady(hash, 1, ability) then SendSkill(hash, 1) end
+                        if availableAbilities[hash] and availableAbilities[hash][1] then SendSkill(hash, 1) end
                     elseif tower.Type == "Commander" then
-                        local ability = tower.AbilityHandler:GetAbilityFromIndex(1)
-                        if isCooldownReady(hash, 1, ability) then SendSkill(hash, 1) end
+                        if availableAbilities[hash] and availableAbilities[hash][1] then SendSkill(hash, 1) end
                     elseif tower.Type == "Medic" then
                         local _, p2 = GetCurrentUpgradeLevels(tower)
                         if p2 >= 4 then
                             local now = tick()
                             if not medicLastUsedTime[hash] or now - medicLastUsedTime[hash] >= medicDelay then
                                 for index = 1, 3 do
-                                    local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-                                    if isCooldownReady(hash, index, ability) then
+                                    if availableAbilities[hash] and availableAbilities[hash][index] then
                                         local targetHash = getBestMedicTarget(tower, ownedTowers)
                                         if targetHash then
                                             SendSkill(hash, index, nil, targetHash)
@@ -404,6 +411,10 @@ TowerAttack.OnClientEvent:Connect(handleTowerAttack)
 
 RunService.Heartbeat:Connect(function()
     if not GameModules.TowerClass then LoadGameModules(); return end
+
+    -- UPDATE: Cập nhật danh sách các kỹ năng có sẵn một lần mỗi khung hình.
+    UpdateAvailableAbilities()
+
     local ownedTowers = GameModules.TowerClass.GetTowers() or {}
     for hash, tower in pairs(ownedTowers) do
         if not tower or not tower.AbilityHandler then continue end
@@ -415,10 +426,13 @@ RunService.Heartbeat:Connect(function()
             if not pos then return end
             local range = getRange(tower)
             for index = 1, 3 do
+                -- UPDATE: Thay thế `isCooldownReady` bằng một tra cứu bảng nhanh chóng.
+                if not (availableAbilities[hash] and availableAbilities[hash][index]) then continue end
+                
                 local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-                if not isCooldownReady(hash, index, ability) then continue end
                 local targetPos = nil
                 local allowUse = true
+                
                 if tower.Type == "Jet Trooper" then
                     if index == 1 then allowUse = false elseif index == 2 then allowUse = true else allowUse = false end
                 end
