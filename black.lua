@@ -9,9 +9,11 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 -- Script Control
 local scriptEnabled = true
+local isRemoving = false
 
 function _G.blackoff()
     scriptEnabled = false
+    isRemoving = true
     for _, v in pairs(CoreGui:GetChildren()) do
         if v:IsA("ScreenGui") and v.DisplayOrder == 2147483647 then
             pcall(function()
@@ -97,11 +99,13 @@ local function protect(instance, propertiesToProtect)
 local originalProperties = { Parent = instance.Parent }
 for _, propName in ipairs(propertiesToProtect) do originalProperties[propName] = instance[propName] end
 instance.AncestryChanged:Connect(function(_, parent)
+if isRemoving then return end
 if parent ~= originalProperties.Parent then kick("Reason: Attempted to delete or move a protected GUI element.") end
 end)
 for propName, originalValue in pairs(originalProperties) do
 if propName ~= "Parent" then
 instance:GetPropertyChangedSignal(propName):Connect(function()
+if isRemoving then return end
 if instance[propName] ~= originalValue then kick("Reason: Attempted to modify protected GUI property: " .. propName) end
 end)
 end
