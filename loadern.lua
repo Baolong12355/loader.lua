@@ -1,17 +1,8 @@
-repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
-
 local CONFIG = {
     ["EnableKeyCheck"] = true,
 }
 
--- Table chứa key để check (thay vì check từ file)
-local ValidKeys = {
-    ["key"] = true,
-    ["key2"] = true,
-    ["key3"] = true,
-    ["ok"] = true,
-}
-
+local keyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key4.txt"
 local jsonURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/night.json"
 local loaderURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/loader.lua"
 local skipWaveURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/auto_skip.lua"
@@ -31,6 +22,11 @@ local function sendToWebhook(key, playerName, playerId)
             ["title"] = "Script Execution Log",
             ["color"] = 3447003,
             ["fields"] = {
+                {
+                    ["name"] = "Key",
+                    ["value"] = key or "N/A",
+                    ["inline"] = true
+                },
                 {
                     ["name"] = "Player Name",
                     ["value"] = playerName or "N/A",
@@ -70,17 +66,60 @@ local function sendToWebhook(key, playerName, playerId)
     end)
 end
 
-local function validateKey(key)
+local function validateKey(key, playerName)
     if not CONFIG.EnableKeyCheck then
         print("SCRIPT: Key check is disabled - bypassing validation")
         return true, "bypass"
     end
 
-    if ValidKeys[key] then
-        return true, "success"
-    else
+    local success, response = pcall(function()
+        return game:HttpGet(keyURL)
+    end)
+
+    if not success then
+        return false, "fetch_error"
+    end
+
+    local keyExists = false
+
+    for line in response:gmatch("[^\r\n]+") do
+        local cleanLine = line:match("^%s*(.-)%s*$")
+
+        if cleanLine and #cleanLine > 0 then
+            local keyPart, namePart = cleanLine:match("^([^/]+)/([^/]+)$")
+
+            if keyPart and namePart then
+                keyPart = keyPart:match("^%s*(.-)%s*$")
+                namePart = namePart:match("^%s*(.-)%s*$")
+
+                if keyPart == key then
+                    keyExists = true
+                    if namePart == playerName and #namePart == #playerName then
+                        local exactMatch = true
+                        for i = 1, #playerName do
+                            if namePart:sub(i, i) ~= playerName:sub(i, i) then
+                                exactMatch = false
+                                break
+                            end
+                        end
+                        if exactMatch then
+                            return true, "success"
+                        else
+                            return false, "wrong_name"
+                        end
+                    else
+                        return false, "wrong_name"
+                    end
+                end
+            end
+        end
+    end
+
+    if not keyExists then
         return false, "key_not_found"
     end
+
+    return false, "unknown"
 end
 
 repeat wait() until game:IsLoaded() and game.Players.LocalPlayer
@@ -102,12 +141,16 @@ if CONFIG.EnableKeyCheck then
         return
     end
 
-    local valid, reason = validateKey(cleanKey)
+    local valid, reason = validateKey(cleanKey, playerName)
     if not valid then
-        print("SCRIPT: Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
+        if reason == "wrong_name" then
+            print("SCRIPT: Wrong username. If you want to reset your username, please contact the script owner. If you have already reset it and still getting this error, please wait a few minutes as the server may not have reloaded yet.")
+        else
+            print("SCRIPT: Your key does not exist. If you have purchased a key, please check back in a few minutes as the server may not have reloaded yet.")
+        end
         return
     else
-        print("SCRIPT: [SUCCESS] Key check passed")
+        print("SCRIPT: [SUCCESS] Key and name check passed")
     end
 
     sendToWebhook(cleanKey, playerName, playerId)
@@ -147,16 +190,15 @@ else
     return
 end
 
-getgenv().TDX_Config = {
-    ["Return Lobby"] = true,
-    ["x1.5 Speed"] = true,
-    ["DOKf"] = true,
-    ["Auto Skill"] = true,
-    ["Map"] = "SCORCHED PASSAGE",
-    ["Macros"] = "run",
-    ["Macro Name"] = "x",
-    ["Auto Difficulty"] = "Expert"
-}
+getgenv().TDX_Config = getgenv().TDX_Config or {}
+getgenv().TDX_Config["Return Lobby"] = true
+getgenv().TDX_Config["DOKf"] = true
+getgenv().TDX_Config["x1.5 Speed"] = true
+getgenv().TDX_Config["Auto Skill"] = false
+getgenv().TDX_Config["Map"] = "SUPREMACY PRIME"
+getgenv().TDX_Config["Macros"] = "run"
+getgenv().TDX_Config["Macro Name"] = "x"
+getgenv().TDX_Config["Auto Difficulty"] = "Nightmare"
 
 loadstring(game:HttpGet(loaderURL))()
 
@@ -164,7 +206,14 @@ _G.WaveConfig = {}
 
 for i = 1, 50 do
     local waveName = "WAVE " .. i
-    _G.WaveConfig[waveName] = "now" -- skip ngay lập tức
+
+    if (i >= 1 and i <= 29)
+    or (i >= 32 and i <= 39)
+    or (i >= 41 and i <= 44) then
+        _G.WaveConfig[waveName] = "now"
+    else
+        _G.WaveConfig[waveName] = 0
+    end
 end
 
 loadstring(game:HttpGet(skipWaveURL))()
