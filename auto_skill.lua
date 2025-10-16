@@ -73,7 +73,7 @@ local medicLastUsedTime = {}
 local medicDelay = 0.5
 
 local skillsUsedThisFrame = 0
-local maxSkillsPerFrame = 10 -- Tăng giới hạn để phản ứng nhanh hơn
+local maxSkillsPerFrame = 5 
 
 local function getDistance2D(pos1, pos2)
     local dx = pos1.X - pos2.X
@@ -111,10 +111,17 @@ local function getAccurateDPS(tower)
     return success and dps or 0
 end
 
-local function IsKritzed(tower)
-    if not tower or not tower.BuffHandler or not tower.BuffHandler.ActiveBuffs then return false end
+-- UPDATE: Thay đổi hàm này để chỉ kiểm tra buff "Kritz" (tăng sát thương) của Medic
+local function isBuffedByMedic(tower)
+    if not tower or not tower.BuffHandler or not tower.BuffHandler.ActiveBuffs then
+        return false
+    end
     for _, buff in pairs(tower.BuffHandler.ActiveBuffs) do
-        if buff.Name and string.match(buff.Name, "^MedicKritz") then return true end
+        local buffName = tostring(buff.Name or "")
+        -- Chỉ tìm kiếm buff Kritz
+        if buffName:match("^MedicKritz") then
+            return true
+        end
     end
     return false
 end
@@ -134,17 +141,23 @@ end
 
 local function getEnemyPathDistance(enemy)
     if not enemy then return 0 end
-    if enemy.MovementHandler and enemy.MovementHandler.PathPercentage then return enemy.MovementHandler.PathPercentage end
+    if enemy.MovementHandler and enemy.MovementHandler.PathPercentage then
+        return enemy.MovementHandler.PathPercentage
+    end
     return 0
 end
 
 local function getFarthestEnemyInRange(pos, range, options)
     options = options or {}
+    local excludeAir = options.excludeAir or false
+    local excludeArrows = options.excludeArrows or false
     local candidates = {}
     for _, enemy in ipairs(getEnemies()) do
         if not enemy.GetPosition then continue end
-        if (options.excludeArrows and enemy.Type == "Arrow") or (options.excludeAir and enemy.IsAirUnit) then continue end
-        if getDistance2D(enemy:GetPosition(), pos) <= range then
+        if excludeArrows and enemy.Type == "Arrow" then continue end
+        if excludeAir and enemy.IsAirUnit then continue end
+        local ePos = enemy:GetPosition()
+        if getDistance2D(ePos, pos) <= range then
             table.insert(candidates, {enemy = enemy, pathDistance = getEnemyPathDistance(enemy)})
         end
     end
@@ -153,38 +166,121 @@ local function getFarthestEnemyInRange(pos, range, options)
     return candidates[1].enemy:GetPosition()
 end
 
-local function findTarget(pos, range, options)
+local function getNearestEnemyInRange(pos, range, options)
     options = options or {}
+    local excludeAir = options.excludeAir or false
+    local excludeArrows = options.excludeArrows or false
     local candidates = {}
     for _, enemy in ipairs(getEnemies()) do
         if not enemy.GetPosition then continue end
-        if (options.excludeArrows and enemy.Type == "Arrow") or (options.excludeAir and enemy.IsAirUnit) then continue end
-        if getDistance2D(enemy:GetPosition(), pos) > range then continue end
-        if options.usedEnemies and options.usedEnemies[tostring(enemy)] then continue end
+        if excludeArrows and enemy.Type == "Arrow" then continue end
+        if excludeAir and enemy.IsAirUnit then continue end
+        local ePos = enemy:GetPosition()
+        if getDistance2D(ePos, pos) <= range then
+            table.insert(candidates, {enemy = enemy, position = ePos, pathDistance = getEnemyPathDistance(enemy)})
+        end
+    end
+    if #candidates == 0 then return nil end
+    table.sort(candidates, function(a, b) return a.pathDistance > b.pathDistance end)
+    return candidates[1].position
+end
+
+local function hasSplashDamage(ability)
+    if not ability or not ability.Config then return false, 0 end
+    if ability.Config.ProjectileHitData then
+        local hitData = ability.Config.ProjectileHitData
+        if hitData.IsSplash and hitData.SplashRadius and hitData.SplashRadius > 0 then return true, hitData.SplashRadius end
+    end
+    if ability.Config.HasRadiusEffect and ability.Config.EffectRadius and ability.Config.EffectRadius > 0 then return true, ability.Config.EffectRadius end
+    return false, 0
+end
+
+local function getAbilityRange(ability, defaultRange)
+    if not ability or not ability.Config then return defaultRange end
+    local config = ability.Config
+    if config.ManualAimInfiniteRange == true then return math.huge end
+    if config.ManualAimCustomRange and config.ManualAimCustomRange > 0 then return config.ManualAimCustomRange end
+    if config.Range and config.Range > 0 then return config.Range end
+    if config.CustomQueryData and config.CustomQueryData.Range then return config.CustomQueryData.Range end
+    return defaultRange
+end
+
+local function requiresManualAiming(ability)
+    if not ability or not ability.Config then return false end
+    return ability.Config.IsManualAimAtGround == true or ability.Config.IsManualAimAtPath == true
+end
+
+local function getEnhancedTarget(pos, towerRange, towerType, ability)
+    local options = {excludeAir = skipAirTowers[towerType] or false, excludeArrows = true}
+    local effectiveRange = getAbilityRange(ability, towerRange)
+    if ability then
+        local isSplash, _ = hasSplashDamage(ability)
+        local isManualAim = requiresManualAiming(ability)
+        if isSplash or isManualAim then
+            return getFarthestEnemyInRange(pos, effectiveRange, options)
+        end
+    end
+    if not directionalTowerTypes[towerType] then
+        return getFarthestEnemyInRange(pos, effectiveRange, options)
+    else
+        return getNearestEnemyInRange(pos, effectiveRange, options)
+    end
+end
+
+local function findTarget(pos, range, options)
+    options = options or {}
+    local mode = options.mode or "nearest"
+    local excludeAir = options.excludeAir or false
+    local excludeArrows = options.excludeArrows or false
+    local usedEnemies = options.usedEnemies
+    local markUsed = options.markUsed or false
+    local candidates = {}
+    for _, enemy in ipairs(getEnemies()) do
+        if not enemy.GetPosition then continue end
+        if excludeArrows and enemy.Type == "Arrow" then continue end
+        if excludeAir and enemy.IsAirUnit then continue end
+        local ePos = enemy:GetPosition()
+        if getDistance2D(ePos, pos) > range then continue end
+        if usedEnemies and usedEnemies[tostring(enemy)] then continue end
         table.insert(candidates, enemy)
     end
     if #candidates == 0 then return nil end
     local chosen = nil
-    if options.mode == "maxhp" then
+    if mode == "nearest" then
+        chosen = candidates[1]
+    elseif mode == "maxhp" then
         local maxHP = -1
         for _, enemy in ipairs(candidates) do
             if enemy.HealthHandler then
                 local hp = enemy.HealthHandler:GetMaxHealth()
-                if hp > maxHP then maxHP = hp; chosen = enemy end
+                if hp > maxHP then
+                    maxHP = hp
+                    chosen = enemy
+                end
             end
         end
-    else -- default to nearest
-        chosen = candidates[1]
+    elseif mode == "random_weighted" then
+        table.sort(candidates, function(a, b)
+            local hpA = a.HealthHandler and a.HealthHandler:GetMaxHealth() or 0
+            local hpB = b.HealthHandler and b.HealthHandler:GetMaxHealth() or 0
+            return hpA > hpB
+        end)
+        if math.random(1, 10) <= 3 then
+            chosen = candidates[1]
+        else
+            chosen = candidates[math.random(1, #candidates)]
+        end
     end
-    if chosen and options.markUsed and options.usedEnemies then
-        options.usedEnemies[tostring(chosen)] = true
+    if chosen and markUsed and usedEnemies then
+        usedEnemies[tostring(chosen)] = true
     end
     return chosen and chosen:GetPosition() or nil
 end
 
 local function getMobsterTarget(tower, hash, path)
-    local pos, range = getTowerPos(tower), getRange(tower)
+    local pos = getTowerPos(tower)
     if not pos then return nil end
+    local range = getRange(tower)
     mobsterUsedEnemies[hash] = mobsterUsedEnemies[hash] or {}
     local usedEnemies = (path == 2) and mobsterUsedEnemies[hash] or nil
     return findTarget(pos, range, {mode = "maxhp", excludeAir = true, excludeArrows = true, usedEnemies = usedEnemies, markUsed = (path == 2)})
@@ -196,20 +292,35 @@ local function getCommanderTarget()
         if not e.IsAirUnit and e.Type ~= "Arrow" then table.insert(candidates, e) end
     end
     if #candidates == 0 then return nil end
-    table.sort(candidates, function(a, b) return (a.HealthHandler and a.HealthHandler:GetMaxHealth() or 0) > (b.HealthHandler and b.HealthHandler:GetMaxHealth() or 0) end)
-    return candidates[1]:GetPosition()
+    table.sort(candidates, function(a, b)
+        local hpA = a.HealthHandler and a.HealthHandler:GetMaxHealth() or 0
+        local hpB = b.HealthHandler and b.HealthHandler:GetMaxHealth() or 0
+        return hpA > hpB
+    end)
+    local chosen
+    if math.random(1, 10) <= 3 then
+        chosen = candidates[1]
+    else
+        chosen = candidates[math.random(1, #candidates)]
+    end
+    return chosen and chosen:GetPosition() or nil
 end
 
 local function getBestMedicTarget(medicTower, ownedTowers)
-    local medicPos, medicRange = getTowerPos(medicTower), getRange(medicTower)
+    local medicPos = getTowerPos(medicTower)
     if not medicPos then return nil end
+    local medicRange = getRange(medicTower)
     local bestHash, bestDPS = nil, -1
     for hash, tower in pairs(ownedTowers) do
-        if tower ~= medicTower and tower.Type ~= "Refractor" and canReceiveBuff(tower) and not IsKritzed(tower) then
+        if tower == medicTower or tower.Type == "Refractor" then continue end
+        if canReceiveBuff(tower) and not isBuffedByMedic(tower) then
             local towerPos = getTowerPos(tower)
             if towerPos and getDistance2D(towerPos, medicPos) <= medicRange then
                 local dps = getAccurateDPS(tower)
-                if dps > bestDPS then bestDPS = dps; bestHash = hash end
+                if dps > bestDPS then
+                    bestDPS = dps
+                    bestHash = hash
+                end
             end
         end
     end
@@ -238,25 +349,42 @@ local function handleTowerAttack(attackData)
     local ownedTowers = GameModules.TowerClass.GetTowers() or {}
     for _, data in ipairs(attackData) do
         local attackingTowerHash = data.X
-        if not ownedTowers[attackingTowerHash] then continue end
+        local attackingTower = ownedTowers[attackingTowerHash]
+        if not attackingTower then continue end
         task.spawn(function()
             setThreadIdentity(2)
             for hash, tower in pairs(ownedTowers) do
-                if hash == attackingTowerHash or skipTowerTypes[tower.Type] then continue end
-                local towerPos, attackingPos = getTowerPos(tower), getTowerPos(ownedTowers[attackingTowerHash])
+                if hash == attackingTowerHash then continue end
+                if skipTowerTypes[tower.Type] and tower.Type ~= "Medic" then continue end
+
+                local towerPos = getTowerPos(tower)
+                local attackingPos = getTowerPos(attackingTower)
                 if not towerPos or not attackingPos then continue end
-                if getDistance2D(towerPos, attackingPos) <= getRange(tower) then
+                
+                local distance = getDistance2D(towerPos, attackingPos)
+                local towerRange = getRange(tower)
+                
+                if distance <= towerRange then
                     local ability = tower.AbilityHandler:GetAbilityFromIndex(1)
-                    if (tower.Type == "EDJ" or tower.Type == "Commander") and ability and ability:CanUse() then
-                        SendSkill(hash, 1)
+                    if tower.Type == "EDJ" or tower.Type == "Commander" then
+                        if ability and ability:CanUse() then
+                            SendSkill(hash, 1)
+                        end
                     elseif tower.Type == "Medic" then
                         local _, p2 = GetCurrentUpgradeLevels(tower)
-                        if p2 >= 4 and (not medicLastUsedTime[hash] or tick() - medicLastUsedTime[hash] >= medicDelay) then
-                            for index = 1, 3 do
-                                local medicAbility = tower.AbilityHandler:GetAbilityFromIndex(index)
-                                if medicAbility and medicAbility:CanUse() then
-                                    local targetHash = getBestMedicTarget(tower, ownedTowers)
-                                    if targetHash then SendSkill(hash, index, nil, targetHash); medicLastUsedTime[hash] = tick(); break end
+                        if p2 >= 4 then
+                            local now = tick()
+                            if not medicLastUsedTime[hash] or now - medicLastUsedTime[hash] >= medicDelay then
+                                for index = 1, 3 do
+                                    local medicAbility = tower.AbilityHandler:GetAbilityFromIndex(index)
+                                    if medicAbility and medicAbility:CanUse() then
+                                        local targetHash = getBestMedicTarget(tower, ownedTowers)
+                                        if targetHash then
+                                            SendSkill(hash, index, nil, targetHash)
+                                            medicLastUsedTime[hash] = now
+                                            break
+                                        end
+                                    end
                                 end
                             end
                         end
@@ -270,90 +398,109 @@ TowerAttack.OnClientEvent:Connect(handleTowerAttack)
 
 local function GetAllReadyAbilitiesFromHotbar()
     local readyAbilities = {}
-    if not GameModules.AbilityHotbarHandler then LoadGameModules(); return readyAbilities end
-    local success, hotbarData = pcall(function() return debug.getupvalue(GameModules.AbilityHotbarHandler.Update, 3) end)
+    if not GameModules.AbilityHotbarHandler then
+        LoadGameModules()
+        return readyAbilities
+    end
+    
+    local success, hotbarData = pcall(function()
+        return debug.getupvalue(GameModules.AbilityHotbarHandler.Update, 3)
+    end)
+    
     if not success or not hotbarData then return readyAbilities end
+    
     for _, slotData in pairs(hotbarData) do
         if type(slotData) == "table" then
             for _, groupData in pairs(slotData) do
                 if type(groupData) == "table" and groupData.LevelToAbilityDataMap then
                     for _, levelData in pairs(groupData.LevelToAbilityDataMap) do
                         if levelData.AvailableCount and levelData.AvailableCount > 0 then
-                            table.insert(readyAbilities, { tower = levelData.ClosestTower, ability = levelData.ClosestAbility })
+                            table.insert(readyAbilities, {
+                                tower = levelData.ClosestTower,
+                                ability = levelData.ClosestAbility,
+                            })
                         end
                     end
                 end
             end
         end
     end
+    
     return readyAbilities
 end
 
 RunService.Heartbeat:Connect(function()
     if not GameModules.TowerClass or not GameModules.AbilityHotbarHandler then LoadGameModules(); return end
+    
     skillsUsedThisFrame = 0
+    
     task.spawn(function()
         setThreadIdentity(2)
         local hotbarAbilities = GetAllReadyAbilitiesFromHotbar()
+        
         for _, data in ipairs(hotbarAbilities) do
-            local tower, ability = data.tower, data.ability
+            local tower = data.tower
+            local ability = data.ability
+            
             if not tower or not ability or skipTowerTypes[tower.Type] then continue end
             
             local pos = getTowerPos(tower)
             if not pos then continue end
 
-            local hash, index, range = tower.Hash, ability.Index, getRange(tower)
-            local p1, p2 = GetCurrentUpgradeLevels(tower)
+            local hash = tower.Hash
+            local index = ability.Index
+            local range = getRange(tower)
+            
             local targetPos = nil
+            local allowUse = true
 
-            -- FIX: Khôi phục logic xử lý chuyên biệt cho từng loại tháp định hướng
-            if tower.Type == "Ghost" then
+            local directional = directionalTowerTypes[tower.Type]
+            local sendWithPos = (typeof(directional) == "table" and directional.onlyAbilityIndex == index) or (directional == true)
+            if ability and requiresManualAiming(ability) then
+                sendWithPos = true
+            end
+
+            if tower.Type == "Jet Trooper" then
+                if index == 2 then SendSkill(hash, index) end
+                continue
+            elseif tower.Type == "Ghost" then
+                local _, p2 = GetCurrentUpgradeLevels(tower)
                 if p2 <= 2 then
                     targetPos = findTarget(pos, math.huge, {mode = "maxhp", excludeArrows = true, excludeAir = false})
                     if targetPos then SendSkill(hash, index, targetPos) end
                 end
-            elseif tower.Type == "Toxicnator" then
-                targetPos = findTarget(pos, range, {mode = "maxhp", excludeArrows = false, excludeAir = false})
-                if targetPos then SendSkill(hash, index, targetPos) end
-            elseif tower.Type == "Flame Trooper" then
-                targetPos = getFarthestEnemyInRange(pos, 9.5, {excludeAir = false, excludeArrows = true})
-                if targetPos then SendSkill(hash, index, targetPos) end
-            elseif tower.Type == "Ice Breaker" then
-                if index == 1 then
-                    targetPos = getFarthestEnemyInRange(pos, range, {excludeAir = true, excludeArrows = true})
-                elseif index == 2 then
-                    targetPos = getFarthestEnemyInRange(pos, 8, {excludeAir = true, excludeArrows = true})
+                continue
+            elseif tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
+                local p1, p2 = GetCurrentUpgradeLevels(tower)
+                if p2 >= 3 and p2 <= 5 then
+                    targetPos = getMobsterTarget(tower, hash, 2)
+                elseif p1 >= 4 and p1 <= 5 then
+                    targetPos = getMobsterTarget(tower, hash, 1)
                 end
                 if targetPos then SendSkill(hash, index, targetPos) end
-            elseif tower.Type == "Slammer" then
-                targetPos = getFarthestEnemyInRange(pos, range, {excludeAir = true, excludeArrows = true})
-                if targetPos then SendSkill(hash, index, targetPos) end
-            elseif tower.Type == "John" then
-                local targetRange = (p1 >= 5) and range or 4.5
-                targetPos = getFarthestEnemyInRange(pos, targetRange, {excludeAir = true, excludeArrows = true})
-                if targetPos then SendSkill(hash, index, targetPos) end
-            elseif tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
-                if p2 >= 3 and p2 <= 5 then targetPos = getMobsterTarget(tower, hash, 2)
-                elseif p1 >= 4 and p1 <= 5 then targetPos = getMobsterTarget(tower, hash, 1) end
-                if targetPos then SendSkill(hash, index, targetPos) end
+                continue
             elseif tower.Type == "Commander" and index == 3 then
                  targetPos = getCommanderTarget()
                  if targetPos then SendSkill(hash, index, targetPos) end
-            elseif tower.Type == "Jet Trooper" then
-                if index == 2 then SendSkill(hash, index) end
-            else
-                -- Logic chung cho các tháp còn lại
-                local directional = directionalTowerTypes[tower.Type]
-                local sendWithPos = (typeof(directional) == "table" and directional.onlyAbilityIndex == index) or (directional == true)
-                if ability and requiresManualAiming(ability) then sendWithPos = true end
+                 continue
+            end
+            
+            if sendWithPos then
+                targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
+                if not targetPos then
+                    allowUse = false
+                end
+            else 
+                if not getFarthestEnemyInRange(pos, range, {excludeAir = skipAirTowers[tower.Type] or false, excludeArrows = true}) then
+                    allowUse = false
+                end
+            end
 
-                if sendWithPos then
-                    targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                    if targetPos then SendSkill(hash, index, targetPos) end
-                else
-                    if getFarthestEnemyInRange(pos, range, {excludeAir = skipAirTowers[tower.Type] or false, excludeArrows = true}) then
-                        SendSkill(hash, index)
-                    end
+            if allowUse then
+                if sendWithPos and targetPos then
+                    SendSkill(hash, index, targetPos)
+                elseif not sendWithPos then
+                    SendSkill(hash, index)
                 end
             end
         end
