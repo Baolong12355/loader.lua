@@ -13,6 +13,9 @@ local function LoadGameModules()
         GameModules.TowerClass = require(ClientGameClass:WaitForChild("TowerClass"))
         GameModules.EnemyClass = require(ClientGameClass:WaitForChild("EnemyClass"))
         GameModules.TowerUtilities = require(Common:WaitForChild("TowerUtilities"))
+        GameModules.AbilityHotbarHandler = require(
+            PlayerScripts.Client:WaitForChild("UserInterfaceHandler"):WaitForChild("AbilityHotbarHandler")
+        )
     end)
 end
 LoadGameModules()
@@ -62,7 +65,6 @@ local function SafeRemoteCall(remoteType, remote, ...)
 end
 
 local directionalTowerTypes = {["Commander"] = { onlyAbilityIndex = 3 }, ["Toxicnator"] = true, ["Ghost"] = true, ["Ice Breaker"] = true, ["Mobster"] = true, ["Golden Mobster"] = true, ["Artillery"] = true, ["Golden Mine Layer"] = true, ["Flame Trooper"] = true}
-local skipTowerTypes = {["Helicopter"] = true, ["Cryo Helicopter"] = true, ["Medic"] = true, ["Combat Drone"] = true, ["Machine Gunner"] = true}
 local skipAirTowers = {["Ice Breaker"] = true, ["John"] = true, ["Slammer"] = true, ["Mobster"] = true, ["Golden Mobster"] = true}
 
 local mobsterUsedEnemies = {}
@@ -70,30 +72,6 @@ local medicLastUsedTime = {}
 local medicDelay = 0.5
 local lastGlobalSkillUseTime = 0
 local skillDelay = 0.05
-
--- UPDATE: Bảng này sẽ lưu trữ các kỹ năng có sẵn để sử dụng trong mỗi khung hình.
-local availableAbilities = {}
-
--- UPDATE: Hàm mới để cập nhật trạng thái của tất cả các kỹ năng một lần mỗi khung hình.
--- Nó sử dụng logic `ability:CanUse()` giống như hotbar của game, hiệu quả hơn nhiều.
-local function UpdateAvailableAbilities()
-    table.clear(availableAbilities)
-    local ownedTowers = GameModules.TowerClass.GetTowers() or {}
-    for hash, tower in pairs(ownedTowers) do
-        if tower and tower.OwnedByLocalPlayer and tower.AbilityHandler then
-            for i = 1, 3 do
-                local ability = tower.AbilityHandler:GetAbilityFromIndex(i)
-                if ability and ability:CanUse() and not ability.Passive then
-                    if not availableAbilities[hash] then
-                        availableAbilities[hash] = {}
-                    end
-                    availableAbilities[hash][i] = true
-                end
-            end
-        end
-    end
-end
-
 
 local function getDistance2D(pos1, pos2)
     local dx = pos1.X - pos2.X
@@ -120,8 +98,6 @@ local function GetCurrentUpgradeLevels(tower)
     pcall(function() p2 = tower.LevelHandler:GetLevelOnPath(2) or 0 end)
     return p1, p2
 end
-
--- DEPRECATED: Hàm isCooldownReady đã bị loại bỏ và thay thế bằng hệ thống `availableAbilities`.
 
 local function getAccurateDPS(tower)
     if not tower or not GameModules.TowerUtilities then return 0 end
@@ -378,18 +354,20 @@ local function handleTowerAttack(attackData)
                 local distance = getDistance2D(towerPos, attackingPos)
                 local towerRange = getRange(tower)
                 if distance <= towerRange then
-                    -- UPDATE: Thay đổi kiểm tra cooldown sang hệ thống mới
                     if tower.Type == "EDJ" then
-                        if availableAbilities[hash] and availableAbilities[hash][1] then SendSkill(hash, 1) end
+                        local ability = tower.AbilityHandler:GetAbilityFromIndex(1)
+                        if ability and ability.CooldownRemaining <= 0 then SendSkill(hash, 1) end
                     elseif tower.Type == "Commander" then
-                        if availableAbilities[hash] and availableAbilities[hash][1] then SendSkill(hash, 1) end
+                        local ability = tower.AbilityHandler:GetAbilityFromIndex(1)
+                        if ability and ability.CooldownRemaining <= 0 then SendSkill(hash, 1) end
                     elseif tower.Type == "Medic" then
                         local _, p2 = GetCurrentUpgradeLevels(tower)
                         if p2 >= 4 then
                             local now = tick()
                             if not medicLastUsedTime[hash] or now - medicLastUsedTime[hash] >= medicDelay then
                                 for index = 1, 3 do
-                                    if availableAbilities[hash] and availableAbilities[hash][index] then
+                                    local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
+                                    if ability and ability.CooldownRemaining <= 0 then
                                         local targetHash = getBestMedicTarget(tower, ownedTowers)
                                         if targetHash then
                                             SendSkill(hash, index, nil, targetHash)
@@ -409,96 +387,155 @@ end
 
 TowerAttack.OnClientEvent:Connect(handleTowerAttack)
 
-RunService.Heartbeat:Connect(function()
-    if not GameModules.TowerClass then LoadGameModules(); return end
-
-    -- UPDATE: Cập nhật danh sách các kỹ năng có sẵn một lần mỗi khung hình.
-    UpdateAvailableAbilities()
-
-    local ownedTowers = GameModules.TowerClass.GetTowers() or {}
-    for hash, tower in pairs(ownedTowers) do
-        if not tower or not tower.AbilityHandler then continue end
-        if skipTowerTypes[tower.Type] then continue end
-        task.spawn(function()
-            setThreadIdentity(2)
-            local p1, p2 = GetCurrentUpgradeLevels(tower)
-            local pos = getTowerPos(tower)
-            if not pos then return end
-            local range = getRange(tower)
-            for index = 1, 3 do
-                -- UPDATE: Thay thế `isCooldownReady` bằng một tra cứu bảng nhanh chóng.
-                if not (availableAbilities[hash] and availableAbilities[hash][index]) then continue end
-                
-                local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
-                local targetPos = nil
-                local allowUse = true
-                
-                if tower.Type == "Jet Trooper" then
-                    if index == 1 then allowUse = false elseif index == 2 then allowUse = true else allowUse = false end
-                end
-                if tower.Type == "Ghost" then
-                    if p2 > 2 then allowUse = false; break else
-                        targetPos = findTarget(pos, math.huge, {mode = "maxhp", excludeArrows = true, excludeAir = false})
-                        if targetPos then SendSkill(hash, index, targetPos) end; break
-                    end
-                end
-                if tower.Type == "Toxicnator" then
-                    targetPos = findTarget(pos, range, {mode = "maxhp", excludeArrows = false, excludeAir = false})
-                    if targetPos then SendSkill(hash, index, targetPos) end; break
-                end
-                if tower.Type == "Flame Trooper" then
-                    targetPos = getEnhancedTarget(pos, 9.5, tower.Type, ability)
-                    if targetPos then SendSkill(hash, index, targetPos) end; break
-                end
-                if tower.Type == "Ice Breaker" then
-                    if index == 1 then
-                        targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                        if targetPos then SendSkill(hash, index, targetPos) end
-                    elseif index == 2 then
-                        targetPos = getEnhancedTarget(pos, 8, tower.Type, ability)
-                        if targetPos then SendSkill(hash, index, targetPos) end
-                    end; break
-                end
-                if tower.Type == "Slammer" then
-                    local enemyInRange = getEnhancedTarget(pos, range, tower.Type, ability)
-                    if enemyInRange then SendSkill(hash, index, enemyInRange) end; break
-                end
-                if tower.Type == "John" then
-                    if p1 >= 5 then targetPos = getEnhancedTarget(pos, range, tower.Type, ability) else targetPos = getEnhancedTarget(pos, 4.5, tower.Type, ability) end
-                    if targetPos then SendSkill(hash, index, targetPos) end; break
-                end
-                if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
-                    if p2 >= 3 and p2 <= 5 then
-                        targetPos = getMobsterTarget(tower, hash, 2)
-                        if targetPos then SendSkill(hash, index, targetPos) end
-                    elseif p1 >= 4 and p1 <= 5 then
-                        targetPos = getMobsterTarget(tower, hash, 1)
-                        if targetPos then SendSkill(hash, index, targetPos) end
-                    end; break
-                end
-                if tower.Type == "Commander" and index == 3 then
-                    targetPos = getCommanderTarget()
-                    if targetPos then SendSkill(hash, index, targetPos) end; break
-                end
-                local directional = directionalTowerTypes[tower.Type]
-                local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
-                if ability and requiresManualAiming(ability) then sendWithPos = true end
-                if not targetPos and sendWithPos and allowUse then
-                    targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
-                    if not targetPos then allowUse = false end
-                end
-                if not sendWithPos and not directional and allowUse then
-                    local hasEnemies = getFarthestEnemyInRange(pos, range, {excludeAir = skipAirTowers[tower.Type] or false, excludeArrows = true})
-                    if not hasEnemies then allowUse = false end
-                end
-                if allowUse then
-                    if sendWithPos and targetPos then
-                        SendSkill(hash, index, targetPos)
-                    elseif not sendWithPos then
-                        SendSkill(hash, index)
+local function GetAllReadyAbilitiesFromHotbar()
+    local readyAbilities = {}
+    
+    if not GameModules.AbilityHotbarHandler then
+        LoadGameModules()
+        return readyAbilities
+    end
+    
+    local success, hotbarData = pcall(function()
+        return debug.getupvalue(GameModules.AbilityHotbarHandler.Update, 3)
+    end)
+    
+    if not success or not hotbarData then return readyAbilities end
+    
+    for hotbarSlot, abilityData in pairs(hotbarData) do
+        if type(abilityData) == "table" then
+            for groupName, groupData in pairs(abilityData) do
+                if type(groupData) == "table" and groupData.LevelToAbilityDataMap then
+                    for level, levelData in pairs(groupData.LevelToAbilityDataMap) do
+                        if levelData.AvailableCount and levelData.AvailableCount > 0 then
+                            table.insert(readyAbilities, {
+                                tower = levelData.ClosestTower,
+                                ability = levelData.ClosestAbility,
+                                config = levelData.Config,
+                                availableCount = levelData.AvailableCount,
+                                cooldownRemaining = levelData.CooldownRemaining or 0,
+                                isStunned = levelData.IsStunned or false,
+                                isDisabled = levelData.IsDisabled or false,
+                                isConverted = levelData.IsConverted or false,
+                                isRebuilding = levelData.IsRebuilding or false
+                            })
+                        end
                     end
                 end
             end
-        end)
+        end
     end
+    
+    return readyAbilities
+end
+
+local function HandleSpecialTowerAbility(tower, ability, pos, range)
+    local hash = tower.Hash
+    local index = ability.Index
+    local p1, p2 = GetCurrentUpgradeLevels(tower)
+    
+    if tower.Type == "Ghost" then
+        if p2 > 2 then return false end
+        local targetPos = findTarget(pos, math.huge, {mode = "maxhp", excludeArrows = true, excludeAir = false})
+        if targetPos then SendSkill(hash, index, targetPos) end
+        return true
+    end
+    
+    if tower.Type == "Toxicnator" then
+        local targetPos = findTarget(pos, range, {mode = "maxhp", excludeArrows = false, excludeAir = false})
+        if targetPos then SendSkill(hash, index, targetPos) end
+        return true
+    end
+    
+    if tower.Type == "Flame Trooper" then
+        local targetPos = getEnhancedTarget(pos, 9.5, tower.Type, ability)
+        if targetPos then SendSkill(hash, index, targetPos) end
+        return true
+    end
+    
+    if tower.Type == "Ice Breaker" then
+        if index == 1 then
+            local targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
+            if targetPos then SendSkill(hash, index, targetPos) end
+        elseif index == 2 then
+            local targetPos = getEnhancedTarget(pos, 8, tower.Type, ability)
+            if targetPos then SendSkill(hash, index, targetPos) end
+        end
+        return true
+    end
+    
+    if tower.Type == "Slammer" then
+        local targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
+        if targetPos then SendSkill(hash, index, targetPos) end
+        return true
+    end
+    
+    if tower.Type == "John" then
+        local targetRange = (p1 >= 5) and range or 4.5
+        local targetPos = getEnhancedTarget(pos, targetRange, tower.Type, ability)
+        if targetPos then SendSkill(hash, index, targetPos) end
+        return true
+    end
+    
+    if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
+        if p2 >= 3 and p2 <= 5 then
+            local targetPos = getMobsterTarget(tower, hash, 2)
+            if targetPos then SendSkill(hash, index, targetPos) end
+        elseif p1 >= 4 and p1 <= 5 then
+            local targetPos = getMobsterTarget(tower, hash, 1)
+            if targetPos then SendSkill(hash, index, targetPos) end
+        end
+        return true
+    end
+    
+    if tower.Type == "Commander" and index == 3 then
+        local targetPos = getCommanderTarget()
+        if targetPos then SendSkill(hash, index, targetPos) end
+        return true
+    end
+    
+    if tower.Type == "Jet Trooper" then
+        if index == 2 then
+            SendSkill(hash, index)
+            return true
+        end
+        return false
+    end
+    
+    return false
+end
+
+RunService.Heartbeat:Connect(function()
+    if not GameModules.TowerClass then LoadGameModules(); return end
+    
+    task.spawn(function()
+        setThreadIdentity(2)
+        local hotbarAbilities = GetAllReadyAbilitiesFromHotbar()
+        
+        for _, data in ipairs(hotbarAbilities) do
+            if data.tower and data.ability and not data.isStunned and not data.isDisabled 
+                and not data.isConverted and not data.isRebuilding then
+                
+                local tower = data.tower
+                local ability = data.ability
+                local pos = getTowerPos(tower)
+                
+                if pos then
+                    local range = getRange(tower)
+                    
+                    if HandleSpecialTowerAbility(tower, ability, pos, range) then
+                        continue
+                    end
+                    
+                    if requiresManualAiming(ability) then
+                        local targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
+                        if targetPos then
+                            SendSkill(tower.Hash, ability.Index, targetPos)
+                        end
+                    else
+                        SendSkill(tower.Hash, ability.Index)
+                    end
+                end
+            end
+        end
+    end)
 end)
