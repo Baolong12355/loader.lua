@@ -337,12 +337,6 @@ local function SendSkill(hash, index, pos, targetHash)
     end
 end
 
-local function CanAbilityBeUsed(ability)
-    if not ability or not ability.Config then return false end
-    local canUseWhileStunned = ability.Config.CanUseWhileStunned or false
-    return canUseWhileStunned
-end
-
 local function handleTowerAttack(attackData)
     if not GameModules.TowerClass then return end
     local ownedTowers = GameModules.TowerClass.GetTowers() or {}
@@ -518,12 +512,9 @@ RunService.Heartbeat:Connect(function()
         local hotbarAbilities = GetAllReadyAbilitiesFromHotbar()
         
         for _, data in ipairs(hotbarAbilities) do
-            if not data.tower or not data.ability then continue end
-            
-            local canUseWhileStunned = CanAbilityBeUsed(data.ability)
-            local isBlocked = (data.isStunned and not canUseWhileStunned) or data.isDisabled or data.isConverted or data.isRebuilding
-            
-            if not isBlocked then
+            if data.tower and data.ability and not data.isStunned and not data.isDisabled 
+                and not data.isConverted and not data.isRebuilding then
+                
                 local tower = data.tower
                 local ability = data.ability
                 local pos = getTowerPos(tower)
