@@ -13,7 +13,6 @@ local function LoadGameModules()
         GameModules.TowerClass = require(ClientGameClass:WaitForChild("TowerClass"))
         GameModules.EnemyClass = require(ClientGameClass:WaitForChild("EnemyClass"))
         GameModules.TowerUtilities = require(Common:WaitForChild("TowerUtilities"))
-        -- Lấy AbilityHotbarHandler để đọc dữ liệu
         GameModules.AbilityHotbarHandler = require(
             PlayerScripts.Client:WaitForChild("UserInterfaceHandler"):WaitForChild("AbilityHotbarHandler")
         )
@@ -66,7 +65,6 @@ local function SafeRemoteCall(remoteType, remote, ...)
 end
 
 local directionalTowerTypes = {["Commander"] = { onlyAbilityIndex = 3 }, ["Toxicnator"] = true, ["Ghost"] = true, ["Ice Breaker"] = true, ["Mobster"] = true, ["Golden Mobster"] = true, ["Artillery"] = true, ["Golden Mine Layer"] = true, ["Flame Trooper"] = true}
--- UPDATE: Bảng này chỉ nên chứa các tháp hoàn toàn không có kỹ năng chủ động cần script điều khiển
 local skipTowerTypes = {["Helicopter"] = true, ["Cryo Helicopter"] = true, ["Combat Drone"] = true, ["Machine Gunner"] = true}
 local skipAirTowers = {["Ice Breaker"] = true, ["John"] = true, ["Slammer"] = true, ["Mobster"] = true, ["Golden Mobster"] = true}
 
@@ -75,7 +73,7 @@ local medicLastUsedTime = {}
 local medicDelay = 0.5
 
 local skillsUsedThisFrame = 0
-local maxSkillsPerFrame = 5 
+local maxSkillsPerFrame = 5
 
 local function getDistance2D(pos1, pos2)
     local dx = pos1.X - pos2.X
@@ -113,9 +111,18 @@ local function getAccurateDPS(tower)
     return success and dps or 0
 end
 
-local function isBuffedByMedic(tower)
-    if not tower or not tower.BuffHandler or not tower.BuffHandler.IsUbered then return false end
-    return tower.BuffHandler:IsUbered()
+-- ĐÃ XÓA: Hàm isBuffedByMedic đã bị loại bỏ vì không còn được sử dụng.
+
+local function IsKritzed(tower)
+    if not tower or not tower.BuffHandler or not tower.BuffHandler.ActiveBuffs then
+        return false
+    end
+    for _, buff in pairs(tower.BuffHandler.ActiveBuffs) do
+        if buff.Name and string.match(buff.Name, "^MedicKritz") then
+            return true
+        end
+    end
+    return false
 end
 
 local function canReceiveBuff(tower)
@@ -305,7 +312,7 @@ local function getBestMedicTarget(medicTower, ownedTowers)
     local bestHash, bestDPS = nil, -1
     for hash, tower in pairs(ownedTowers) do
         if tower == medicTower or tower.Type == "Refractor" then continue end
-        if canReceiveBuff(tower) and not isBuffedByMedic(tower) then
+        if canReceiveBuff(tower) and not IsKritzed(tower) then
             local towerPos = getTowerPos(tower)
             if towerPos and getDistance2D(towerPos, medicPos) <= medicRange then
                 local dps = getAccurateDPS(tower)
@@ -319,7 +326,6 @@ local function getBestMedicTarget(medicTower, ownedTowers)
     return bestHash
 end
 
--- THAY ĐỔI: Sử dụng bộ đếm mỗi khung hình thay vì delay toàn cục
 local function canUseSkill()
     if skillsUsedThisFrame < maxSkillsPerFrame then
         skillsUsedThisFrame = skillsUsedThisFrame + 1
@@ -347,8 +353,7 @@ local function handleTowerAttack(attackData)
         task.spawn(function()
             setThreadIdentity(2)
             for hash, tower in pairs(ownedTowers) do
-                if hash == attackingTowerHash then continue end
-                if skipTowerTypes[tower.Type] then continue end -- Bỏ qua các tháp không cần xử lý ở đây
+                if hash == attackingTowerHash or skipTowerTypes[tower.Type] then continue end
 
                 local towerPos = getTowerPos(tower)
                 local attackingPos = getTowerPos(attackingTower)
@@ -425,7 +430,6 @@ end
 RunService.Heartbeat:Connect(function()
     if not GameModules.TowerClass or not GameModules.AbilityHotbarHandler then LoadGameModules(); return end
     
-    -- THAY ĐỔI: Reset bộ đếm mỗi khi bắt đầu một khung hình mới
     skillsUsedThisFrame = 0
     
     task.spawn(function()
@@ -438,7 +442,6 @@ RunService.Heartbeat:Connect(function()
             
             if not tower or not ability or skipTowerTypes[tower.Type] then continue end
             
-            -- Logic chính để quyết định cách sử dụng kỹ năng
             local pos = getTowerPos(tower)
             if not pos then continue end
 
@@ -449,14 +452,12 @@ RunService.Heartbeat:Connect(function()
             local targetPos = nil
             local allowUse = true
 
-            -- Khôi phục logic kiểm tra kỹ năng có cần vị trí không
             local directional = directionalTowerTypes[tower.Type]
             local sendWithPos = (typeof(directional) == "table" and directional.onlyAbilityIndex == index) or (directional == true)
             if ability and requiresManualAiming(ability) then
                 sendWithPos = true
             end
 
-            -- Các trường hợp đặc biệt cho từng tháp
             if tower.Type == "Jet Trooper" then
                 if index == 2 then SendSkill(hash, index) end
                 continue
@@ -482,13 +483,12 @@ RunService.Heartbeat:Connect(function()
                  continue
             end
             
-            -- Logic chung cho các kỹ năng
             if sendWithPos then
                 targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
                 if not targetPos then
                     allowUse = false
                 end
-            else -- Kỹ năng không cần vị trí, nhưng vẫn nên kiểm tra có địch trong tầm không
+            else 
                 if not getFarthestEnemyInRange(pos, range, {excludeAir = skipAirTowers[tower.Type] or false, excludeArrows = true}) then
                     allowUse = false
                 end
