@@ -7,13 +7,23 @@ local Terrain = workspace:WaitForChild("Terrain")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Tạo namespace toàn cục cho script
-_G.EnemyDisplayScript = _G.EnemyDisplayScript or {}
-local scriptNamespace = _G.EnemyDisplayScript
+-- Script Control
+local scriptEnabled = true
 
--- Script Control - Biến toàn cục có thể thay đổi
-scriptNamespace.enabled = true
-scriptNamespace.screenGui = nil
+function _G.blackoff()
+    scriptEnabled = false
+    for _, v in pairs(CoreGui:GetChildren()) do
+        if v:IsA("ScreenGui") and v.DisplayOrder == 2147483647 then
+            pcall(function()
+                v:Destroy()
+            end)
+        end
+    end
+end
+
+function _G.blackon()
+    scriptEnabled = true
+end
 
 pcall(function()
 LocalPlayer.CameraMaxZoomDistance = 1000
@@ -38,8 +48,6 @@ screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
 screenGui.DisplayOrder = 2147483647
 screenGui.Parent = CoreGui
-
-scriptNamespace.screenGui = screenGui
 
 local blackFrame = Instance.new("Frame")
 blackFrame.Name = "Cover"
@@ -124,7 +132,7 @@ local SHIELD_COLOR_STRING = "rgb(0,170,255)"
 local NORMAL_COLOR = Color3.new(1, 1, 1)
 
 RunService.RenderStepped:Connect(function()
-if not scriptNamespace.enabled then return end
+if not scriptEnabled then return end
 
 local waveStr = (waveTextLabel and waveTextLabel.Text) or "?"
 local timeStr = (timeTextLabel and timeTextLabel.Text) or "??:??"
@@ -203,7 +211,7 @@ enemyListFrame.CanvasSize = UDim2.new(0, maxCanvasWidth, 0, uiListLayout.Absolut
 end)
 
 RunService.RenderStepped:Connect(function()
-if not scriptNamespace.enabled then return end
+if not scriptEnabled then return end
 
 screenGui.DisplayOrder = 2147483647
 if screenGui.Parent ~= CoreGui then screenGui.Parent = CoreGui end
