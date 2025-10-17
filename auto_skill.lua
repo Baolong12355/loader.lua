@@ -73,7 +73,7 @@ local medicLastUsedTime = {}
 local medicDelay = 0.5
 
 local skillsUsedThisFrame = 0
-local maxSkillsPerFrame = 5 
+local maxSkillsPerFrame = 10 
 
 local function getDistance2D(pos1, pos2)
     local dx = pos1.X - pos2.X
@@ -111,17 +111,10 @@ local function getAccurateDPS(tower)
     return success and dps or 0
 end
 
--- UPDATE: Thay đổi hàm này để chỉ kiểm tra buff "Kritz" (tăng sát thương) của Medic
 local function isBuffedByMedic(tower)
-    if not tower or not tower.BuffHandler or not tower.BuffHandler.ActiveBuffs then
-        return false
-    end
+    if not tower or not tower.BuffHandler or not tower.BuffHandler.ActiveBuffs then return false end
     for _, buff in pairs(tower.BuffHandler.ActiveBuffs) do
-        local buffName = tostring(buff.Name or "")
-        -- Chỉ tìm kiếm buff Kritz
-        if buffName:match("^MedicKritz") then
-            return true
-        end
+        if tostring(buff.Name or ""):match("^MedicKritz") then return true end
     end
     return false
 end
@@ -277,13 +270,56 @@ local function findTarget(pos, range, options)
     return chosen and chosen:GetPosition() or nil
 end
 
+-- UPDATE: Hàm mới chuyên dụng cho logic của Mobster Path 2
+local function getBestMobsterTarget(pos, range, usedEnemies)
+    local candidates = {}
+    for _, enemy in ipairs(getEnemies()) do
+        if enemy.GetPosition and not enemy.IsAirUnit and enemy.Type ~= "Arrow" then
+            local ePos = enemy:GetPosition()
+            if getDistance2D(ePos, pos) <= range and not usedEnemies[tostring(enemy)] then
+                table.insert(candidates, enemy)
+            end
+        end
+    end
+
+    if #candidates == 0 then return nil end
+
+    -- Sắp xếp theo: Máu tối đa (cao nhất) -> Quãng đường đi được (xa nhất)
+    table.sort(candidates, function(a, b)
+        local maxHpA = a.HealthHandler:GetMaxHealth() or 0
+        local maxHpB = b.HealthHandler:GetMaxHealth() or 0
+        if maxHpA ~= maxHpB then
+            return maxHpA > maxHpB -- Ưu tiên 1: Máu tối đa
+        else
+            -- Ưu tiên 2: Quãng đường đi được
+            local pathDistA = getEnemyPathDistance(a) or 0
+            local pathDistB = getEnemyPathDistance(b) or 0
+            return pathDistA > pathDistB
+        end
+    end)
+
+    local chosen = candidates[1]
+    if chosen then
+        -- Đánh dấu kẻ địch đã được chọn để không nhắm lại
+        usedEnemies[tostring(chosen)] = true
+        return chosen:GetPosition()
+    end
+    return nil
+end
+
 local function getMobsterTarget(tower, hash, path)
     local pos = getTowerPos(tower)
     if not pos then return nil end
     local range = getRange(tower)
     mobsterUsedEnemies[hash] = mobsterUsedEnemies[hash] or {}
-    local usedEnemies = (path == 2) and mobsterUsedEnemies[hash] or nil
-    return findTarget(pos, range, {mode = "maxhp", excludeAir = true, excludeArrows = true, usedEnemies = usedEnemies, markUsed = (path == 2)})
+
+    -- UPDATE: Gọi hàm mới cho Path 2
+    if path == 2 then
+        return getBestMobsterTarget(pos, range, mobsterUsedEnemies[hash])
+    else 
+        -- Giữ lại logic cũ cho Path 1
+        return findTarget(pos, range, {mode = "maxhp", excludeAir = true, excludeArrows = true, usedEnemies = nil, markUsed = false})
+    end
 end
 
 local function getCommanderTarget()
@@ -360,10 +396,10 @@ local function handleTowerAttack(attackData)
                 local towerPos = getTowerPos(tower)
                 local attackingPos = getTowerPos(attackingTower)
                 if not towerPos or not attackingPos then continue end
-                
+
                 local distance = getDistance2D(towerPos, attackingPos)
                 local towerRange = getRange(tower)
-                
+
                 if distance <= towerRange then
                     local ability = tower.AbilityHandler:GetAbilityFromIndex(1)
                     if tower.Type == "EDJ" or tower.Type == "Commander" then
@@ -402,13 +438,13 @@ local function GetAllReadyAbilitiesFromHotbar()
         LoadGameModules()
         return readyAbilities
     end
-    
+
     local success, hotbarData = pcall(function()
         return debug.getupvalue(GameModules.AbilityHotbarHandler.Update, 3)
     end)
-    
+
     if not success or not hotbarData then return readyAbilities end
-    
+
     for _, slotData in pairs(hotbarData) do
         if type(slotData) == "table" then
             for _, groupData in pairs(slotData) do
@@ -425,32 +461,32 @@ local function GetAllReadyAbilitiesFromHotbar()
             end
         end
     end
-    
+
     return readyAbilities
 end
 
 RunService.Heartbeat:Connect(function()
     if not GameModules.TowerClass or not GameModules.AbilityHotbarHandler then LoadGameModules(); return end
-    
+
     skillsUsedThisFrame = 0
-    
+
     task.spawn(function()
         setThreadIdentity(2)
         local hotbarAbilities = GetAllReadyAbilitiesFromHotbar()
-        
+
         for _, data in ipairs(hotbarAbilities) do
             local tower = data.tower
             local ability = data.ability
-            
+
             if not tower or not ability or skipTowerTypes[tower.Type] then continue end
-            
+
             local pos = getTowerPos(tower)
             if not pos then continue end
 
             local hash = tower.Hash
             local index = ability.Index
             local range = getRange(tower)
-            
+
             local targetPos = nil
             local allowUse = true
 
@@ -484,7 +520,7 @@ RunService.Heartbeat:Connect(function()
                  if targetPos then SendSkill(hash, index, targetPos) end
                  continue
             end
-            
+
             if sendWithPos then
                 targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
                 if not targetPos then
