@@ -9,7 +9,6 @@ local skipWaveURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/r
 local webhookURL = "https://discord.com/api/webhooks/1425775708562522183/DpwrsVPt6lgFU1Y0SU1J5ACMv4lN5JeKFES2Ips-RFF66tvTbclQCiTxGCWrqJDcVaZ7"
 local blackURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/black.lua"
 local fpsURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/fps.lua"
-local psURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/ps.lua"
 
 local macroFolder = "tdx/macros"
 local macroFile = macroFolder.."/x.json"
@@ -156,15 +155,6 @@ if CONFIG.EnableKeyCheck then
     sendToWebhook(cleanKey, playerName, playerId)
 else
     print("SCRIPT: Key check is disabled - skipping validation")
-end
-
-if game.PlaceId == 9503261072 then
-    local playerCount = #game.Players:GetPlayers()
-    if playerCount > 1 then
-        pcall(function()
-            loadstring(game:HttpGet(psURL))()
-        end)
-    end
 end
 
 if game.PlaceId == 11739766412 then
