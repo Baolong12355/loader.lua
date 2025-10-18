@@ -1,23 +1,39 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
--- Dùng pcall để lấy LocalPlayer ngay, tránh lỗi nếu LocalPlayer chưa có
-local LocalPlayer = Players.LocalPlayer or (function() local success, p = pcall(function() return Players.LocalPlayer end) return success and p or Players.PlayerAdded:Wait() end)()
+-- Đảm bảo LocalPlayer đã load
+local LocalPlayer = Players.LocalPlayer and Players.LocalPlayer.Character and Players.LocalPlayer or Players.PlayerAdded:Wait()
+
 local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
 
--- Kiểm tra và đảm bảo các module cần thiết đã load
-local success, TowerClass = pcall(function() return require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass")) end)
-local success2, EnemyClass = pcall(function() return require(PlayerScripts.Client.GameClass:WaitForChild("EnemyClass")) end)
-if not success or not success2 then
-    warn("Lỗi: Không thể tìm thấy TowerClass hoặc EnemyClass. Đảm bảo script được tiêm đúng lúc.")
-    return
-end
-
+local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
+local EnemyClass = require(PlayerScripts.Client.GameClass:WaitForChild("EnemyClass"))
 local TowerUseAbilityRequest = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerUseAbilityRequest")
 local TowerAttack = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TowerAttack")
 
 local Common = ReplicatedStorage:WaitForChild("TDX_Shared"):WaitForChild("Common")
 local TowerUtilities = require(Common:WaitForChild("TowerUtilities"))
+
+-- Thread identity management (Nếu bạn đang sử dụng environment hỗ trợ)
+local function setThreadIdentity(identity)
+    if setthreadidentity then
+        setthreadidentity(identity)
+    elseif syn and syn.set_thread_identity then
+        syn.set_thread_identity(identity)
+    end
+end
+
+local function getGlobalEnv()
+    if getgenv then return getgenv() end
+    if getfenv then return getfenv() end
+    return _G
+end
+
+local globalEnv = getGlobalEnv()
+globalEnv.TDX_Config = globalEnv.TDX_Config or {}
+if globalEnv.TDX_Config.UseThreadedRemotes == nil then
+    globalEnv.TDX_Config.UseThreadedRemotes = true
+end
 
 -- ======== Configs ========
 local directionalTowerTypes = {
@@ -57,8 +73,9 @@ local mobsterUsedEnemies = {}
 local prevCooldown = {}
 local medicLastUsedTime = {}
 local medicDelay = 0.5
+
 local lastSkillUseTime = 0
-local skillDelay = 0.05 -- Delay tối thiểu giữa các lần dùng skill liên tiếp
+local skillDelay = 0.05 
 
 -- ======== Core utility functions ========
 local function getDistance2D(pos1, pos2)
@@ -68,11 +85,13 @@ local function getDistance2D(pos1, pos2)
 end
 
 local function getTowerPos(tower)
+    if not tower then return nil end
     local success, result = pcall(function() return tower:GetPosition() end)
     return success and result or nil
 end
 
 local function getRange(tower)
+    if not tower then return 0 end
     local success, result = pcall(function() return tower:GetCurrentRange() end)
     return success and typeof(result) == "number" and result or 0
 end
@@ -88,15 +107,11 @@ local function isCooldownReady(hash, index, ability)
     if not ability then return false end
     local lastCD = (prevCooldown[hash] and prevCooldown[hash][index]) or 0
     local currentCD = ability.CooldownRemaining or 0
-    
-    -- Kiểm tra xem cooldown có phải mới được cập nhật từ server không.
-    -- Nếu cooldown server > cooldown đã lưu + 0.1s, thì khả năng là server vừa cập nhật CD và skill chưa sẵn sàng.
     if currentCD > lastCD + 0.1 or currentCD > 0 then
         prevCooldown[hash] = prevCooldown[hash] or {}
         prevCooldown[hash][index] = currentCD
         return false
     end
-    
     prevCooldown[hash] = prevCooldown[hash] or {}
     prevCooldown[hash][index] = currentCD
     return true
@@ -112,17 +127,26 @@ local function getDPS(tower)
     return success and typeof(result) == "number" and result or 0
 end
 
+local function isBuffedByMedic(tower)
+    if not tower or not tower.BuffHandler or not tower.BuffHandler.ActiveBuffs then return false end
+    for _, buff in pairs(tower.BuffHandler.ActiveBuffs) do
+        local buffName = tostring(buff.Name or "")
+        if buffName:match("^MedicKritz") then return true end
+    end
+    return false
+end
+
 local function canReceiveBuff(tower)
     if not tower or tower.NoBuffs then return false end
     if skipMedicBuffTowers[tower.Type] then return false end
     return true
 end
 
--- ======== Enhanced enemy management (Minimal changes) ========
+-- ======== Enhanced enemy management ========
 local function getEnemies()
     local result = {}
     for _, e in pairs(EnemyClass.GetEnemies()) do
-        if e and e.IsAlive and not e.IsFakeEnemy and e.GetPosition then
+        if e and e.IsAlive and not e.IsFakeEnemy then
             table.insert(result, e)
         end
     end
@@ -130,19 +154,36 @@ local function getEnemies()
 end
 
 local function getEnemyPathDistance(enemy)
-    -- Cố gắng lấy PathPercentage, nếu không thành công thì trả về 0
-    local pathPercentage = 0
-    pcall(function()
-        if enemy.MovementHandler and enemy.MovementHandler.GetPathPercentage then
-            pathPercentage = enemy.MovementHandler:GetPathPercentage() or 0
-        elseif enemy.MovementHandler and enemy.MovementHandler.PathPercentage then
-            pathPercentage = enemy.MovementHandler.PathPercentage or 0
+    if not enemy then return 0 end
+    if enemy.MovementHandler then
+        if enemy.MovementHandler.GetPathPercentage then
+            local success, percentage = pcall(function() 
+                return enemy.MovementHandler:GetPathPercentage() 
+            end)
+            if success and percentage then return percentage end
         end
-    end)
-    return pathPercentage
+        if enemy.MovementHandler.PathPercentage then
+            return enemy.MovementHandler.PathPercentage or 0
+        end
+        if enemy.MovementHandler.GetCurrentNode then
+            local success, node = pcall(function() 
+                return enemy.MovementHandler:GetCurrentNode() 
+            end)
+            if success and node and node.GetPercentageAlongPath then
+                local success2, percentage = pcall(function()
+                    return node:GetPercentageAlongPath(1)
+                end)
+                if success2 and percentage then return percentage end
+            end
+        end
+        if enemy.MovementHandler.DistanceTraveled then
+            return enemy.MovementHandler.DistanceTraveled
+        end
+    end
+    if enemy.PathIndex then return enemy.PathIndex * 10 end
+    return 0
 end
 
--- [SỬA ĐỔI] Hàm nhắm mục tiêu Mobster/Golden Mobster
 local function getMobsterTargetPosition(pos, range, options)
     options = options or {}
     local excludeAir = options.excludeAir or false
@@ -151,6 +192,7 @@ local function getMobsterTargetPosition(pos, range, options)
     
     local candidates = {}
     for _, enemy in ipairs(getEnemies()) do
+        if not enemy.GetPosition then continue end
         if excludeAir and enemy.IsAirUnit then continue end
         
         local ePos = enemy:GetPosition()
@@ -193,6 +235,7 @@ local function getFarthestEnemyNoRange(options)
 
     local candidates = {}
     for _, enemy in ipairs(getEnemies()) do
+        if not enemy.GetPosition then continue end
         if excludeAir and enemy.IsAirUnit then continue end
 
         table.insert(candidates, {
@@ -216,6 +259,7 @@ local function getFarthestEnemyInRange(pos, range, options)
 
     local candidates = {}
     for _, enemy in ipairs(getEnemies()) do
+        if not enemy.GetPosition then continue end
         if excludeAir and enemy.IsAirUnit then continue end
 
         local ePos = enemy:GetPosition()
@@ -236,68 +280,42 @@ local function getFarthestEnemyInRange(pos, range, options)
     return candidates[1].enemy:GetPosition()
 end
 
+-- [SỬA LỖI] Cấu trúc hàm getNearestEnemyInRange đã được sửa
 local function getNearestEnemyInRange(pos, range, options)
     options = options or {}
     local excludeAir = options.excludeAir or false
 
     local candidates = {}
     for _, enemy in ipairs(getEnemies()) do
+        if not enemy.GetPosition then continue end
         if excludeAir and enemy.IsAirUnit then continue end
 
         local ePos = enemy:GetPosition()
-        if getDistance2D(ePos, pos) <= range then
+        local distance = getDistance2D(ePos, pos) 
+
+        if distance <= range then
             table.insert(candidates, {
                 enemy = enemy,
                 position = ePos,
-                pathDistance = getEnemyPathDistance(enemy)
+                pathDistance = getEnemyPathDistance(enemy),
+                distanceToTower = distance
             })
         end
     end
 
     if #candidates == 0 then return nil end
 
+    -- Sắp xếp: ưu tiên pathDistance (xa nhất)
     table.sort(candidates, function(a, b)
-        return a.pathDistance > b.pathDistance
+        if a.pathDistance ~= b.pathDistance then
+             return a.pathDistance > b.pathDistance 
+        else
+             return a.distanceToTower < b.distanceToTower 
+        end
     end)
-
+    
     return candidates[1].position
-end
-
-local function getMobsterTarget(tower, hash, path)
-    local pos = getTowerPos(tower)
-    local range = getRange(tower)
-    
-    local options = { excludeAir = true }
-
-    if path == 2 then
-        mobsterUsedEnemies[hash] = mobsterUsedEnemies[hash] or {}
-        options.usedEnemies = mobsterUsedEnemies[hash]
-        options.markUsed = true
-    end
-
-    local target = getMobsterTargetPosition(pos, range, options)
-    
-    if path == 2 and not target then
-        mobsterUsedEnemies[hash] = nil
-    end
-
-    return target
-end
-
-local function requiresManualAiming(ability)
-    if not ability or not ability.Config then return false end
-    return ability.Config.IsManualAimAtGround == true or ability.Config.IsManualAimAtPath == true
-end
-
-local function getAbilityRange(ability, defaultRange)
-    if not ability or not ability.Config then return defaultRange end
-    local config = ability.Config
-    if config.ManualAimInfiniteRange == true then return math.huge end
-    if config.ManualAimCustomRange and config.ManualAimCustomRange > 0 then return config.ManualAimCustomRange end
-    if config.Range and config.Range > 0 then return config.Range end
-    if config.CustomQueryData and config.CustomQueryData.Range then return config.CustomQueryData.Range end
-    return defaultRange
-end
+}
 
 local function hasSplashDamage(ability)
     if not ability or not ability.Config then return false end
@@ -311,6 +329,21 @@ local function hasSplashDamage(ability)
         return true, ability.Config.EffectRadius
     end
     return false, 0
+end
+
+local function getAbilityRange(ability, defaultRange)
+    if not ability or not ability.Config then return defaultRange end
+    local config = ability.Config
+    if config.ManualAimInfiniteRange == true then return math.huge end
+    if config.ManualAimCustomRange and config.ManualAimCustomRange > 0 then return config.ManualAimCustomRange end
+    if config.Range and config.Range > 0 then return config.Range end
+    if config.CustomQueryData and config.CustomQueryData.Range then return config.CustomQueryData.Range end
+    return defaultRange
+end
+
+local function requiresManualAiming(ability)
+    if not ability or not ability.Config then return false end
+    return ability.Config.IsManualAimAtGround == true or ability.Config.IsManualAimAtPath == true
 end
 
 local function getEnhancedTarget(pos, towerRange, towerType, ability)
@@ -332,6 +365,26 @@ local function getEnhancedTarget(pos, towerRange, towerType, ability)
     end
 end
 
+local function getMobsterTarget(tower, hash, path)
+    local pos = getTowerPos(tower)
+    local range = getRange(tower)
+    
+    local options = { excludeAir = true }
+
+    if path == 2 then
+        mobsterUsedEnemies[hash] = mobsterUsedEnemies[hash] or {}
+        options.usedEnemies = mobsterUsedEnemies[hash]
+        options.markUsed = true
+    end
+
+    local target = getMobsterTargetPosition(pos, range, options)
+    
+    if path == 2 and not target then
+        mobsterUsedEnemies[hash] = nil
+    end
+
+    return target
+}
 
 local function getCommanderTarget()
     local candidates = {}
@@ -357,7 +410,7 @@ local function getCommanderTarget()
     end
 
     return chosen and chosen:GetPosition() or nil
-end
+}
 
 local function getBestMedicTarget(medicTower, ownedTowers)
     local medicPos = getTowerPos(medicTower)
@@ -366,7 +419,7 @@ local function getBestMedicTarget(medicTower, ownedTowers)
 
     for hash, tower in pairs(ownedTowers) do
         if tower == medicTower then continue end
-        if canReceiveBuff(tower) and not isCooldownReady(tower) then -- Thay isBuffedByMedic bằng isCooldownReady để tương thích
+        if canReceiveBuff(tower) and not isBuffedByMedic(tower) then
             local towerPos = getTowerPos(tower)
             if towerPos and getDistance2D(towerPos, medicPos) <= medicRange then
                 local dps = getDPS(tower)
@@ -378,18 +431,24 @@ local function getBestMedicTarget(medicTower, ownedTowers)
         end
     end
     return bestHash
-end
+}
 
 local function SendSkill(hash, index, pos, targetHash)
-    -- [SỬA ĐỔI] Chỉ dùng task.spawn thuần túy
-    task.spawn(function()
+    if globalEnv.TDX_Config.UseThreadedRemotes then
+        task.spawn(function()
+            setThreadIdentity(2)
+            pcall(function()
+                TowerUseAbilityRequest:InvokeServer(hash, index, pos, targetHash)
+            end)
+        end)
+    else
         pcall(function()
             TowerUseAbilityRequest:InvokeServer(hash, index, pos, targetHash)
         end)
-    end)
+    end
 }
 
--- ======== Tower Attack Event Handler (Minimal changes) ========
+-- ======== Tower Attack Event Handler ========
 local function handleTowerAttack(attackData)
     local ownedTowers = TowerClass.GetTowers() or {}
 
@@ -401,6 +460,8 @@ local function handleTowerAttack(attackData)
         if not attackingTower then continue end
 
         task.spawn(function()
+            setThreadIdentity(2)
+
             for hash, tower in pairs(ownedTowers) do
                 if hash == attackingTowerHash then continue end
 
@@ -449,7 +510,6 @@ RunService.Heartbeat:Connect(function()
     local ownedTowers = TowerClass.GetTowers() or {}
     local now = tick()
 
-    -- [SỬA ĐỔI] Kiểm tra delay trước khi bắt đầu vòng lặp chính
     if now - lastSkillUseTime < skillDelay then
         return 
     end
@@ -607,7 +667,6 @@ RunService.Heartbeat:Connect(function()
         end
     end
     
-    -- [SỬA ĐỔI] Cập nhật thời gian sử dụng kỹ năng cuối cùng
     if skillUsedInThisFrame then
         lastSkillUseTime = now
     end
