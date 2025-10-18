@@ -380,8 +380,8 @@ local function getMobsterTarget(tower, hash, path)
     mobsterUsedEnemies[hash] = mobsterUsedEnemies[hash] or {}
 
     if path == 2 then
-        -- Path 2: Complex logic with tracking
-        local candidates = {}
+        -- Path 2: Get max HP enemy that hasn't been used
+        local bestEnemy = nil
         local maxHP = -1
 
         for _, enemy in ipairs(getEnemies()) do
@@ -398,24 +398,14 @@ local function getMobsterTarget(tower, hash, path)
 
             if hp > maxHP then
                 maxHP = hp
-                candidates = {{enemy = enemy, hp = hp, pathPercent = getEnemyPathPercentage(enemy)}}
-            elseif hp == maxHP then
-                table.insert(candidates, {enemy = enemy, hp = hp, pathPercent = getEnemyPathPercentage(enemy)})
+                bestEnemy = enemy
             end
         end
 
-        if #candidates == 0 then return nil end
+        if not bestEnemy then return nil end
 
-        -- Sort by path percentage (farthest first) when same HP
-        if #candidates > 1 then
-            table.sort(candidates, function(a, b)
-                return a.pathPercent > b.pathPercent
-            end)
-        end
-
-        local chosen = candidates[1].enemy
-        mobsterUsedEnemies[hash][tostring(chosen)] = true
-        return chosen:GetPosition()
+        mobsterUsedEnemies[hash][tostring(bestEnemy)] = true
+        return bestEnemy:GetPosition()
     else
         -- Path 1: Just check if enemy exists in range, then cast
         for _, enemy in ipairs(getEnemies()) do
