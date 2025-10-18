@@ -1,7 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local LocalPlayer = Players.LocalPlayer
+local LocalPlayer = Players.LocalPlayer:IsLoaded() and Players.LocalPlayer or Players.PlayerAdded:Wait()
 local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
 
 local TowerClass = require(PlayerScripts.Client.GameClass:WaitForChild("TowerClass"))
@@ -12,7 +12,7 @@ local TowerAttack = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Towe
 local Common = ReplicatedStorage:WaitForChild("TDX_Shared"):WaitForChild("Common")
 local TowerUtilities = require(Common:WaitForChild("TowerUtilities"))
 
--- Thread identity management
+-- Thread identity management (Nếu bạn đang sử dụng environment hỗ trợ)
 local function setThreadIdentity(identity)
     if setthreadidentity then
         setthreadidentity(identity)
@@ -33,7 +33,7 @@ if globalEnv.TDX_Config.UseThreadedRemotes == nil then
     globalEnv.TDX_Config.UseThreadedRemotes = true
 end
 
--- Enhanced tower configurations
+-- ======== Configs ========
 local directionalTowerTypes = {
     ["Commander"] = { onlyAbilityIndex = 3 },
     ["Toxicnator"] = true,
@@ -66,11 +66,15 @@ local skipMedicBuffTowers = {
     ["Refractor"] = true
 }
 
--- Tracking variables
+-- ======== Tracking variables ========
 local mobsterUsedEnemies = {}
 local prevCooldown = {}
 local medicLastUsedTime = {}
 local medicDelay = 0.5
+
+-- [SỬA ĐỔI] Thêm delay cho kỹ năng liên tiếp
+local lastSkillUseTime = 0
+local skillDelay = 0.05 
 
 -- ======== Core utility functions ========
 local function getDistance2D(pos1, pos2)
@@ -179,39 +183,84 @@ local function getEnemyPathDistance(enemy)
     return 0
 end
 
-local function getFarthestEnemyNoRange(options)
+local function getMobsterTargetPosition(pos, range, options)
     options = options or {}
     local excludeAir = options.excludeAir or false
+    local usedEnemies = options.usedEnemies
+    local markUsed = options.markUsed or false
     
     local candidates = {}
     for _, enemy in ipairs(getEnemies()) do
         if not enemy.GetPosition then continue end
         if excludeAir and enemy.IsAirUnit then continue end
         
+        local ePos = enemy:GetPosition()
+        if getDistance2D(ePos, pos) > range then continue end
+        
+        if usedEnemies and usedEnemies[tostring(enemy)] then continue end
+
+        table.insert(candidates, {
+            enemy = enemy,
+            maxHP = enemy.HealthHandler and enemy.HealthHandler:GetMaxHealth() or 0,
+            pathDistance = getEnemyPathDistance(enemy)
+        })
+    end
+
+    if #candidates == 0 then return nil end
+
+    -- [SỬA ĐỔI] Logic sắp xếp theo yêu cầu:
+    -- 1. Ưu tiên Max HP cao nhất (a.maxHP > b.maxHP)
+    -- 2. Nếu Max HP bằng nhau, ưu tiên pathDistance xa nhất (a.pathDistance > b.pathDistance)
+    table.sort(candidates, function(a, b)
+        if a.maxHP ~= b.maxHP then
+            return a.maxHP > b.maxHP 
+        else
+            return a.pathDistance > b.pathDistance 
+        end
+    end)
+
+    local chosen = candidates[1].enemy
+
+    if markUsed and usedEnemies and chosen then
+         usedEnemies[tostring(chosen)] = true
+    end
+    
+    return chosen and chosen:GetPosition() or nil
+end
+
+local function getFarthestEnemyNoRange(options)
+    options = options or {}
+    local excludeAir = options.excludeAir or false
+
+    local candidates = {}
+    for _, enemy in ipairs(getEnemies()) do
+        if not enemy.GetPosition then continue end
+        if excludeAir and enemy.IsAirUnit then continue end
+
         table.insert(candidates, {
             enemy = enemy,
             pathDistance = getEnemyPathDistance(enemy)
         })
     end
-    
+
     if #candidates == 0 then return nil end
-    
+
     table.sort(candidates, function(a, b)
         return a.pathDistance > b.pathDistance
     end)
-    
+
     return candidates[1].enemy:GetPosition()
 end
 
 local function getFarthestEnemyInRange(pos, range, options)
     options = options or {}
     local excludeAir = options.excludeAir or false
-    
+
     local candidates = {}
     for _, enemy in ipairs(getEnemies()) do
         if not enemy.GetPosition then continue end
         if excludeAir and enemy.IsAirUnit then continue end
-        
+
         local ePos = enemy:GetPosition()
         if getDistance2D(ePos, pos) <= range then
             table.insert(candidates, {
@@ -220,25 +269,25 @@ local function getFarthestEnemyInRange(pos, range, options)
             })
         end
     end
-    
+
     if #candidates == 0 then return nil end
-    
+
     table.sort(candidates, function(a, b)
         return a.pathDistance > b.pathDistance
     end)
-    
+
     return candidates[1].enemy:GetPosition()
 end
 
 local function getNearestEnemyInRange(pos, range, options)
     options = options or {}
     local excludeAir = options.excludeAir or false
-    
+
     local candidates = {}
     for _, enemy in ipairs(getEnemies()) do
         if not enemy.GetPosition then continue end
         if excludeAir and enemy.IsAirUnit then continue end
-        
+
         local ePos = enemy:GetPosition()
         if getDistance2D(ePos, pos) <= range then
             table.insert(candidates, {
@@ -248,15 +297,15 @@ local function getNearestEnemyInRange(pos, range, options)
             })
         end
     end
-    
+
     if #candidates == 0 then return nil end
-    
+
     table.sort(candidates, function(a, b)
         return a.pathDistance > b.pathDistance
     end)
-    
+
     return candidates[1].position
-end
+}
 
 local function hasSplashDamage(ability)
     if not ability or not ability.Config then return false end
@@ -290,7 +339,7 @@ end
 local function getEnhancedTarget(pos, towerRange, towerType, ability)
     local options = { excludeAir = skipAirTowers[towerType] or false }
     local effectiveRange = getAbilityRange(ability, towerRange)
-    
+
     if ability then
         local isSplash, splashRadius = hasSplashDamage(ability)
         local isManualAim = requiresManualAiming(ability)
@@ -298,7 +347,7 @@ local function getEnhancedTarget(pos, towerRange, towerType, ability)
             return getFarthestEnemyInRange(pos, effectiveRange, options)
         end
     end
-    
+
     if not directionalTowerTypes[towerType] then
         return getFarthestEnemyInRange(pos, effectiveRange, options)
     else
@@ -306,95 +355,26 @@ local function getEnhancedTarget(pos, towerRange, towerType, ability)
     end
 end
 
-local function tacticalTarget(pos, range, options)
-    options = options or {}
-    local mode = options.mode or "nearest"
-    local excludeAir = options.excludeAir or false
-    local usedEnemies = options.usedEnemies
-    local markUsed = options.markUsed or false
-    
-    local candidates = {}
-    for _, enemy in ipairs(getEnemies()) do
-        if not enemy.GetPosition then continue end
-        if excludeAir and enemy.IsAirUnit then continue end
-        
-        local ePos = enemy:GetPosition()
-        if getDistance2D(ePos, pos) > range then continue end
-        
-        if usedEnemies then
-            local id = tostring(enemy)
-            if usedEnemies[id] then continue end
-        end
-        
-        table.insert(candidates, enemy)
-    end
-    
-    if #candidates == 0 then return nil end
-    
-    local chosen = nil
-    if mode == "maxhp" then
-        local maxHP = -1
-        for _, enemy in ipairs(candidates) do
-            if enemy.HealthHandler then
-                local hp = enemy.HealthHandler:GetMaxHealth()
-                if hp > maxHP then
-                    maxHP = hp
-                    chosen = enemy
-                end
-            end
-        end
-    elseif mode == "currenthp" then
-        local maxCurrentHP = -1
-        for _, enemy in ipairs(candidates) do
-            if enemy.HealthHandler then
-                local currentHP = enemy.HealthHandler:GetHealth()
-                if currentHP > maxCurrentHP then
-                    maxCurrentHP = currentHP
-                    chosen = enemy
-                end
-            end
-        end
-    elseif mode == "random_weighted" then
-        table.sort(candidates, function(a, b)
-            local hpA = a.HealthHandler and a.HealthHandler:GetMaxHealth() or 0
-            local hpB = b.HealthHandler and b.HealthHandler:GetMaxHealth() or 0
-            return hpA > hpB
-        end)
-        if math.random(1, 10) <= 3 then
-            chosen = candidates[1]
-        else
-            chosen = candidates[math.random(1, #candidates)]
-        end
-    else
-        chosen = candidates[1]
-    end
-    
-    if chosen and markUsed and usedEnemies then
-        usedEnemies[tostring(chosen)] = true
-    end
-    
-    return chosen and chosen:GetPosition() or nil
-end
-
 local function getMobsterTarget(tower, hash, path)
     local pos = getTowerPos(tower)
     local range = getRange(tower)
     
+    local options = { excludeAir = true }
+
     if path == 2 then
         mobsterUsedEnemies[hash] = mobsterUsedEnemies[hash] or {}
-        return tacticalTarget(pos, range, {
-            mode = "maxhp",
-            excludeAir = true,
-            usedEnemies = mobsterUsedEnemies[hash],
-            markUsed = true
-        })
-    else
-        return tacticalTarget(pos, range, {
-            mode = "maxhp",
-            excludeAir = true
-        })
+        options.usedEnemies = mobsterUsedEnemies[hash]
+        options.markUsed = true
     end
-end
+
+    local target = getMobsterTargetPosition(pos, range, options)
+    
+    if path == 2 and not target then
+        mobsterUsedEnemies[hash] = nil
+    end
+
+    return target
+}
 
 local function getCommanderTarget()
     local candidates = {}
@@ -403,30 +383,30 @@ local function getCommanderTarget()
             table.insert(candidates, e) 
         end
     end
-    
+
     if #candidates == 0 then return nil end
-    
+
     table.sort(candidates, function(a, b)
         local hpA = a.HealthHandler and a.HealthHandler:GetMaxHealth() or 0
         local hpB = b.HealthHandler and b.HealthHandler:GetMaxHealth() or 0
         return hpA > hpB
     end)
-    
+
     local chosen
     if math.random(1, 10) <= 3 then
         chosen = candidates[1]
     else
         chosen = candidates[math.random(1, #candidates)]
     end
-    
+
     return chosen and chosen:GetPosition() or nil
-end
+}
 
 local function getBestMedicTarget(medicTower, ownedTowers)
     local medicPos = getTowerPos(medicTower)
     local medicRange = getRange(medicTower)
     local bestHash, bestDPS = nil, -1
-    
+
     for hash, tower in pairs(ownedTowers) do
         if tower == medicTower then continue end
         if canReceiveBuff(tower) and not isBuffedByMedic(tower) then
@@ -441,7 +421,7 @@ local function getBestMedicTarget(medicTower, ownedTowers)
         end
     end
     return bestHash
-end
+}
 
 local function SendSkill(hash, index, pos, targetHash)
     if globalEnv.TDX_Config.UseThreadedRemotes then
@@ -456,32 +436,32 @@ local function SendSkill(hash, index, pos, targetHash)
             TowerUseAbilityRequest:InvokeServer(hash, index, pos, targetHash)
         end)
     end
-end
+}
 
 -- ======== Tower Attack Event Handler ========
 local function handleTowerAttack(attackData)
     local ownedTowers = TowerClass.GetTowers() or {}
-    
+
     for _, data in ipairs(attackData) do
         local attackingTowerHash = data.X
         local targetHash = data.Y
-        
+
         local attackingTower = ownedTowers[attackingTowerHash]
         if not attackingTower then continue end
-        
+
         task.spawn(function()
             setThreadIdentity(2)
-            
+
             for hash, tower in pairs(ownedTowers) do
                 if hash == attackingTowerHash then continue end
-                
+
                 local towerPos = getTowerPos(tower)
                 local attackingPos = getTowerPos(attackingTower)
                 if not towerPos or not attackingPos then continue end
-                
+
                 local distance = getDistance2D(towerPos, attackingPos)
                 local towerRange = getRange(tower)
-                
+
                 if distance <= towerRange then
                     if tower.Type == "EDJ" or tower.Type == "Commander" then
                         local ability = tower.AbilityHandler:GetAbilityFromIndex(1)
@@ -511,40 +491,46 @@ local function handleTowerAttack(attackData)
             end
         end)
     end
-end
+}
 
 TowerAttack.OnClientEvent:Connect(handleTowerAttack)
 
 -- ======== MAIN LOOP ========
 RunService.Heartbeat:Connect(function()
     local ownedTowers = TowerClass.GetTowers() or {}
-    local skillsThisFrame = 0
-    local MAX_SKILLS_PER_FRAME = 5
-    
+    local now = tick()
+
+    -- [SỬA ĐỔI] Kiểm tra delay trước khi bắt đầu vòng lặp chính
+    if now - lastSkillUseTime < skillDelay then
+        return 
+    end
+
+    local skillUsedInThisFrame = false
+
     for hash, tower in pairs(ownedTowers) do
-        if skillsThisFrame >= MAX_SKILLS_PER_FRAME then break end
-        
+        if skillUsedInThisFrame then break end
+
         if not tower or not tower.AbilityHandler then continue end
         if skipTowerTypes[tower.Type] then continue end
-        
+
         local p1, p2 = GetCurrentUpgradeLevels(tower)
         local pos = getTowerPos(tower)
         local range = getRange(tower)
-        
+
         for index = 1, 3 do
-            if skillsThisFrame >= MAX_SKILLS_PER_FRAME then break end
-            
+            if skillUsedInThisFrame then break end
+
             local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
             if not isCooldownReady(hash, index, ability) then continue end
-            
+
             local targetPos = nil
             local allowUse = true
-            
+
             -- Jet Trooper: chỉ dùng skill 2
             if tower.Type == "Jet Trooper" then
                 if index ~= 2 then allowUse = false end
             end
-            
+
             -- Ghost: lấy kẻ địch xa nhất không giới hạn range
             if tower.Type == "Ghost" then
                 if p2 > 2 then
@@ -554,120 +540,126 @@ RunService.Heartbeat:Connect(function()
                     targetPos = getFarthestEnemyNoRange({ excludeAir = false })
                     if targetPos then 
                         SendSkill(hash, index, targetPos)
-                        skillsThisFrame = skillsThisFrame + 1
+                        skillUsedInThisFrame = true
                     end
                     break
                 end
             end
-            
+
             -- Toxicnator: dùng range của tower
             if tower.Type == "Toxicnator" then
-                targetPos = tacticalTarget(pos, range, {
-                    mode = "maxhp",
-                    excludeAir = false
-                })
+                targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
                 if targetPos then 
                     SendSkill(hash, index, targetPos)
-                    skillsThisFrame = skillsThisFrame + 1
+                    skillUsedInThisFrame = true
                 end
                 break
             end
-            
+
             -- Flame Trooper: dùng range tùy chỉnh 9.5
             if tower.Type == "Flame Trooper" then
-                targetPos = getEnhancedTarget(pos, 9.5, tower.Type, ability)
+                local customRange = range
+                if ability and hasSplashDamage(ability) then
+                    customRange = 9.5 
+                end
+                targetPos = getEnhancedTarget(pos, customRange, tower.Type, ability)
                 if targetPos then 
                     SendSkill(hash, index, targetPos)
-                    skillsThisFrame = skillsThisFrame + 1
+                    skillUsedInThisFrame = true
                 end
                 break
             end
-            
+
             -- Ice Breaker: skill 1 dùng range, skill 2 dùng 8
             if tower.Type == "Ice Breaker" then
                 local customRange = index == 2 and 8 or range
                 targetPos = getEnhancedTarget(pos, customRange, tower.Type, ability)
                 if targetPos then 
                     SendSkill(hash, index, targetPos)
-                    skillsThisFrame = skillsThisFrame + 1
+                    skillUsedInThisFrame = true
                 end
                 break
             end
-            
+
             -- Slammer: dùng range của tower
             if tower.Type == "Slammer" then
                 targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
                 if targetPos then 
                     SendSkill(hash, index, targetPos)
-                    skillsThisFrame = skillsThisFrame + 1
+                    skillUsedInThisFrame = true
                 end
                 break
             end
-            
+
             -- John: dùng range của tower, hoặc 4.5 nếu p1 < 5
             if tower.Type == "John" then
                 local customRange = p1 >= 5 and range or 4.5
                 targetPos = getEnhancedTarget(pos, customRange, tower.Type, ability)
                 if targetPos then 
                     SendSkill(hash, index, targetPos)
-                    skillsThisFrame = skillsThisFrame + 1
+                    skillUsedInThisFrame = true
                 end
                 break
             end
-            
+
             -- Mobster & Golden Mobster
             if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
                 if (p2 >= 3 and p2 <= 5) or (p1 >= 4 and p1 <= 5) then
                     targetPos = getMobsterTarget(tower, hash, p2 >= 3 and 2 or 1)
                     if targetPos then 
                         SendSkill(hash, index, targetPos)
-                        skillsThisFrame = skillsThisFrame + 1
+                        skillUsedInThisFrame = true
                     end
                 end
                 break
             end
-            
+
             -- Commander: chỉ skill 3
             if tower.Type == "Commander" then
                 if index == 3 then
                     targetPos = getCommanderTarget()
                     if targetPos then 
                         SendSkill(hash, index, targetPos)
-                        skillsThisFrame = skillsThisFrame + 1
+                        skillUsedInThisFrame = true
                     end
                 end
                 break
             end
-            
+
             -- General targeting cho directional towers
             local directional = directionalTowerTypes[tower.Type]
             local sendWithPos = typeof(directional) == "table" and directional.onlyAbilityIndex == index or directional == true
-            
+
             if ability and requiresManualAiming(ability) then
                 sendWithPos = true
             end
-            
+
             if not targetPos and sendWithPos and allowUse then
                 targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
                 if not targetPos then allowUse = false end
             end
-            
+
             if not sendWithPos and not directional and allowUse then
                 local hasEnemies = getFarthestEnemyInRange(pos, range, {
                     excludeAir = skipAirTowers[tower.Type] or false
                 })
                 if not hasEnemies then allowUse = false end
             end
-            
+
             if allowUse then
                 if sendWithPos and targetPos then
                     SendSkill(hash, index, targetPos)
-                    skillsThisFrame = skillsThisFrame + 1
+                    skillUsedInThisFrame = true
                 elseif not sendWithPos then
                     SendSkill(hash, index)
-                    skillsThisFrame = skillsThisFrame + 1
+                    skillUsedInThisFrame = true
                 end
             end
         end
+    end
+    
+    -- [SỬA ĐỔI] Cập nhật thời gian sử dụng kỹ năng cuối cùng
+    if skillUsedInThisFrame then
+        lastSkillUseTime = now
     end
 end)
