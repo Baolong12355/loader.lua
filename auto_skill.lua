@@ -604,12 +604,10 @@ RunService.Heartbeat:Connect(function()
                 break
             end
             
-            -- John: dùng tacticalTarget (lấy kẻ địch HP cao nhất)
+            -- John: dùng range của tower, hoặc 4.5 nếu p1 < 5
             if tower.Type == "John" then
-                targetPos = tacticalTarget(pos, range, {
-                    mode = "maxhp",
-                    excludeAir = true
-                })
+                local customRange = p1 >= 5 and range or 4.5
+                targetPos = getEnhancedTarget(pos, customRange, tower.Type, ability)
                 if targetPos then 
                     SendSkill(hash, index, targetPos)
                     skillsThisFrame = skillsThisFrame + 1
