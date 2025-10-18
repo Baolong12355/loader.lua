@@ -1,3 +1,4 @@
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -150,7 +151,7 @@ end
 local function getFurthestEnemy()
 local furthestEnemy, maxProgress = nil, -1
 for _, enemy in pairs(GameModules.EnemyClass.GetEnemies()) do
-if enemy and enemy.IsAlive and not enemy.IsFakeEnemy then
+if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then
 local progress = getEnemyPathProgress(enemy)
 if progress > maxProgress then
 maxProgress = progress
