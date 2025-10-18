@@ -59,7 +59,7 @@ local original_AttackHandler_Attack = FirstPersonAttackHandlerClass._Attack
 
 _G.CurrentFPSControlledTower = nil
 _G.AutoAttackRunning = false
-local hasNoEnemySet = false -- track đã tắt attack khi không có enemy
+local hasNoEnemySet = false
 
 -- Begin / Stop Tower Control
 FirstPersonHandler.Begin = function(towerInstance)
@@ -77,18 +77,18 @@ FirstPersonHandler.Stop = function()
     return original_FirstPersonHandler_Stop()
 end
 
--- Helper: tính tiến độ của enemy
+-- Helper: tính tiến độ của enemy trên đường đi
 local function getEnemyPathProgress(enemy)
     if not enemy or not enemy.MovementHandler then return 0 end
-    
+
     if enemy.MovementHandler.GetPathPercentage then
         return enemy.MovementHandler:GetPathPercentage() or 0
     end
-    
+
     if enemy.MovementHandler.PathPercentage then
         return enemy.MovementHandler.PathPercentage or 0
     end
-    
+
     if enemy.MovementHandler.GetCurrentNode then
         local currentNode = enemy.MovementHandler:GetCurrentNode()
         if currentNode and currentNode.GetPercentageAlongPath then
@@ -99,7 +99,7 @@ local function getEnemyPathProgress(enemy)
     return 0
 end
 
--- Heartbeat: bật/tắt attack dựa vào enemy targetable, chỉ set false 1 lần khi không có enemy
+-- Heartbeat: bật/tắt attack dựa vào enemy targetable
 RunService.Heartbeat:Connect(function()
     if not _G.AutoAttackRunning or not _G.CurrentFPSControlledTower then
         return
@@ -107,7 +107,7 @@ RunService.Heartbeat:Connect(function()
 
     local foundEnemy = false
     for _, enemy in pairs(EnemyClass.GetEnemies()) do
-        if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then
+        if enemy and enemy.IsAlive and enemy:FirstPersonTargetable() then
             foundEnemy = true
             break
         end
@@ -117,7 +117,6 @@ RunService.Heartbeat:Connect(function()
         FirstPersonAttackManager.ToggleTryAttacking(true)
         hasNoEnemySet = false
     elseif not hasNoEnemySet then
-        -- chỉ set false 1 lần
         FirstPersonAttackManager.ToggleTryAttacking(false)
         hasNoEnemySet = true
     end
@@ -135,7 +134,7 @@ FirstPersonAttackHandlerClass._Attack = function(self)
     local maxProgress = -1
 
     for _, enemy in pairs(EnemyClass.GetEnemies()) do
-        if enemy and enemy.IsAlive and not enemy.IsFakeEnemy and enemy:FirstPersonTargetable() then
+        if enemy and enemy.IsAlive and enemy:FirstPersonTargetable() then
             local enemyPosition = enemy:GetTorsoPosition() or enemy:GetPosition()
             if enemyPosition and towerPosition then
                 local pathProgress = getEnemyPathProgress(enemy)
