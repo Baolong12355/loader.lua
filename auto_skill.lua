@@ -437,7 +437,7 @@ local function getMobsterTarget(tower, hash, path)
 
         if #candidates > 1 then
             table.sort(candidates, function(a, b)
-                return a.pathPercent > b.pathPercent
+                return a.pathPercent < b.pathPercent
             end)
         end
 
@@ -461,7 +461,7 @@ local function getMobsterTarget(tower, hash, path)
 
         table.sort(candidates, function(a, b)
             if a.hp == b.hp then
-                return a.pathPercent > b.pathPercent
+                return a.pathPercent < b.pathPercent
             end
             return a.hp > b.hp
         end)
