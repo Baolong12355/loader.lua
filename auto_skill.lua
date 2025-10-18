@@ -380,7 +380,7 @@ local function getMobsterTarget(tower, hash, path)
     mobsterUsedEnemies[hash] = mobsterUsedEnemies[hash] or {}
 
     if path == 2 then
-        -- Path 2: Get max HP enemy that hasn't been used
+        -- Path 2: Get max HP enemy that hasn't been used (first in table order with same HP)
         local bestEnemy = nil
         local maxHP = -1
 
