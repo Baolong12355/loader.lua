@@ -570,9 +570,11 @@ TowerAttack.OnClientEvent:Connect(handleTowerAttack)
 -- ======== MAIN LOOP ========
 local skillsThisFrame = 0
 local MAX_SKILLS_PER_FRAME = 5
+local mobsterProcessedThisFrame = false
 
 RunService.Heartbeat:Connect(function()
     skillsThisFrame = 0
+    mobsterProcessedThisFrame = false
     local ownedTowers = TowerClass.GetTowers() or {}
     local towerSkills = {}
     
@@ -700,11 +702,25 @@ RunService.Heartbeat:Connect(function()
                 break
             end
 
-            -- Mobster & Golden Mobster (use pre-calculated target)
+            -- Mobster & Golden Mobster (use pre-calculated target, only 1 per frame for path 2)
             if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
-                if towerSkills[hash] and towerSkills[hash][index] then
-                    SendSkill(hash, index, towerSkills[hash][index])
-                    skillsThisFrame = skillsThisFrame + 1
+                local _, p2 = GetCurrentUpgradeLevels(tower)
+                
+                -- Path 2 (p2 >= 3): chỉ 1 Mobster/frame
+                if p2 >= 3 and p2 <= 5 then
+                    if not mobsterProcessedThisFrame then
+                        if towerSkills[hash] and towerSkills[hash][index] then
+                            SendSkill(hash, index, towerSkills[hash][index])
+                            skillsThisFrame = skillsThisFrame + 1
+                            mobsterProcessedThisFrame = true
+                        end
+                    end
+                -- Path 1 (p1 >= 4): bình thường, có thể nhiều cái/frame
+                else
+                    if towerSkills[hash] and towerSkills[hash][index] then
+                        SendSkill(hash, index, towerSkills[hash][index])
+                        skillsThisFrame = skillsThisFrame + 1
+                    end
                 end
                 break
             end
