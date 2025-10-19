@@ -198,7 +198,7 @@ for i = 1, 50 do
     local waveName = "WAVE " .. i
 
     if (i >= 1 and i <= 29)
-    or (i >= 32 and i <= 34)  -- skip 32–34
+    or (i >= 32 and i <= 33)  -- skip 32–33, 34 không skip
     or (i >= 37 and i <= 39)
     or (i >= 41 and i <= 44) then
         _G.WaveConfig[waveName] = "now" -- skip ngay lập tức
