@@ -68,7 +68,7 @@ local skipMedicBuffTowers = {
 
 -- Tracking variables
 local mobsterUsedEnemies = {}
-local mobsterLastUsedTime = {}  -- Tracking thời gian dùng skill cuối
+local frameUsedEnemies = {}  -- Cache chung cho mỗi frame
 local prevCooldown = {}
 
 -- Cleanup dead enemies từ cache
@@ -717,18 +717,11 @@ RunService.Heartbeat:Connect(function()
                 break
             end
 
-            -- Mobster & Golden Mobster (use pre-calculated target with delay)
+            -- Mobster & Golden Mobster (use pre-calculated target, share frame cache)
             if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
-                local now = tick()
-                local lastUsed = mobsterLastUsedTime[hash] or 0
-                
-                -- Check delay giữa lần dùng skill
-                if now - lastUsed >= MOBSTER_DELAY then
-                    if towerSkills[hash] and towerSkills[hash][index] then
-                        SendSkill(hash, index, towerSkills[hash][index])
-                        skillsThisFrame = skillsThisFrame + 1
-                        mobsterLastUsedTime[hash] = now
-                    end
+                if towerSkills[hash] and towerSkills[hash][index] then
+                    SendSkill(hash, index, towerSkills[hash][index])
+                    skillsThisFrame = skillsThisFrame + 1
                 end
                 break
             end
