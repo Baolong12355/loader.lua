@@ -75,6 +75,7 @@ local prevCooldown = {}
 local function cleanupDeadEnemiesFromCache()
     for hash, enemies in pairs(mobsterUsedEnemies) do
         for enemyId, _ in pairs(enemies) do
+            -- Parse enemy hash từ string
             local testEnemy = nil
             for _, e in pairs(EnemyClass.GetEnemies()) do
                 if tostring(e) == enemyId and not e:Alive() then
@@ -85,20 +86,6 @@ local function cleanupDeadEnemiesFromCache()
         end
     end
 end
-
--- Update enemy position cache realtime (RenderStepped)
-RunService.RenderStepped:Connect(function()
-    enemyPositionCache = {}
-    for _, enemy in pairs(EnemyClass.GetEnemies()) do
-        if enemy and enemy:Alive() then
-            enemyPositionCache[tostring(enemy)] = {
-                pos = enemy:GetPosition(),
-                pathPercent = getEnemyPathPercentage(enemy),
-                pathIndex = enemy.MovementHandler and enemy.MovementHandler.PathIndex or 0
-            }
-        end
-    end
-end)
 local medicLastUsedTime = {}
 local medicDelay = 0.5
 
