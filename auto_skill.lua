@@ -69,6 +69,24 @@ local skipMedicBuffTowers = {
 -- Tracking variables
 local mobsterUsedEnemies = {}
 local prevCooldown = {}
+local mobsterLastUsedTime = {}
+local mobsterDelay = 0.15
+
+-- Cleanup dead enemies từ cache
+local function cleanupDeadEnemiesFromCache()
+    for hash, enemies in pairs(mobsterUsedEnemies) do
+        for enemyId, _ in pairs(enemies) do
+            -- Parse enemy hash từ string
+            local testEnemy = nil
+            for _, e in pairs(EnemyClass.GetEnemies()) do
+                if tostring(e) == enemyId and not e:Alive() then
+                    enemies[enemyId] = nil
+                    break
+                end
+            end
+        end
+    end
+end
 local medicLastUsedTime = {}
 local medicDelay = 0.5
 
@@ -150,30 +168,18 @@ end
 
 local function getEnemyPathPercentage(enemy)
     if not enemy or not enemy.MovementHandler then return 0 end
-
-    -- Priority 1: Direct PathPercentage property
-    if enemy.MovementHandler.PathPercentage then
-        return enemy.MovementHandler.PathPercentage
+    
+    local mh = enemy.MovementHandler
+    local pathPercent = mh.PathPercentage or 0
+    
+    -- Nếu đi reverse direction, phải invert percentage
+    if mh.ReverseDirection then
+        pathPercent = 1 - pathPercent
     end
-
-    -- Priority 2: GetPathPercentage method
-    if enemy.MovementHandler.GetPathPercentage then
-        local success, percentage = pcall(function() 
-            return enemy.MovementHandler:GetPathPercentage() 
-        end)
-        if success and typeof(percentage) == "number" then 
-            return percentage 
-        end
-    end
-
-    -- Priority 3: Calculate from PathIndex and PathPercentageInSegment
-    if enemy.MovementHandler.PathIndex and enemy.MovementHandler.PathPercentageInSegment then
-        local pathIndex = enemy.MovementHandler.PathIndex or 0
-        local segmentPercent = enemy.MovementHandler.PathPercentageInSegment or 0
-        return pathIndex + segmentPercent
-    end
-
-    return 0
+    
+    -- Combine PathIndex và PathPercentage để so sánh chính xác
+    -- Kẻ ở PathIndex cao hơn hoặc PathPercentage cao hơn = đi xa hơn
+    return (mh.PathIndex or 0) + pathPercent
 end
 
 local function getFarthestEnemyNoRange(options)
@@ -255,6 +261,34 @@ local function getNearestEnemyInRange(pos, range, options)
     return candidates[1].position
 end
 
+local function getFarthestEnemyInRangeByPath(pos, range, options)
+    options = options or {}
+    local excludeAir = options.excludeAir or false
+
+    local candidates = {}
+    for _, enemy in ipairs(getEnemies()) do
+        if not enemy.GetPosition then continue end
+        if excludeAir and enemy.IsAirUnit then continue end
+
+        local ePos = enemy:GetPosition()
+        if getDistance2D(ePos, pos) <= range then
+            table.insert(candidates, {
+                enemy = enemy,
+                position = ePos,
+                pathPercent = getEnemyPathPercentage(enemy)
+            })
+        end
+    end
+
+    if #candidates == 0 then return nil end
+
+    table.sort(candidates, function(a, b)
+        return a.pathPercent > b.pathPercent
+    end)
+
+    return candidates[1].position
+end
+
 local function hasSplashDamage(ability)
     if not ability or not ability.Config then return false end
     if ability.Config.ProjectileHitData then
@@ -292,14 +326,14 @@ local function getEnhancedTarget(pos, towerRange, towerType, ability)
         local isSplash, splashRadius = hasSplashDamage(ability)
         local isManualAim = requiresManualAiming(ability)
         if isSplash or isManualAim then
-            return getFarthestEnemyInRange(pos, effectiveRange, options)
+            return getFarthestEnemyInRangeByPath(pos, effectiveRange, options)
         end
     end
 
     if not directionalTowerTypes[towerType] then
-        return getFarthestEnemyInRange(pos, effectiveRange, options)
+        return getFarthestEnemyInRangeByPath(pos, effectiveRange, options)
     else
-        return getNearestEnemyInRange(pos, effectiveRange, options)
+        return getFarthestEnemyInRangeByPath(pos, effectiveRange, options)
     end
 end
 
@@ -380,8 +414,8 @@ local function getMobsterTarget(tower, hash, path)
     mobsterUsedEnemies[hash] = mobsterUsedEnemies[hash] or {}
 
     if path == 2 then
-        -- Path 2: Get max HP enemy that hasn't been used (first in table order with same HP)
-        local bestEnemy = nil
+        -- Path 2: Complex logic with tracking
+        local candidates = {}
         local maxHP = -1
 
         for _, enemy in ipairs(getEnemies()) do
@@ -398,14 +432,24 @@ local function getMobsterTarget(tower, hash, path)
 
             if hp > maxHP then
                 maxHP = hp
-                bestEnemy = enemy
+                candidates = {{enemy = enemy, hp = hp, pathPercent = getEnemyPathPercentage(enemy)}}
+            elseif hp == maxHP then
+                table.insert(candidates, {enemy = enemy, hp = hp, pathPercent = getEnemyPathPercentage(enemy)})
             end
         end
 
-        if not bestEnemy then return nil end
+        if #candidates == 0 then return nil end
 
-        mobsterUsedEnemies[hash][tostring(bestEnemy)] = true
-        return bestEnemy:GetPosition()
+        -- Sort by path percentage (farthest first) when same HP
+        if #candidates > 1 then
+            table.sort(candidates, function(a, b)
+                return a.pathPercent > b.pathPercent
+            end)
+        end
+
+        local chosen = candidates[1].enemy
+        mobsterUsedEnemies[hash][tostring(chosen)] = true
+        return chosen:GetPosition()
     else
         -- Path 1: Just check if enemy exists in range, then cast
         for _, enemy in ipairs(getEnemies()) do
@@ -542,27 +586,64 @@ end
 TowerAttack.OnClientEvent:Connect(handleTowerAttack)
 
 -- ======== MAIN LOOP ========
-local lastSkillTime = 0
-local SKILL_DELAY = 0.05
+local skillsThisFrame = 0
+local MAX_SKILLS_PER_FRAME = 5
+local mobsterProcessedThisFrame = false
 
 RunService.Heartbeat:Connect(function()
+    skillsThisFrame = 0
+    cleanupDeadEnemiesFromCache()
     local ownedTowers = TowerClass.GetTowers() or {}
+    local towerSkills = {}
+    local now = tick()
 
+    -- First pass: calculate targets for towers with complex logic
     for hash, tower in pairs(ownedTowers) do
         if not tower or not tower.AbilityHandler then continue end
         if skipTowerTypes[tower.Type] then continue end
 
-        -- Enforce delay between skills
-        local now = tick()
-        if now - lastSkillTime < SKILL_DELAY then
-            continue
+        local p1, p2 = GetCurrentUpgradeLevels(tower)
+        local pos = getTowerPos(tower)
+        local range = getRange(tower)
+
+        -- Pre-calculate for Mobster/Golden Mobster and similar towers
+        if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
+            -- Check delay only for path 2
+            if p2 >= 3 and p2 <= 5 then
+                if mobsterLastUsedTime[hash] and now - mobsterLastUsedTime[hash] < mobsterDelay then
+                    continue
+                end
+            end
+
+            if (p2 >= 3 and p2 <= 5) or (p1 >= 4 and p1 <= 5) then
+                for index = 1, 3 do
+                    local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
+                    if isCooldownReady(hash, index, ability) then
+                        local targetPos = getMobsterTarget(tower, hash, p2 >= 3 and 2 or 1)
+                        if targetPos then
+                            towerSkills[hash] = towerSkills[hash] or {}
+                            towerSkills[hash][index] = targetPos
+                        end
+                        break
+                    end
+                end
+            end
         end
+    end
+
+    -- Second pass: execute skills with frame limit
+    for hash, tower in pairs(ownedTowers) do
+        if skillsThisFrame >= MAX_SKILLS_PER_FRAME then break end
+        if not tower or not tower.AbilityHandler then continue end
+        if skipTowerTypes[tower.Type] then continue end
 
         local p1, p2 = GetCurrentUpgradeLevels(tower)
         local pos = getTowerPos(tower)
         local range = getRange(tower)
 
         for index = 1, 3 do
+            if skillsThisFrame >= MAX_SKILLS_PER_FRAME then break end
+
             local ability = tower.AbilityHandler:GetAbilityFromIndex(index)
             if not isCooldownReady(hash, index, ability) then continue end
 
@@ -583,7 +664,7 @@ RunService.Heartbeat:Connect(function()
                     targetPos = getFarthestEnemyNoRange({ excludeAir = false })
                     if targetPos then 
                         SendSkill(hash, index, targetPos)
-                        lastSkillTime = now
+                        skillsThisFrame = skillsThisFrame + 1
                     end
                     break
                 end
@@ -597,7 +678,7 @@ RunService.Heartbeat:Connect(function()
                 })
                 if targetPos then 
                     SendSkill(hash, index, targetPos)
-                    lastSkillTime = now
+                    skillsThisFrame = skillsThisFrame + 1
                 end
                 break
             end
@@ -607,7 +688,7 @@ RunService.Heartbeat:Connect(function()
                 targetPos = getEnhancedTarget(pos, 9.5, tower.Type, ability)
                 if targetPos then 
                     SendSkill(hash, index, targetPos)
-                    lastSkillTime = now
+                    skillsThisFrame = skillsThisFrame + 1
                 end
                 break
             end
@@ -618,7 +699,7 @@ RunService.Heartbeat:Connect(function()
                 targetPos = getEnhancedTarget(pos, customRange, tower.Type, ability)
                 if targetPos then 
                     SendSkill(hash, index, targetPos)
-                    lastSkillTime = now
+                    skillsThisFrame = skillsThisFrame + 1
                 end
                 break
             end
@@ -628,7 +709,7 @@ RunService.Heartbeat:Connect(function()
                 targetPos = getEnhancedTarget(pos, range, tower.Type, ability)
                 if targetPos then 
                     SendSkill(hash, index, targetPos)
-                    lastSkillTime = now
+                    skillsThisFrame = skillsThisFrame + 1
                 end
                 break
             end
@@ -639,18 +720,20 @@ RunService.Heartbeat:Connect(function()
                 targetPos = getEnhancedTarget(pos, customRange, tower.Type, ability)
                 if targetPos then 
                     SendSkill(hash, index, targetPos)
-                    lastSkillTime = now
+                    skillsThisFrame = skillsThisFrame + 1
                 end
                 break
             end
 
-            -- Mobster & Golden Mobster
+            -- Mobster & Golden Mobster (use pre-calculated target with delay for path 2 only)
             if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
-                if (p2 >= 3 and p2 <= 5) or (p1 >= 4 and p1 <= 5) then
-                    targetPos = getMobsterTarget(tower, hash, p2 >= 3 and 2 or 1)
-                    if targetPos then 
-                        SendSkill(hash, index, targetPos)
-                        lastSkillTime = now
+                if towerSkills[hash] and towerSkills[hash][index] then
+                    SendSkill(hash, index, towerSkills[hash][index])
+                    skillsThisFrame = skillsThisFrame + 1
+                    
+                    -- Only apply delay for path 2
+                    if p2 >= 3 and p2 <= 5 then
+                        mobsterLastUsedTime[hash] = now
                     end
                 end
                 break
@@ -662,7 +745,7 @@ RunService.Heartbeat:Connect(function()
                     targetPos = getCommanderTarget()
                     if targetPos then 
                         SendSkill(hash, index, targetPos)
-                        lastSkillTime = now
+                        skillsThisFrame = skillsThisFrame + 1
                     end
                 end
                 break
@@ -691,10 +774,10 @@ RunService.Heartbeat:Connect(function()
             if allowUse then
                 if sendWithPos and targetPos then
                     SendSkill(hash, index, targetPos)
-                    lastSkillTime = now
+                    skillsThisFrame = skillsThisFrame + 1
                 elseif not sendWithPos then
                     SendSkill(hash, index)
-                    lastSkillTime = now
+                    skillsThisFrame = skillsThisFrame + 1
                 end
             end
         end
