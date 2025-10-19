@@ -68,7 +68,37 @@ local skipMedicBuffTowers = {
 
 -- Tracking variables
 local mobsterUsedEnemies = {}
+local frameUsedEnemies = {}  -- Cache chung cho mỗi frame
 local prevCooldown = {}
+
+-- Cleanup dead enemies từ cache
+local function cleanupDeadEnemiesFromCache()
+    for hash, enemies in pairs(mobsterUsedEnemies) do
+        for enemyId, _ in pairs(enemies) do
+            local testEnemy = nil
+            for _, e in pairs(EnemyClass.GetEnemies()) do
+                if tostring(e) == enemyId and not e:Alive() then
+                    enemies[enemyId] = nil
+                    break
+                end
+            end
+        end
+    end
+end
+
+-- Update enemy position cache realtime (RenderStepped)
+RunService.RenderStepped:Connect(function()
+    enemyPositionCache = {}
+    for _, enemy in pairs(EnemyClass.GetEnemies()) do
+        if enemy and enemy:Alive() then
+            enemyPositionCache[tostring(enemy)] = {
+                pos = enemy:GetPosition(),
+                pathPercent = getEnemyPathPercentage(enemy),
+                pathIndex = enemy.MovementHandler and enemy.MovementHandler.PathIndex or 0
+            }
+        end
+    end
+end)
 local medicLastUsedTime = {}
 local medicDelay = 0.5
 
@@ -574,12 +604,10 @@ local mobsterProcessedThisFrame = false
 
 RunService.Heartbeat:Connect(function()
     skillsThisFrame = 0
-    mobsterProcessedThisFrame = false
+    frameUsedEnemies = {}  -- Reset cache chung mỗi frame
+    cleanupDeadEnemiesFromCache()  -- Clear enemy chết ra khỏi cache
     local ownedTowers = TowerClass.GetTowers() or {}
     local towerSkills = {}
-    
-    -- Reset mobster tracking mỗi frame
-    mobsterUsedEnemies = {}
 
     -- First pass: calculate targets for towers with complex logic
     for hash, tower in pairs(ownedTowers) do
@@ -702,25 +730,11 @@ RunService.Heartbeat:Connect(function()
                 break
             end
 
-            -- Mobster & Golden Mobster (use pre-calculated target, only 1 per frame for path 2)
+            -- Mobster & Golden Mobster (use pre-calculated target, share frame cache)
             if tower.Type == "Mobster" or tower.Type == "Golden Mobster" then
-                local _, p2 = GetCurrentUpgradeLevels(tower)
-                
-                -- Path 2 (p2 >= 3): chỉ 1 Mobster/frame
-                if p2 >= 3 and p2 <= 5 then
-                    if not mobsterProcessedThisFrame then
-                        if towerSkills[hash] and towerSkills[hash][index] then
-                            SendSkill(hash, index, towerSkills[hash][index])
-                            skillsThisFrame = skillsThisFrame + 1
-                            mobsterProcessedThisFrame = true
-                        end
-                    end
-                -- Path 1 (p1 >= 4): bình thường, có thể nhiều cái/frame
-                else
-                    if towerSkills[hash] and towerSkills[hash][index] then
-                        SendSkill(hash, index, towerSkills[hash][index])
-                        skillsThisFrame = skillsThisFrame + 1
-                    end
+                if towerSkills[hash] and towerSkills[hash][index] then
+                    SendSkill(hash, index, towerSkills[hash][index])
+                    skillsThisFrame = skillsThisFrame + 1
                 end
                 break
             end
