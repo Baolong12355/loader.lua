@@ -575,6 +575,9 @@ RunService.Heartbeat:Connect(function()
     skillsThisFrame = 0
     local ownedTowers = TowerClass.GetTowers() or {}
     local towerSkills = {}
+    
+    -- Reset mobster tracking mỗi frame
+    mobsterUsedEnemies = {}
 
     -- First pass: calculate targets for towers with complex logic
     for hash, tower in pairs(ownedTowers) do
