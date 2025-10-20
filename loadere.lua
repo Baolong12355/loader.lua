@@ -3,7 +3,7 @@ local CONFIG = {
 }
 
 local keyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key3.txt"
-local jsonURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/nd.json"
+local jsonURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/end.json"
 local loaderURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/loader.lua"
 local skipWaveURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/auto_skip.lua"
 local webhookURL = "https://discord.com/api/webhooks/1425775708562522183/DpwrsVPt6lgFU1Y0SU1J5ACMv4lN5JeKFES2Ips-RFF66tvTbclQCiTxGCWrqJDcVaZ7"
