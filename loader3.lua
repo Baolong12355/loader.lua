@@ -1,4 +1,4 @@
-local keyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key3.txt"
+local keyURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/main/key2.txt"
 local jsonURL = "https://raw.githubusercontent.com/Baolong12355/loader.lua/refs/heads/main/end.json"
 local macroFolder = "tdx/macros"
 local macroFile = macroFolder.."/x.json"
